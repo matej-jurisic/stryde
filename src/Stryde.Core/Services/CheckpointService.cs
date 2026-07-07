@@ -18,6 +18,9 @@ public class CheckpointService(StrydeDbContext db)
         var goal = await db.Goals.FirstOrDefaultAsync(g => g.Id == goalId && g.UserId == userId);
         if (goal is null) return Result<CheckpointDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
 
+        var capError = await ValidateTotalProgressAsync(goalId, req.PlannedProgress, excludeCheckpointId: null);
+        if (capError is not null) return Result<CheckpointDto>.Fail(capError);
+
         var cp = new Checkpoint
         {
             GoalId = goalId,
@@ -59,11 +62,29 @@ public class CheckpointService(StrydeDbContext db)
             .FirstOrDefaultAsync(c => c.Id == id && c.GoalId == goalId && c.Goal.UserId == userId);
         if (cp is null) return Result<CheckpointDto>.Fail(new Error(ErrorType.NotFound, "Checkpoint not found."));
 
+        var capError = await ValidateTotalProgressAsync(goalId, req.PlannedProgress, excludeCheckpointId: id);
+        if (capError is not null) return Result<CheckpointDto>.Fail(capError);
+
         cp.Title = req.Title.Trim();
         cp.PlannedProgress = req.PlannedProgress;
         cp.TargetDate = req.TargetDate;
         await db.SaveChangesAsync();
         return Result<CheckpointDto>.Success(CheckpointDto.FromEntity(cp));
+    }
+
+    // Cross-field rule: a goal's checkpoints may not plan more than 100% total progress.
+    private async Task<Error?> ValidateTotalProgressAsync(Guid goalId, decimal plannedProgress, Guid? excludeCheckpointId)
+    {
+        // Sum client-side: SQLite cannot aggregate decimal columns
+        var others = await db.Checkpoints
+            .Where(c => c.GoalId == goalId && (excludeCheckpointId == null || c.Id != excludeCheckpointId))
+            .Select(c => c.PlannedProgress)
+            .ToListAsync();
+        var total = others.Sum() + plannedProgress;
+        if (total > 100)
+            return new Error(ErrorType.Validation,
+                $"Total planned progress for this goal cannot exceed 100% (this change would make it {total}%).");
+        return null;
     }
 
     public async Task<Result> DeleteAsync(Guid id, Guid goalId, Guid userId)

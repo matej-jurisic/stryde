@@ -192,21 +192,7 @@ function EventBlock({
   onClick: (e: Event) => void
 }) {
   const { event, col, totalCols, topPx, heightPx } = layout
-  const now = new Date()
-
-  const overdue =
-    event.status === 'pending' &&
-    (event.endAt
-      ? new Date(event.endAt) < now
-      : event.startAt
-        ? (() => {
-            const d = new Date(event.startAt!)
-            d.setHours(23, 59, 59, 999)
-            return d < now
-          })()
-        : false)
-
-  const { bg, leftColor, textClass } = eventColors(event, overdue)
+  const { bg, leftColor, textClass } = eventColors(event, event.isOverdue)
   const isDone = event.status !== 'pending'
 
   const GAP = 2
@@ -368,6 +354,9 @@ export function CalendarPage() {
     isDrag: boolean
   } | null>(null)
   const justDraggedRef = useRef(false)
+  const touchStartRef = useRef<{ clientX: number; clientY: number } | null>(null)
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const daysRef = useRef<Date[]>([])
   const [dragOverlays, setDragOverlays] = useState<Map<number, { topPx: number; heightPx: number }>>(
     () => new Map(),
   )
@@ -416,6 +405,67 @@ export function CalendarPage() {
     }
   }, [])
 
+  daysRef.current = days
+
+  // Non-passive touchmove so we can preventDefault during drag (blocks scroll)
+  useEffect(() => {
+    const el = gridRef.current
+    if (!el) return
+    function onTouchMove(e: TouchEvent) {
+      const touch = e.touches[0]
+      // Cancel hold if finger moves too far before timer fires
+      if (holdTimerRef.current !== null) {
+        if (!touchStartRef.current) return
+        const dx = touch.clientX - touchStartRef.current.clientX
+        const dy = touch.clientY - touchStartRef.current.clientY
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+          clearTimeout(holdTimerRef.current)
+          holdTimerRef.current = null
+          touchStartRef.current = null
+        }
+        return
+      }
+      if (!dragRef.current?.isDrag) return
+      e.preventDefault()
+      const currentDays = daysRef.current
+      if (!gridRef.current) return
+      const rect = gridRef.current.getBoundingClientRect()
+      const colWidth = rect.width / currentDays.length
+      const endDayIdx = Math.max(0, Math.min(Math.floor((touch.clientX - rect.left) / colWidth), currentDays.length - 1))
+      const endY = Math.max(0, Math.min(touch.clientY - rect.top, HOUR_PX * 24 - 1))
+      const { startDayIdx, startY } = dragRef.current
+      const minIdx = Math.min(startDayIdx, endDayIdx)
+      const maxIdx = Math.max(startDayIdx, endDayIdx)
+      const result = new Map<number, { topPx: number; heightPx: number }>()
+      for (let i = minIdx; i <= maxIdx; i++) {
+        if (startDayIdx === endDayIdx) {
+          const topY = Math.min(startY, endY)
+          const botY = Math.max(startY, endY)
+          const s = snapToGrid(currentDays[i], topY)
+          const en = snapToGrid(currentDays[i], botY)
+          const topPx = ((s.getHours() * 60 + s.getMinutes()) / 60) * HOUR_PX
+          const endPx = ((en.getHours() * 60 + en.getMinutes()) / 60) * HOUR_PX
+          result.set(i, { topPx, heightPx: Math.max(endPx - topPx, HOUR_PX / 4) })
+        } else if (i === minIdx) {
+          const anchorY = startDayIdx < endDayIdx ? startY : endY
+          const s = snapToGrid(currentDays[i], anchorY)
+          const topPx = ((s.getHours() * 60 + s.getMinutes()) / 60) * HOUR_PX
+          result.set(i, { topPx, heightPx: HOUR_PX * 24 - topPx })
+        } else if (i === maxIdx) {
+          const anchorY = startDayIdx > endDayIdx ? startY : endY
+          const en = snapToGrid(currentDays[i], anchorY)
+          const endPx = ((en.getHours() * 60 + en.getMinutes()) / 60) * HOUR_PX
+          result.set(i, { topPx: 0, heightPx: Math.max(endPx, HOUR_PX / 4) })
+        } else {
+          result.set(i, { topPx: 0, heightPx: HOUR_PX * 24 })
+        }
+      }
+      setDragOverlays(result)
+    }
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    return () => el.removeEventListener('touchmove', onTouchMove)
+  }, [])
+
   function prev() {
     setCurrent((d) => addDays(d, view === 'day' ? -1 : -7))
   }
@@ -442,6 +492,64 @@ export function CalendarPage() {
     setDefaultEndAt(undefined)
     setFocusStartAt(!event.startAt)
     setModalOpen(true)
+  }
+
+  // ── Touch hold-to-drag (mobile) ──────────────────────────────────────────
+
+  function handleGridTouchStart(e: React.TouchEvent<HTMLDivElement>) {
+    if ((e.target as Element).closest('button')) return
+    const touch = e.touches[0]
+    touchStartRef.current = { clientX: touch.clientX, clientY: touch.clientY }
+    const dayIdx = getDayIdxFromX(touch.clientX)
+    const y = getYInGrid(touch.clientY)
+    holdTimerRef.current = setTimeout(() => {
+      holdTimerRef.current = null
+      if (!touchStartRef.current) return
+      dragRef.current = { startDayIdx: dayIdx, startClientX: touch.clientX, startClientY: touch.clientY, startY: y, isDrag: true }
+      setDragOverlays(computeOverlays(dayIdx, y, dayIdx, y))
+      if (navigator.vibrate) navigator.vibrate(30)
+    }, 300)
+  }
+
+  function handleGridTouchEnd(e: React.TouchEvent<HTMLDivElement>) {
+    touchStartRef.current = null
+    if (holdTimerRef.current !== null) {
+      clearTimeout(holdTimerRef.current)
+      holdTimerRef.current = null
+      return
+    }
+    if (!dragRef.current) return
+    const { startDayIdx, startY } = dragRef.current
+    dragRef.current = null
+    setDragOverlays(new Map())
+    const touch = e.changedTouches[0]
+    const endDayIdx = getDayIdxFromX(touch.clientX)
+    const endY = getYInGrid(touch.clientY)
+    let startDate: Date
+    let endDate: Date
+    if (startDayIdx < endDayIdx) {
+      startDate = snapToGrid(days[startDayIdx], startY)
+      endDate = snapToGrid(days[endDayIdx], endY)
+    } else if (startDayIdx > endDayIdx) {
+      startDate = snapToGrid(days[endDayIdx], endY)
+      endDate = snapToGrid(days[startDayIdx], startY)
+    } else {
+      startDate = snapToGrid(days[startDayIdx], Math.min(startY, endY))
+      endDate = snapToGrid(days[startDayIdx], Math.max(startY, endY))
+    }
+    if (endDate <= startDate) endDate.setMinutes(endDate.getMinutes() + 15)
+    justDraggedRef.current = true
+    openCreate(formatDatetimeLocal(startDate), formatDatetimeLocal(endDate))
+  }
+
+  function handleGridTouchCancel() {
+    touchStartRef.current = null
+    if (holdTimerRef.current !== null) {
+      clearTimeout(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+    dragRef.current = null
+    setDragOverlays(new Map())
   }
 
   // ── Grid drag helpers ────────────────────────────────────────────────────
@@ -614,7 +722,7 @@ export function CalendarPage() {
           />
 
           {/* View toggle */}
-          <div className="hidden sm:flex overflow-hidden rounded-md border border-border">
+          <div className="flex overflow-hidden rounded-md border border-border">
             <button
               onClick={() => setView('day')}
               className={`h-8 px-3 text-xs font-medium transition-colors ${
@@ -687,6 +795,9 @@ export function CalendarPage() {
               className="flex flex-1 min-w-0 cursor-crosshair select-none"
               onMouseDown={handleGridMouseDown}
               onClick={handleGridClick}
+              onTouchStart={handleGridTouchStart}
+              onTouchEnd={handleGridTouchEnd}
+              onTouchCancel={handleGridTouchCancel}
             >
               {days.map((day, idx) => (
                 <DayColumn

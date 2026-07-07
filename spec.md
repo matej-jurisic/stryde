@@ -33,6 +33,20 @@ Stryde is built around three primitives: **Events**, **Goals**, and the **Daily 
 
 ---
 
+## Timezone & Day Semantics
+
+All day-bucketing happens **server-side**, in the user's IANA timezone (`User.Timezone`), offset by the configurable day boundary (`UserSettings.DayBoundaryTime`):
+
+- A **day** runs from the boundary time to the next day's boundary time in the user's timezone. With a 04:00 boundary, 02:30 still belongs to the previous day.
+- An **event belongs to the day it starts on** (in the user's timezone). Events that cross midnight are not split: the calendar renders them on their start day only, clamped to that day.
+- **"Today"** = the day the current instant falls in, per the rules above.
+- **Overdue** is computed server-side and exposed as `isOverdue` on the event DTO. The client never re-derives it.
+- Floating events have no day and are never overdue.
+
+The shared implementation lives in `Stryde.Core/Common/DayMath.cs`; every feature that reasons about days (recommendations, overdue, future recurrence) must go through it.
+
+---
+
 ## Events
 
 An event is the atomic unit of work. Every event has:
@@ -58,9 +72,9 @@ An event with a start datetime is standard. It participates in scheduling, overd
 
 ### Overdue
 
-An event is overdue if:
+An event is overdue if it is still pending and:
 - It has an end datetime and that datetime has passed, **or**
-- It has a start datetime (no end) and midnight local time on the due date has passed.
+- It has a start datetime (no end) and its day has ended (the day boundary on the following date has passed, in the user's timezone — see Timezone & Day Semantics).
 
 ### Scheduling
 
@@ -71,6 +85,17 @@ Scheduling an event means setting its start datetime (and optionally end datetim
 Repeat rules follow a stored rule model (not pre-materialized instances). The next occurrence is generated on completion or skip of the current one.
 
 Supported patterns: daily, weekly on specific days, every N days/weeks/months, monthly on a date.
+
+A rule is stored as a `Pattern` discriminator plus a JSON `Config`:
+
+| Pattern | Config | Example |
+|---|---|---|
+| `daily` | `{}` | every day |
+| `weekly` | `{ "days": [1, 3, 5] }` (ISO weekday, 1 = Monday .. 7 = Sunday) | Mon/Wed/Fri |
+| `everyN` | `{ "n": 3, "unit": "days" \| "weeks" \| "months" }` | every 3 weeks |
+| `monthly` | `{ "day": 15 }` (clamped to the month's last day) | the 15th monthly |
+
+Next-instance generation must be idempotent: re-marking an already done/skipped event does not spawn another instance.
 
 Behavior on completion: next instance generated immediately.
 Behavior on skip: next instance generated, current marked skipped (does not count toward goal progress).
@@ -118,6 +143,8 @@ Checkpoints are self-defined milestones that indicate planned progress.
 
 Checkpoints have no required order — they can be reached in any sequence.
 
+The planned progress of a goal's checkpoints may not total more than 100%. Creating or editing a checkpoint that would push the total past 100% is rejected with a validation error.
+
 ### Progress Model
 
 Progress has two tracks:
@@ -132,7 +159,15 @@ Progress has two tracks:
 
 ## Daily Plan
 
-The Daily Plan is the primary execution view. It shows scheduled events as time blocks for a given day, surfaces recommendations, and gives a read on goal health.
+The Daily Plan is the primary execution view: a distinct page (`/plan`, the app's index route) focused on *executing* today, as opposed to the Calendar which is for *placing events in time*.
+
+> **Status: specced, not yet built.** The route currently shows a placeholder. Until it ships, the Calendar day view (with the recommendations panel) covers the same ground.
+
+### Contents
+
+- **Today's agenda** — the day's scheduled events as an ordered list (not an hour grid), with one-click done/skip.
+- **Recommendations** — the ranked list below, in the middle column (see design.md three-pane layout).
+- **Goal health strip** — Focus goals with believed vs actual progress at a glance.
 
 ### Navigation
 
@@ -140,17 +175,13 @@ Users can navigate to any day — past or future. Default view is today.
 
 ### Day Boundary
 
-The start of a day (when "today" rolls over) is user-configurable in settings.
-
-### Layout
-
-Layout and time ribbon behavior will be decided during implementation.
+The start of a day (when "today" rolls over) is user-configurable in settings. See Timezone & Day Semantics.
 
 ### Recommendations (Rule-Based)
 
 Recommendations are ranked by the following rules in order:
 
-1. Events due today (not yet scheduled)
+1. Events due today, not yet done
 2. Events overdue (missed due date)
 3. Events linked to a Focus goal with lagging actual progress
 4. Events linked to Active goals with lagging actual progress
@@ -158,7 +189,7 @@ Recommendations are ranked by the following rules in order:
 6. Floating events linked to Active goals
 7. Floating events linked to Bench goals (only if nothing above exists)
 
-Within each tier, events are sorted by due date ascending, then by duration ascending (shorter first, to fill gaps).
+Within each tier, events are sorted by due date ascending (end datetime, falling back to start), then by duration ascending (shorter first, to fill gaps); events without a duration sort last. An event that qualifies for several tiers appears once, in its highest tier.
 
 **LLM expansion slot:** The recommendation engine is designed to be replaceable or augmentable with an LLM-powered planner. Out of scope for v1.
 
@@ -170,9 +201,11 @@ Only these views are in scope for v1:
 
 | View | Purpose |
 |---|---|
-| Inbox | All pending floating events (no start datetime). Entry point for unscheduled work. |
+| Daily Plan | Execution view for a single day: agenda, recommendations, goal health. Index route. (Specced, not yet built.) |
+| Inbox | Triage list of all events grouped by state (Overdue, Today, Unscheduled, Upcoming, Completed). Entry point for unscheduled work. |
 | Calendar | Day/week view of scheduled events. Primary scheduling surface. |
 | Goals | Goal list with progress insight per goal. Checkpoint management. |
+| Settings | Timezone, day boundary, max Focus goals, appearance, sign out. |
 
 Additional views (Cockpit, Lab) are deferred — defined during development if needed.
 
@@ -184,7 +217,8 @@ Additional views (Cockpit, Lab) are deferred — defined during development if n
 |---|---|
 | Max Focus goals | Hard limit on simultaneous Focus goals. User-defined. |
 | Day boundary | Time at which the day rolls over. |
-| Timezone | Set automatically on first open from browser locale. User can override. |
+| Timezone | Set automatically on registration from browser locale. Editable on the Settings page. |
+| Theme | Light / dark / system. Client-side preference (localStorage), defaults to system. |
 
 ---
 
@@ -193,7 +227,7 @@ Additional views (Cockpit, Lab) are deferred — defined during development if n
 | # | Decision | Notes |
 |---|---|---|
 | 1 | Event → goal progress attribution | How much progress does completing one event contribute? Fixed increment, manual per-event amount, or derived from duration? |
-| 2 | Recommendation rule weights | Exact tie-breaking within tiers. |
+| 2 | ~~Recommendation rule weights~~ | **Resolved:** due date asc (end, falling back to start), duration asc, no-duration last; dedupe into highest tier. |
 | 3 | LLM recommendation layer | Scope, trigger, and UX for when/how Claude-powered suggestions surface. |
 
 ---

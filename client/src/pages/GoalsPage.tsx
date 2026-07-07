@@ -128,9 +128,14 @@ function GoalCard({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalCardP
   const believed = believedProgress(goal.checkpoints)
   const transitions = STATUS_TRANSITIONS[goal.status]
 
+  // Goal changes ripple into event badges and recommendation tiers
   const deleteMutation = useMutation({
     mutationFn: () => goalsApi.delete(goal.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['goals'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['goals'] })
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+    },
   })
 
   const statusMutation = useMutation({
@@ -138,6 +143,8 @@ function GoalCard({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalCardP
     onSuccess: () => {
       setStatusError('')
       qc.invalidateQueries({ queryKey: ['goals'] })
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
     onError: (err) => {
       setStatusError(err instanceof ApiError ? err.message : 'Something went wrong.')

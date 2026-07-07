@@ -14,8 +14,8 @@ public static class SettingsEndpoints
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
-            var settings = await svc.GetOrCreateAsync(userId.Value);
-            return Results.Ok(UserSettingsDto.FromEntity(settings));
+            var result = await svc.GetDtoAsync(userId.Value);
+            return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
         });
 
         group.MapPut("/", async (UpdateUserSettingsRequest req, ClaimsPrincipal principal, UserSettingsService svc) =>

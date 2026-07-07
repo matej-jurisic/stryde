@@ -48,6 +48,7 @@ export interface Event {
   status: EventStatus
   repeatRuleId: string | null
   createdAt: string
+  isOverdue: boolean
   goals: GoalSummary[]
 }
 
@@ -60,4 +61,5 @@ export interface UserSettings {
   userId: string
   maxFocusGoals: number
   dayBoundaryTime: string // "HH:mm"
+  timezone: string // IANA id
 }

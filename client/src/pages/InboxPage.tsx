@@ -44,18 +44,11 @@ type Group = 'overdue' | 'today' | 'floating' | 'upcoming' | 'done'
 function classify(e: Event): Group {
   if (e.status !== 'pending') return 'done'
   if (!e.startAt) return 'floating'
+  if (e.isOverdue) return 'overdue'
 
-  const now = new Date()
   const start = new Date(e.startAt)
-  const todayStart = startOfDay(now)
+  const todayStart = startOfDay(new Date())
   const tomorrowStart = new Date(todayStart.getTime() + 86400000)
-
-  if (e.endAt) {
-    if (new Date(e.endAt) < now) return 'overdue'
-  } else {
-    // startAt-only: overdue if midnight of due date has passed
-    if (new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1) <= todayStart) return 'overdue'
-  }
 
   if (start < tomorrowStart) return 'today'
   return 'upcoming'
@@ -84,12 +77,18 @@ function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
 
   const statusMutation = useMutation({
     mutationFn: (status: EventStatus) => eventsApi.setStatus(event.id, status),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['inbox'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+    },
   })
 
   const deleteMutation = useMutation({
     mutationFn: () => eventsApi.delete(event.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['inbox'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+    },
   })
 
   const isPending = event.status === 'pending'
@@ -179,7 +178,7 @@ export function InboxPage() {
   const [scheduleMode, setScheduleMode] = useState(false)
 
   const { data: events = [], isLoading } = useQuery({
-    queryKey: ['inbox'],
+    queryKey: ['events', 'all'],
     queryFn: () => eventsApi.list(),
   })
 

@@ -35,7 +35,7 @@ public class GoalTests : IDisposable
         _client.UseBearer(token);
 
         // Set max focus goals to 1 via settings
-        await _client.PutAsJsonAsync("/api/settings", new { maxFocusGoals = 1, dayBoundaryTime = "00:00" });
+        await _client.PutAsJsonAsync("/api/settings", new { maxFocusGoals = 1, dayBoundaryTime = "00:00", timezone = "UTC" });
 
         // Create two goals
         var res1 = await _client.PostAsJsonAsync("/api/goals", new { title = "Goal 1" });

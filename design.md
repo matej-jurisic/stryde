@@ -70,7 +70,7 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 ### 2. Middle Column (320px fixed)
 
 - White background (`--card`).
-- **Purpose:** In the Daily Plan view — Recommendation Engine surface. In other views — contextual panel or collapsed.
+- **Purpose:** In the Daily Plan and Calendar day views — Recommendation Engine surface. In other views — contextual panel or collapsed.
 - **Top:** Column header ("Recommendations"), followed by a full-width outlined "+ New Event" button.
 - **Content:** Events grouped by recommendation tier label (e.g., "Due Today", "Overdue", "Focus", "Floating").
 - **Event list items:**
@@ -132,6 +132,26 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - **No `shadow-card`** on any internal element (cards, list rows, panels, sidebar).
 - **Only `shadow-pop`** on floating elements: modals, dropdowns, popovers.
 - `shadow-pop: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.06)`.
+
+---
+
+## Dark Mode
+
+- Toggled by adding `.dark` to `<html>`; all colors flow from the CSS variables in `index.css`.
+- User preference (light / dark / system) lives on the Settings page, persisted in localStorage (`stryde-theme`), default system. Implementation: `client/src/lib/theme.ts`.
+- Never branch on the theme in components — style with semantic tokens only.
+
+---
+
+## Daily Plan Page (planned — plan.md Phase 11)
+
+The `/plan` view follows the three-pane layout: recommendations in the middle column, and the right canvas holds (top to bottom):
+
+1. **Day header** — date, prev/next/today controls (same pattern as the calendar header).
+2. **Goal health strip** — one compact row per Focus goal: title, believed vs actual progress bars.
+3. **Agenda** — the day's scheduled events as a vertical list (checkbox, title, time range, goal tags), ordered by start time. No hour grid; this is a checklist, not a scheduling surface.
+
+Mobile: single column, agenda first, recommendations collapsed behind a toggle.
 
 ---
 

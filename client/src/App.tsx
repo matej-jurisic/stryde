@@ -6,10 +6,10 @@ import { AppShell } from '@/components/layout/AppShell'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { PlanPage } from '@/pages/PlanPage'
-import { EventsPage } from '@/pages/EventsPage'
 import { GoalsPage } from '@/pages/GoalsPage'
 import { InboxPage } from '@/pages/InboxPage'
 import { CalendarPage } from '@/pages/CalendarPage'
+import { SettingsPage } from '@/pages/SettingsPage'
 
 function AppRoutes() {
   const { status, setStatus } = useAuthStore()
@@ -45,7 +45,7 @@ function AppRoutes() {
         <Route path="/inbox"    element={<InboxPage />} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/goals"    element={<GoalsPage />} />
-        <Route path="/events"   element={<EventsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/"       element={<Navigate to="/plan" replace />} />
         <Route path="*"       element={<Navigate to="/plan" replace />} />
       </Routes>

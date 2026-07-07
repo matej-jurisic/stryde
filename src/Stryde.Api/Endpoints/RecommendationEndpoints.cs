@@ -14,8 +14,8 @@ public static class RecommendationEndpoints
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
-            var effectiveDate = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
-            var items = await svc.GetAsync(userId.Value, effectiveDate);
+            // No date means "the user's current day" — the service resolves it in the user's timezone.
+            var items = await svc.GetAsync(userId.Value, date);
             return Results.Ok(items);
         }).RequireAuthorization();
     }

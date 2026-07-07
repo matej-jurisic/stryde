@@ -47,11 +47,15 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Enums/` — stored as strings (`HasConversion<string>`).
 - `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. Many-to-many via skip nav (`Event.Goals`).
 - `Common/Result.cs` — `Result`/`Result<T>` + `Error(ErrorType, msg)`. **Expected failures = Results, not exceptions.**
-- `Common/Validators.cs` — shared static validation rules.
+- `Common/Validators.cs` — shared static validation rules (incl. `ValidateTimezone`).
+- `Common/DayMath.cs` — `DayContext(TimeZoneInfo, TimeOnly)` + pure day-bucketing: `DayOf`, `Today`,
+  `EndOfDay`, `EventDay`, `IsOverdue`. **All "which day / overdue?" logic goes through here**, in the
+  user's IANA timezone offset by the day boundary. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
+  `EventDto.IsOverdue` is computed server-side; the client must not re-derive it.
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
-- `Recurrence/RecurrenceCalculator.cs` — pure; generates next occurrence from a `RepeatRule`.
-- ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset`** — sort client-side after `ToListAsync`.
+- `Recurrence/RecurrenceCalculator.cs` — *planned for Phase 9, does not exist yet*; will generate the next occurrence from a `RepeatRule` via `DayMath`.
+- ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
 
 **Backend (`Stryde.Api`)**
 - `Program.cs` — registers core services, JWT + auth policy, SPA fallback. JWT config is read
@@ -63,12 +67,14 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Endpoints/ApiResults.cs` — `Error.ToProblem()` + `principal.GetUserId()` (reads `sub` claim).
 
 **Frontend (`client/src`)**
-- `App.tsx` — auth-gated routing; index → `/plan` (Daily Plan).
-- `pages/` — `PlanPage`, `InboxPage`, `CalendarPage`, `GoalsPage`, `SettingsPage`.
+- `App.tsx` — auth-gated routing; index → `/plan` (Daily Plan — currently a stub, see plan.md Phase 11).
+- `pages/` — `PlanPage` (stub), `InboxPage`, `CalendarPage`, `GoalsPage`, `SettingsPage`.
 - `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh).
 - `lib/types.ts` — mirrors backend DTOs.
+- `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`), toggles `.dark` on `<html>`; `initTheme()` runs in `main.tsx`.
 - `store/auth.ts` — Zustand; access token in memory only.
 - `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field`.
+- `components/layout/useInboxCount.ts` — shared nav badge hook (shares the `['events', 'all']` cache with InboxPage).
 
 **Tests**
 - `Unit/TestContext.cs` — in-memory SQLite + real services. Naming: `Method_scenario`.
@@ -92,9 +98,17 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   (`principal.GetUserId()`). Logic in `TokenService.cs`; cookie I/O in `RefreshCookieManager.cs`.
 - **Enums as strings** in DB and on the frontend (e.g. `GoalStatus = 'focus' | 'active' | 'bench' | 'closed'`).
 - **Theming:** semantic CSS variables in `index.css` → Tailwind via `@theme inline`. Never hardcode
-  `bg-slate-*` / `text-*-600`. Dark mode = `.dark` on `<html>`.
+  `bg-slate-*` / `text-*-600`. Dark mode = `.dark` on `<html>`, controlled by `lib/theme.ts`
+  (light/dark/system on the Settings page, persisted in localStorage).
+- **Day math is server-side.** Anything that decides "which day is this / is this overdue / what is today"
+  uses `DayMath` + `DayContext` in the user's timezone. The client consumes `event.isOverdue`; it never
+  recomputes overdue locally. Purely presentational date formatting (labels, grouping headers) may stay client-side.
 - **Frontend:** `verbatimModuleSyntax` — use `import type` for type-only imports. TanStack Query for
-  server state (`queryKey: ['events']`, invalidate after writes); Zustand for auth (access token in memory).
+  server state; Zustand for auth (access token in memory).
+- **Query keys:** every event list lives under the `['events', ...]` prefix (`['events', 'all']` for
+  Inbox + nav badge, `['events', 'calendar', ...]` for calendar ranges). After any event write invalidate
+  `['events']` and `['recommendations']`. After any goal write invalidate `['goals']`, `['events']`, and
+  `['recommendations']` (goal titles/statuses are embedded in event DTOs and drive tiers).
 
 ## Design language
 
@@ -114,8 +128,13 @@ See `design.md` for the full visual spec. Summary of key decisions:
 ## Key domain rules
 
 - **Floating events** (no `StartAt`) live in Inbox. Not overdue, no urgency signal.
-- **Overdue:** `EndAt` passed, or `StartAt`-only and midnight of due date passed.
+- **An event belongs to the day it starts on** (user timezone, day-boundary-adjusted). Cross-midnight
+  events are not split; the calendar renders them on their start day, clamped.
+- **Overdue:** pending, and `EndAt` passed, or `StartAt`-only and the event's day has ended (day boundary
+  on the following date, user timezone). Computed in `DayMath.IsOverdue`, exposed as `EventDto.IsOverdue`.
 - **Focus limit:** moving a goal to `focus` is blocked if `UserSettings.MaxFocusGoals` is already reached — `Conflict` error.
+- **Checkpoint cap:** a goal's checkpoints may not plan more than 100% total progress — `Validation` error
+  (cross-field rule in `CheckpointService`).
 - **Repeat on complete/skip:** generate next instance immediately with same rule and goal links; current marked done/skipped.
 - **Repeat delete scope:** `this` (current instance only) or `future` (current + all future). Always prompt on frontend.
 - **Recommendation ranking (7 tiers):**
@@ -129,7 +148,8 @@ See `design.md` for the full visual spec. Summary of key decisions:
   Within each tier: sort by due date asc, then duration asc (shorter first).
 - **Goal progress — believed:** sum of `PlannedProgress` of all `reached` checkpoints.
 - **Goal progress — actual:** count of completed linked events × fixed increment (v1: each completion = fixed increment, exact value TBD in Phase 10).
-- **Day boundary:** user-configurable time at which "today" rolls over (default midnight). Stored in `UserSettings.DayBoundaryTime`.
+- **Day boundary:** user-configurable time at which "today" rolls over (default midnight). Stored in
+  `UserSettings.DayBoundaryTime`; applied everywhere via `DayMath` (a day runs boundary to boundary).
 
 ## Gotchas
 

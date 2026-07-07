@@ -18,6 +18,21 @@ public static class Validators
         return null;
     }
 
+    public static Error? ValidateTimezone(string? timezoneId)
+    {
+        if (string.IsNullOrWhiteSpace(timezoneId))
+            return new Error(ErrorType.Validation, "Timezone is required.");
+        try
+        {
+            _ = TimeZoneInfo.FindSystemTimeZoneById(timezoneId);
+            return null;
+        }
+        catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            return new Error(ErrorType.Validation, "Unknown timezone.");
+        }
+    }
+
     public static Error? ValidateDateRange(DateTimeOffset? startAt, DateTimeOffset? endAt)
     {
         if (startAt.HasValue && endAt.HasValue && endAt <= startAt)

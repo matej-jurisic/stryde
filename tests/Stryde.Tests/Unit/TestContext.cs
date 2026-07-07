@@ -15,6 +15,7 @@ public class TestContext : IDisposable
     public EventService EventService { get; }
     public CheckpointService CheckpointService { get; }
     public UserSettingsService UserSettingsService { get; }
+    public RecommendationService RecommendationService { get; }
 
     public TestContext()
     {
@@ -40,8 +41,9 @@ public class TestContext : IDisposable
         AuthService = new AuthService(Db, tokens, hasher);
         UserSettingsService = new UserSettingsService(Db);
         GoalService = new GoalService(Db, UserSettingsService);
-        EventService = new EventService(Db);
+        EventService = new EventService(Db, UserSettingsService);
         CheckpointService = new CheckpointService(Db);
+        RecommendationService = new RecommendationService(Db, UserSettingsService);
     }
 
     public void Dispose()

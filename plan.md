@@ -1,6 +1,6 @@
 # Stryde — Implementation Plan
 
-10 phases, each producing working, committed software. Phases build on the previous — no phase leaves the app in a broken state.
+Phased build, each phase producing working, committed software. Phases build on the previous — no phase leaves the app in a broken state.
 
 ---
 
@@ -130,28 +130,43 @@
 
 ---
 
-## Phase 8 — Recommendation Engine
+## Phase 8 — Recommendation Engine ✅
 
 **Goal:** The app surfaces what to work on next, ranked by the rules in the spec.
 
 **Backend**
-- `GET /api/recommendations?date=YYYY-MM-DD` endpoint
+- `GET /api/recommendations?date=YYYY-MM-DD` endpoint (date optional; defaults to the user's current day)
 - Implements the 7-tier ranking from the spec:
-  1. Events due today, not yet scheduled
+  1. Events due today, not yet done
   2. Overdue events
   3. Events linked to Focus goals with lagging actual progress
   4. Events linked to Active goals with lagging actual progress
   5. Floating events linked to Focus goals
   6. Floating events linked to Active goals
   7. Floating events linked to Bench goals
-- Within tiers: sort by due date ascending, then duration ascending
+- Within tiers: sort by due date ascending, then duration ascending; dedupe into the highest qualifying tier
 
 **Frontend**
-- Recommendation strip displayed in the Calendar day view
-- Each recommendation shows title, linked goals, and a one-click schedule action
-- Strip is collapsible
+- Recommendation panel (persistent 320px column, not a collapsible strip) in the Calendar day view
+- Each recommendation shows title, primary linked goal, duration, and a one-click schedule action
 
-**Done when:** The recommendation strip is visible on the day view and updates correctly as events are completed or scheduled.
+**Deferred to Phase 10:** the "lagging actual progress" filter for tiers 3/4 (needs the fixed progress increment); until then all pending scheduled events linked to focus/active goals qualify.
+
+**Done when:** The recommendation panel is visible on the day view and updates correctly as events are completed or scheduled. ✔
+
+---
+
+## Hardening pass (July 2026) ✅
+
+Unplanned correctness and polish work done after Phase 8:
+
+- **Timezone-aware day logic, server-side.** All day-bucketing (due today, overdue, "today") now runs in the user's IANA timezone offset by `DayBoundaryTime`, via `Common/DayMath.cs`. Previously everything was UTC.
+- **`isOverdue` on the event DTO.** Computed once server-side; the three divergent client-side overdue implementations were removed.
+- **Settings page** (`/settings`): timezone, day boundary, max Focus goals, light/dark/system theme toggle (localStorage), sign out. The settings PUT now also updates `User.Timezone`.
+- **Checkpoint cap:** a goal's checkpoints may not plan more than 100% total progress.
+- **Query key unification:** all event lists live under the `['events', ...]` prefix; event writes invalidate `['events']` + `['recommendations']`; goal writes additionally invalidate `['events']`. Fixed a cache collision where the sidebar badge and the Inbox page shared a key with different fetches.
+- **Removed** the temporary Events page (Inbox + Calendar cover it) and a leftover diagnostic test.
+- **Unit tests** for the recommendation tiers, timezone bucketing, day-boundary overdue, and the checkpoint cap (20 tests total).
 
 ---
 
@@ -162,9 +177,11 @@
 **Supported patterns:** daily, weekly on specific days, every N days/weeks/months, monthly on a date.
 
 **Backend**
-- Repeat rule stored as structured JSON (pattern type + config)
+- Repeat rule stored as structured JSON (pattern type + config — schema is specced in spec.md, Repeats)
+- Recurrence date math goes through `Common/DayMath.cs` (user timezone + day boundary), same as recommendations
 - On event complete: next instance generated with same rule, linked to same goals
 - On event skip: same as complete, current marked skipped
+- Idempotent: re-marking an already done/skipped event must not spawn another instance
 - On event reschedule: datetimes updated, rule unchanged
 - On event delete: request body specifies `scope` — `this` (current instance only) or `future` (current + all future)
 
@@ -176,14 +193,11 @@
 
 ---
 
-## Phase 10 — Settings, Progress Insights & Polish
+## Phase 10 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.
 
-**Settings page**
-- Timezone (auto-detected on first open, user-editable)
-- Day boundary time
-- Max Focus goals
+**Settings page** — ✅ done early in the hardening pass (timezone, day boundary, max Focus goals, theme, sign out)
 
 **Goal progress insights**
 - Actual progress: each completed linked event contributes a fixed increment (Open Decision #1 resolved to fixed increment for v1)
@@ -192,10 +206,13 @@
 **Polish**
 - Mobile layout pass — all views usable on small screens
 - Loading states for all async operations
-- Error states and toast notifications for failures
+- Error states and toast notifications for failures (design the toast pattern in design.md first)
 - Form validation error messages consistent across all modals
 - Empty states for all list views
 - Page titles and basic navigation structure finalized
+- Recommendation "lagging actual progress" filter for tiers 3/4 (deferred from Phase 8)
+- Drag-and-drop: drag a recommendation onto the calendar grid to schedule it; drag/resize existing calendar blocks to reschedule
+- Delete confirmations for events and goals (repeat-scope prompt ships with Phase 9)
 
 **Docker Compose production hardening**
 - `docker-compose.prod.yml` override (or env-based config) with production-appropriate settings
@@ -208,11 +225,25 @@
 
 ---
 
+## Phase 11 — Daily Plan Page
+
+**Goal:** `/plan` becomes a real execution view instead of a placeholder. See spec.md (Daily Plan) for the full definition.
+
+- Today's agenda: the day's scheduled events as an ordered list with one-click done/skip
+- Recommendations in the middle column (reuse `RecommendationPanel`)
+- Goal health strip: Focus goals with believed vs actual progress
+- Day navigation (prev/next/today), same day-boundary semantics as the calendar
+- Mobile: single column, agenda first
+
+**Done when:** Logging in lands on a Daily Plan that answers "what should I do right now" without opening the calendar.
+
+---
+
 ## Open Decisions to Resolve During Build
 
 | # | Decision | Target Phase |
 |---|---|---|
 | 1 | Event → goal progress attribution | Phase 10 (fixed increment for v1) |
-| 2 | Recommendation rule tie-breaking within tiers | Phase 8 |
-| 3 | Time ribbon layout details | Phase 7 |
-| 4 | Goal list ordering | Phase 5 |
+| 2 | ~~Recommendation rule tie-breaking within tiers~~ | Resolved in Phase 8: due date asc, duration asc, no-duration last, dedupe into highest tier |
+| 3 | Time ribbon layout details | Resolved in Phase 7 (hour grid, drag-create, snap to 15 min) |
+| 4 | Goal list ordering | Resolved in Phase 5: grouped Focus → Active → Bench → Closed, creation order within a group |

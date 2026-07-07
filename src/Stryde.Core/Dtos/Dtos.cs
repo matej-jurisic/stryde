@@ -24,11 +24,13 @@ public sealed record EventDto(
     string Status,
     Guid? RepeatRuleId,
     DateTimeOffset CreatedAt,
+    bool IsOverdue,
     List<GoalSummaryDto> Goals)
 {
-    public static EventDto FromEntity(Event e) => new(
+    public static EventDto FromEntity(Event e, Common.DayContext ctx, DateTimeOffset nowUtc) => new(
         e.Id, e.UserId, e.Title, e.StartAt, e.EndAt,
         e.Status.ToString(), e.RepeatRuleId, e.CreatedAt,
+        Common.DayMath.IsOverdue(e, ctx, nowUtc),
         e.Goals.Select(GoalSummaryDto.FromEntity).ToList());
 }
 
@@ -94,10 +96,10 @@ public sealed record SetCheckpointStatusRequest(CheckpointStatus Status);
 public sealed record RecommendationDto(int Tier, EventDto Event);
 
 // UserSettings
-public sealed record UserSettingsDto(Guid UserId, int MaxFocusGoals, string DayBoundaryTime)
+public sealed record UserSettingsDto(Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone)
 {
-    public static UserSettingsDto FromEntity(UserSettings us) => new(
-        us.UserId, us.MaxFocusGoals, us.DayBoundaryTime.ToString("HH:mm"));
+    public static UserSettingsDto FromEntity(UserSettings us, string timezone) => new(
+        us.UserId, us.MaxFocusGoals, us.DayBoundaryTime.ToString("HH:mm"), timezone);
 }
 
-public sealed record UpdateUserSettingsRequest(int MaxFocusGoals, string DayBoundaryTime);
+public sealed record UpdateUserSettingsRequest(int MaxFocusGoals, string DayBoundaryTime, string Timezone);

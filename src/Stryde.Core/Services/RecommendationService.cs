@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Stryde.Core.Common;
 using Stryde.Core.Data;
 using Stryde.Core.Dtos;
 using Stryde.Core.Entities;
@@ -6,31 +7,25 @@ using Stryde.Core.Enums;
 
 namespace Stryde.Core.Services;
 
-public class RecommendationService(StrydeDbContext db)
+public class RecommendationService(StrydeDbContext db, UserSettingsService settings)
 {
-    public async Task<List<RecommendationDto>> GetAsync(Guid userId, DateOnly date)
+    /// <param name="date">The day to recommend for; defaults to the user's current day.</param>
+    /// <param name="nowUtc">Injectable clock for tests; defaults to the real time.</param>
+    public async Task<List<RecommendationDto>> GetAsync(Guid userId, DateOnly? date = null, DateTimeOffset? nowUtc = null)
     {
+        var now = nowUtc ?? DateTimeOffset.UtcNow;
+        var ctx = await settings.GetDayContextAsync(userId);
+        var today = date ?? DayMath.Today(ctx, now);
+
         var events = await db.Events
             .Include(e => e.Goals)
             .Where(e => e.UserId == userId && e.Status == EventStatus.pending)
             .ToListAsync();
 
-        var now = DateTime.UtcNow;
+        bool IsDueToday(Event e) => DayMath.EventDay(e, ctx) == today;
 
-        bool IsDueToday(Event e)
-        {
-            if (e.StartAt == null) return false;
-            return DateOnly.FromDateTime(e.StartAt.Value.UtcDateTime) == date;
-        }
-
-        bool IsOverdue(Event e)
-        {
-            if (e.StartAt == null) return false;
-            if (DateOnly.FromDateTime(e.StartAt.Value.UtcDateTime) >= date) return false;
-            if (e.EndAt.HasValue) return e.EndAt.Value.UtcDateTime < now;
-            // StartAt-only: overdue after midnight of the start date
-            return e.StartAt.Value.UtcDateTime.Date.AddDays(1) < now;
-        }
+        bool IsOverdue(Event e) =>
+            DayMath.EventDay(e, ctx) < today && DayMath.IsOverdue(e, ctx, now);
 
         bool IsFloating(Event e) => e.StartAt == null;
 
@@ -93,7 +88,7 @@ public class RecommendationService(StrydeDbContext db)
             .OrderBy(x => x.tier)
             .ThenBy(x => SortDate(x.e))
             .ThenBy(x => Duration(x.e))
-            .Select(x => new RecommendationDto(x.tier, EventDto.FromEntity(x.e)))
+            .Select(x => new RecommendationDto(x.tier, EventDto.FromEntity(x.e, ctx, now)))
             .ToList();
     }
 }

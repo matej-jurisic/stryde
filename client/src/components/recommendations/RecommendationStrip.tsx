@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, GripVertical, CalendarPlus } from 'lucide-react'
+import { Plus, CalendarPlus } from 'lucide-react'
 import { recommendationsApi } from '@/lib/api'
 import type { Event, Recommendation, GoalStatus } from '@/lib/types'
 import { Badge } from '@/components/ui/Badge'
@@ -46,9 +46,6 @@ function RecItem({ event, onSchedule }: { event: Event; onSchedule: () => void }
 
   return (
     <li className="group flex items-start gap-2 rounded-lg border border-transparent px-2 py-2.5 transition-colors hover:border-border hover:bg-muted/40">
-      <span className="mt-0.5 shrink-0 cursor-grab text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-        <GripVertical className="h-4 w-4" />
-      </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-sm text-foreground">{event.title}</p>
@@ -101,7 +98,7 @@ export function RecommendationPanel({ date, onEventClick, onNewEvent }: Recommen
       <div className="shrink-0 px-5 py-5">
         <h1 className="text-lg font-semibold text-foreground">Recommendations</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Drag events onto your day to schedule.
+          What to work on next, ranked. Use the calendar icon to schedule.
         </p>
         <button
           onClick={onNewEvent}

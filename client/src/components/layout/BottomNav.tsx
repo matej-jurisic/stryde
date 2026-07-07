@@ -1,16 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { CalendarRange, CalendarDays, Inbox, Target, Settings } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
-import { eventsApi } from '@/lib/api'
-
-function useInboxCount() {
-  const { data = [] } = useQuery({
-    queryKey: ['inbox'],
-    queryFn: () => eventsApi.list({ floating: true }),
-    staleTime: 30_000,
-  })
-  return data.filter((e) => e.status === 'pending').length
-}
+import { useInboxCount } from './useInboxCount'
 
 const navItems = [
   { to: '/plan',     label: 'Plan',     Icon: CalendarRange, badge: false },

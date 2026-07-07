@@ -7,7 +7,7 @@ using Stryde.Core.Enums;
 
 namespace Stryde.Core.Services;
 
-public class EventService(StrydeDbContext db)
+public class EventService(StrydeDbContext db, UserSettingsService settings)
 {
     public async Task<Result<EventDto>> CreateAsync(Guid userId, CreateEventRequest req)
     {
@@ -27,7 +27,7 @@ public class EventService(StrydeDbContext db)
 
         db.Events.Add(ev);
         await db.SaveChangesAsync();
-        return Result<EventDto>.Success(EventDto.FromEntity(ev));
+        return Result<EventDto>.Success(await ToDtoAsync(ev, userId));
     }
 
     public async Task<Result<EventDto>> GetAsync(Guid id, Guid userId)
@@ -36,7 +36,7 @@ public class EventService(StrydeDbContext db)
             .Include(e => e.Goals)
             .FirstOrDefaultAsync(e => e.Id == id && e.UserId == userId);
         if (ev is null) return Result<EventDto>.Fail(new Error(ErrorType.NotFound, "Event not found."));
-        return Result<EventDto>.Success(EventDto.FromEntity(ev));
+        return Result<EventDto>.Success(await ToDtoAsync(ev, userId));
     }
 
     public async Task<List<EventDto>> ListAsync(
@@ -59,10 +59,13 @@ public class EventService(StrydeDbContext db)
         IEnumerable<Event> events = all;
         if (startFrom.HasValue) events = events.Where(e => e.StartAt >= startFrom.Value);
         if (endBefore.HasValue) events = events.Where(e => e.StartAt < endBefore.Value);
+
+        var ctx = await settings.GetDayContextAsync(userId);
+        var now = DateTimeOffset.UtcNow;
         return events
             .OrderBy(e => e.StartAt ?? DateTimeOffset.MaxValue)
             .ThenBy(e => e.CreatedAt)
-            .Select(EventDto.FromEntity)
+            .Select(e => EventDto.FromEntity(e, ctx, now))
             .ToList();
     }
 
@@ -94,7 +97,7 @@ public class EventService(StrydeDbContext db)
         }
 
         await db.SaveChangesAsync();
-        return Result<EventDto>.Success(EventDto.FromEntity(ev));
+        return Result<EventDto>.Success(await ToDtoAsync(ev, userId));
     }
 
     public async Task<Result> DeleteAsync(Guid id, Guid userId)
@@ -114,6 +117,12 @@ public class EventService(StrydeDbContext db)
         if (ev is null) return Result<EventDto>.Fail(new Error(ErrorType.NotFound, "Event not found."));
         ev.Status = status;
         await db.SaveChangesAsync();
-        return Result<EventDto>.Success(EventDto.FromEntity(ev));
+        return Result<EventDto>.Success(await ToDtoAsync(ev, userId));
+    }
+
+    private async Task<EventDto> ToDtoAsync(Event ev, Guid userId)
+    {
+        var ctx = await settings.GetDayContextAsync(userId);
+        return EventDto.FromEntity(ev, ctx, DateTimeOffset.UtcNow);
     }
 }
