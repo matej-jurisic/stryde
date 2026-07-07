@@ -1,0 +1,21 @@
+# .NET
+bin/
+obj/
+*.user
+*.db
+*.db-shm
+*.db-wal
+
+# Node
+client/node_modules/
+client/dist/
+
+# Environment
+.env
+appsettings.Development.json
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.suo

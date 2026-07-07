@@ -1,0 +1,58 @@
+import { useEffect } from 'react'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { tryRefresh } from '@/lib/api'
+import { useAuthStore } from '@/store/auth'
+import { AppShell } from '@/components/layout/AppShell'
+import { LoginPage } from '@/pages/LoginPage'
+import { RegisterPage } from '@/pages/RegisterPage'
+import { PlanPage } from '@/pages/PlanPage'
+import { EventsPage } from '@/pages/EventsPage'
+import { GoalsPage } from '@/pages/GoalsPage'
+import { InboxPage } from '@/pages/InboxPage'
+import { CalendarPage } from '@/pages/CalendarPage'
+
+function AppRoutes() {
+  const { status, setStatus } = useAuthStore()
+
+  useEffect(() => {
+    tryRefresh().then((ok) => {
+      if (!ok) setStatus('unauthenticated')
+    })
+  }, [setStatus])
+
+  if (status === 'loading') {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    )
+  }
+
+  if (status === 'unauthenticated') {
+    return (
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    )
+  }
+
+  return (
+    <AppShell>
+      <Routes>
+        <Route path="/plan"     element={<PlanPage />} />
+        <Route path="/inbox"    element={<InboxPage />} />
+        <Route path="/calendar" element={<CalendarPage />} />
+        <Route path="/goals"    element={<GoalsPage />} />
+        <Route path="/events"   element={<EventsPage />} />
+        <Route path="/"       element={<Navigate to="/plan" replace />} />
+        <Route path="*"       element={<Navigate to="/plan" replace />} />
+      </Routes>
+    </AppShell>
+  )
+}
+
+export default function App() {
+  return <AppRoutes />
+}

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Stryde.Api/Stryde.Api.csproj" />
+    <Project Path="src/Stryde.Core/Stryde.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Stryde.Tests/Stryde.Tests.csproj" />
+  </Folder>
+</Solution>

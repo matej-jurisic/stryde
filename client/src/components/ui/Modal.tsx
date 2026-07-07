@@ -1,0 +1,61 @@
+import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { X } from 'lucide-react'
+
+interface ModalProps {
+  open: boolean
+  onClose: () => void
+  title: string
+  children: ReactNode
+  footer?: ReactNode
+}
+
+export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      aria-modal="true"
+      role="dialog"
+      aria-labelledby="modal-title"
+    >
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        className="relative z-10 flex w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-background"
+        style={{ boxShadow: 'var(--shadow-pop-value)' }}
+      >
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h2 id="modal-title" className="text-base font-semibold text-foreground">{title}</h2>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
+          {children}
+        </div>
+        {footer && (
+          <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  )
+}
