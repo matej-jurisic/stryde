@@ -12,6 +12,7 @@ export interface AuthResponse {
 export type EventStatus = 'pending' | 'done' | 'skipped'
 export type GoalStatus = 'focus' | 'active' | 'bench' | 'closed'
 export type CheckpointStatus = 'pending' | 'reached'
+export type CheckpointSize = 'tiny' | 'small' | 'normal' | 'big' | 'huge'
 
 export interface GoalSummary {
   id: string
@@ -23,7 +24,7 @@ export interface Checkpoint {
   id: string
   goalId: string
   title: string
-  plannedProgress: number
+  size: CheckpointSize
   targetDate: string | null
   status: CheckpointStatus
   createdAt: string
@@ -39,6 +40,22 @@ export interface Goal {
   checkpoints: Checkpoint[]
 }
 
+export interface CategorySummary {
+  id: string
+  name: string
+  color: string
+  icon: string | null
+}
+
+export interface Category {
+  id: string
+  userId: string
+  name: string
+  color: string
+  icon: string | null
+  createdAt: string
+}
+
 export interface Event {
   id: string
   userId: string
@@ -50,12 +67,19 @@ export interface Event {
   createdAt: string
   isOverdue: boolean
   goals: GoalSummary[]
+  category: CategorySummary | null
 }
 
-export interface Recommendation {
-  tier: number
-  event: Event
+export interface BaseEventSummary {
+  id: string
+  title: string
+  category: CategorySummary | null
+  goals: GoalSummary[]
 }
+
+export type Recommendation =
+  | { tier: number; type: 'event'; event: Event; baseEvent: null }
+  | { tier: number; type: 'base_event'; event: null; baseEvent: BaseEventSummary }
 
 export interface UserSettings {
   userId: string

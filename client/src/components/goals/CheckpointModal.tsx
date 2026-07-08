@@ -4,24 +4,29 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { checkpointsApi, ApiError } from '@/lib/api'
-import type { Checkpoint } from '@/lib/types'
+import type { Checkpoint, CheckpointSize } from '@/lib/types'
+
+const SIZES: { value: CheckpointSize; label: string }[] = [
+  { value: 'tiny',   label: 'Tiny'   },
+  { value: 'small',  label: 'Small'  },
+  { value: 'normal', label: 'Normal' },
+  { value: 'big',    label: 'Big'    },
+  { value: 'huge',   label: 'Huge'   },
+]
 
 interface FormState {
   title: string
-  plannedProgress: string
+  size: CheckpointSize
   targetDate: string
 }
 
 interface Errors {
   title?: string
-  plannedProgress?: string
 }
 
 function validate(form: FormState): Errors {
   const errs: Errors = {}
   if (!form.title.trim()) errs.title = 'Title is required.'
-  const p = Number(form.plannedProgress)
-  if (isNaN(p) || p < 0 || p > 100) errs.plannedProgress = 'Must be between 0 and 100.'
   return errs
 }
 
@@ -36,7 +41,7 @@ export function CheckpointModal({ open, onClose, goalId, checkpoint }: Checkpoin
   const qc = useQueryClient()
   const isEdit = Boolean(checkpoint)
 
-  const [form, setForm] = useState<FormState>({ title: '', plannedProgress: '0', targetDate: '' })
+  const [form, setForm] = useState<FormState>({ title: '', size: 'normal', targetDate: '' })
   const [errors, setErrors] = useState<Errors>({})
   const [apiError, setApiError] = useState('')
 
@@ -44,7 +49,7 @@ export function CheckpointModal({ open, onClose, goalId, checkpoint }: Checkpoin
     if (open) {
       setForm({
         title: checkpoint?.title ?? '',
-        plannedProgress: checkpoint ? String(checkpoint.plannedProgress) : '0',
+        size: checkpoint?.size ?? 'normal',
         targetDate: checkpoint?.targetDate ? checkpoint.targetDate.slice(0, 10) : '',
       })
       setErrors({})
@@ -56,7 +61,7 @@ export function CheckpointModal({ open, onClose, goalId, checkpoint }: Checkpoin
     mutationFn: () => {
       const payload = {
         title: form.title.trim(),
-        plannedProgress: Number(form.plannedProgress),
+        size: form.size,
         targetDate: form.targetDate ? new Date(form.targetDate).toISOString() : null,
       }
       return isEdit
@@ -97,20 +102,31 @@ export function CheckpointModal({ open, onClose, goalId, checkpoint }: Checkpoin
         label="Title"
         value={form.title}
         onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-        placeholder="e.g. Reach 20km long run"
+        placeholder="e.g. Learn your first full song"
         error={errors.title}
         autoFocus
       />
-      <Field
-        label="Planned progress (%)"
-        type="number"
-        min={0}
-        max={100}
-        value={form.plannedProgress}
-        onChange={(e) => setForm((f) => ({ ...f, plannedProgress: e.target.value }))}
-        placeholder="0"
-        error={errors.plannedProgress}
-      />
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium text-foreground">Size</span>
+        <div className="grid grid-cols-5 gap-1">
+          {SIZES.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, size: value }))}
+              className={`rounded-md border py-1.5 text-xs font-medium transition-colors ${
+                form.size === value
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-background text-muted-foreground hover:border-primary hover:text-foreground'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <Field
         label="Target date (optional)"
         type="date"

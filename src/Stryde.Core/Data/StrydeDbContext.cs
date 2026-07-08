@@ -14,6 +14,8 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
     public DbSet<Checkpoint> Checkpoints => Set<Checkpoint>();
     public DbSet<RepeatRule> RepeatRules => Set<RepeatRule>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+    public DbSet<Category> Categories => Set<Category>();
+    public DbSet<BaseEvent> BaseEvents => Set<BaseEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,10 +36,37 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .Property(c => c.Status)
             .HasConversion<string>();
 
+        modelBuilder.Entity<Checkpoint>()
+            .Property(c => c.Size)
+            .HasConversion<string>();
+
         modelBuilder.Entity<Event>()
             .HasMany(e => e.Goals)
             .WithMany(g => g.Events)
             .UsingEntity(j => j.ToTable("EventGoals"));
+
+        modelBuilder.Entity<Event>()
+            .HasOne(e => e.Category)
+            .WithMany()
+            .HasForeignKey(e => e.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Event>()
+            .HasOne(e => e.BaseEvent)
+            .WithMany()
+            .HasForeignKey(e => e.BaseEventId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<BaseEvent>()
+            .HasOne(b => b.Category)
+            .WithMany()
+            .HasForeignKey(b => b.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<BaseEvent>()
+            .HasMany(b => b.Goals)
+            .WithMany()
+            .UsingEntity(j => j.ToTable("BaseEventGoals"));
 
         modelBuilder.Entity<UserSettings>()
             .HasKey(us => us.UserId);

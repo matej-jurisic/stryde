@@ -41,7 +41,9 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Backend (`Stryde.Core`)**
 - `Entities/` — POCOs; `Guid Id = Guid.NewGuid()` + `DateTimeOffset CreatedAt`, no base class.
-  Key entities: `User, Event, Goal, Checkpoint, RepeatRule, EventGoal (join), UserSettings`.
+  Key entities: `User, Event, BaseEvent, Goal, Checkpoint, RepeatRule, EventGoal (join), UserSettings`.
+  `BaseEvent` — reusable template (title, categoryId?, goals[]); every `Event` has `BaseEventId?` FK.
+  Auto-created silently by `EventService` when a new event doesn't link to an existing one.
   `Event.Status` is `pending | done | skipped`. `Goal.Status` is `focus | active | bench | closed`.
   `Checkpoint.Status` is `pending | reached`.
 - `Enums/` — stored as strings (`HasConversion<string>`).
@@ -54,7 +56,7 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
   `EventDto.IsOverdue` is computed server-side; the client must not re-derive it.
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
-- `Recurrence/RecurrenceCalculator.cs` — *planned for Phase 9, does not exist yet*; will generate the next occurrence from a `RepeatRule` via `DayMath`.
+- `Recurrence/RecurrenceCalculator.cs` — *planned for Phase 10, does not exist yet*; uses **virtual rendering** — enumerates future occurrences from a `RepeatRule` for a date range via `DayMath`; does not pre-store instances.
 - ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
 
 **Backend (`Stryde.Api`)**
@@ -115,14 +117,14 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 See `design.md` for the full visual spec. Summary of key decisions:
 
 - **Three-pane layout.** Fixed left sidebar 240px (`md:`+), recommendations column 320px, fluid canvas. Below `md` → drawer.
-- **Color:** light-gray canvas (`--background` `#f3f4f6`), white cards/panels (`--card` `#ffffff`). Primary brand: vibrant purple (`--primary` `#8b5cf6`). Borders: `#e5e7eb`.
+- **Color:** light-gray canvas (`--background` `#f3f4f6`), white cards/panels (`--card` `#ffffff`). Primary brand: slate blue (`--primary` `#8499B1`). Borders: `#e5e7eb`.
 - **Active nav state:** `bg-accent` (gray tint) + `font-semibold` text. NOT a primary-color tint. Hover: `bg-accent`.
 - **Shadows: strictly flat.** No shadow on cards or internal elements. Only `shadow-pop` on modals and floating menus.
-- **Status pills** via `Badge`: soft `color-mix` bg + saturated text. Tones: `neutral | violet | red | blue | amber | green`.
+- **Status pills** via `Badge`: soft `color-mix` bg + saturated text. Tones: `neutral | red | blue | amber | green`.
 - **Corners:** 6-8px buttons/tags, 8-12px cards/modals (`--radius-md/lg/xl`).
 - **Typography:** Inter, regular body / semibold headers. Don't bold body, labels, or buttons.
 - **Icons:** outline/stroke, 2px stroke-width, `currentColor`.
-- **Goal status colors:** Focus = purple/pink, Active = teal/blue, Bench = neutral gray.
+- **Goal status colors:** Focus = primary/blue, Active = teal/blue, Bench = neutral gray.
 - **Sidebar:** Stryde brand in `text-primary`. Main nav items in middle. Settings pinned to bottom.
 
 ## Key domain rules
@@ -135,17 +137,14 @@ See `design.md` for the full visual spec. Summary of key decisions:
 - **Focus limit:** moving a goal to `focus` is blocked if `UserSettings.MaxFocusGoals` is already reached — `Conflict` error.
 - **Checkpoint cap:** a goal's checkpoints may not plan more than 100% total progress — `Validation` error
   (cross-field rule in `CheckpointService`).
-- **Repeat on complete/skip:** generate next instance immediately with same rule and goal links; current marked done/skipped.
-- **Repeat delete scope:** `this` (current instance only) or `future` (current + all future). Always prompt on frontend.
-- **Recommendation ranking (7 tiers):**
-  1. Events due today, not yet done
-  2. Overdue events
-  3. Events linked to Focus goals with lagging actual progress
-  4. Events linked to Active goals with lagging actual progress
-  5. Floating events linked to Focus goals
-  6. Floating events linked to Active goals
-  7. Floating events linked to Bench goals (only when nothing above exists)
-  Within each tier: sort by due date asc, then duration asc (shorter first).
+- **Repeat rules — virtual rendering:** future occurrences are derived from the stored rule and rendered by the calendar for any requested date range; never pre-stored. Lists (inbox, plan, recommendations) show only the next upcoming instance. Completing/skipping marks that instance; the calendar continues rendering future occurrences from the rule.
+- **Repeat delete scope:** `this` (current instance only) or `future` (deletes the rule, stopping all future occurrences). Always prompt on frontend.
+- **Recommendation ranking (4 tiers):** answers "what should I add to today's schedule?" — never echoes events already on the calendar.
+  1. Floating events linked to Focus goals
+  2. Floating events linked to Active goals
+  3. BaseEvents with ≥2 completions on today's weekday in the past 6 weeks, no instance on today's schedule — frequency desc within tier
+  4. Floating events linked to Bench goals (only when tiers 1-3 are empty)
+  Within each tier: sort by due date asc, then duration asc (shorter first). An event appears at most once.
 - **Goal progress — believed:** sum of `PlannedProgress` of all `reached` checkpoints.
 - **Goal progress — actual:** count of completed linked events × fixed increment (v1: each completion = fixed increment, exact value TBD in Phase 10).
 - **Day boundary:** user-configurable time at which "today" rolls over (default midnight). Stored in

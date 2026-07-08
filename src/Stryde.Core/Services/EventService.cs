@@ -17,12 +17,33 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
 
         var ev = new Event { UserId = userId, Title = req.Title.Trim(), StartAt = req.StartAt, EndAt = req.EndAt };
 
+        if (req.CategoryId.HasValue)
+        {
+            var cat = await db.Categories.FirstOrDefaultAsync(c => c.Id == req.CategoryId.Value && c.UserId == userId);
+            if (cat is null) return Result<EventDto>.Fail(new Error(ErrorType.NotFound, "Category not found."));
+            ev.CategoryId = req.CategoryId.Value;
+        }
+
         if (req.GoalIds is { Count: > 0 })
         {
             var goals = await db.Goals
                 .Where(g => req.GoalIds.Contains(g.Id) && g.UserId == userId)
                 .ToListAsync();
             ev.Goals.AddRange(goals);
+        }
+
+        if (req.BaseEventId.HasValue)
+        {
+            var be = await db.BaseEvents.FirstOrDefaultAsync(b => b.Id == req.BaseEventId.Value && b.UserId == userId);
+            if (be is null) return Result<EventDto>.Fail(new Error(ErrorType.NotFound, "Base event not found."));
+            ev.BaseEventId = be.Id;
+        }
+        else
+        {
+            var be = new BaseEvent { UserId = userId, Title = ev.Title, CategoryId = ev.CategoryId };
+            be.Goals.AddRange(ev.Goals);
+            db.BaseEvents.Add(be);
+            ev.BaseEventId = be.Id;
         }
 
         db.Events.Add(ev);
@@ -34,6 +55,7 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
     {
         var ev = await db.Events
             .Include(e => e.Goals)
+            .Include(e => e.Category)
             .FirstOrDefaultAsync(e => e.Id == id && e.UserId == userId);
         if (ev is null) return Result<EventDto>.Fail(new Error(ErrorType.NotFound, "Event not found."));
         return Result<EventDto>.Success(await ToDtoAsync(ev, userId));
@@ -48,6 +70,7 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
     {
         var query = db.Events
             .Include(e => e.Goals)
+            .Include(e => e.Category)
             .Where(e => e.UserId == userId);
 
         if (status.HasValue) query = query.Where(e => e.Status == status.Value);
@@ -77,12 +100,25 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
 
         var ev = await db.Events
             .Include(e => e.Goals)
+            .Include(e => e.Category)
             .FirstOrDefaultAsync(e => e.Id == id && e.UserId == userId);
         if (ev is null) return Result<EventDto>.Fail(new Error(ErrorType.NotFound, "Event not found."));
 
         ev.Title = req.Title.Trim();
         ev.StartAt = req.StartAt;
         ev.EndAt = req.EndAt;
+        ev.CategoryId = req.CategoryId;
+
+        if (req.CategoryId.HasValue)
+        {
+            var cat = await db.Categories.FirstOrDefaultAsync(c => c.Id == req.CategoryId.Value && c.UserId == userId);
+            if (cat is null) return Result<EventDto>.Fail(new Error(ErrorType.NotFound, "Category not found."));
+            ev.Category = cat;
+        }
+        else
+        {
+            ev.Category = null;
+        }
 
         if (req.GoalIds is not null)
         {
@@ -113,6 +149,7 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
     {
         var ev = await db.Events
             .Include(e => e.Goals)
+            .Include(e => e.Category)
             .FirstOrDefaultAsync(e => e.Id == id && e.UserId == userId);
         if (ev is null) return Result<EventDto>.Fail(new Error(ErrorType.NotFound, "Event not found."));
         ev.Status = status;

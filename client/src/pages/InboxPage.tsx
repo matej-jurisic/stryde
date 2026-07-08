@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock } from 'lucide-react'
-import { eventsApi } from '@/lib/api'
+import { eventsApi, categoriesApi } from '@/lib/api'
 import type { Event, EventStatus } from '@/lib/types'
+import { CategoryIcon } from '@/components/categories/categoryIcons'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { EventModal } from '@/components/events/EventModal'
@@ -123,6 +125,12 @@ function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
               {formatEventDate(event.startAt, event.endAt)}
             </span>
           )}
+          {event.category && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <CategoryIcon icon={event.category.icon} color={event.category.color} size={11} strokeWidth={2} />
+              {event.category.name}
+            </span>
+          )}
           {event.goals.map((g) => (
             <Badge key={g.id} tone="focus">{g.title}</Badge>
           ))}
@@ -173,6 +181,9 @@ function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
 // --- page ---
 
 export function InboxPage() {
+  const [searchParams] = useSearchParams()
+  const categoryId = searchParams.get('category')
+
   const [modalOpen, setModalOpen] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
   const [scheduleMode, setScheduleMode] = useState(false)
@@ -181,6 +192,16 @@ export function InboxPage() {
     queryKey: ['events', 'all'],
     queryFn: () => eventsApi.list(),
   })
+
+  const { data: categories = [] } = useQuery({
+    queryKey: ['categories'],
+    queryFn: categoriesApi.list,
+  })
+
+  const activeCategory = categoryId ? categories.find((c) => c.id === categoryId) : null
+  const visibleEvents = categoryId
+    ? events.filter((e) => e.category?.id === categoryId)
+    : events.filter((e) => !e.category)
 
   function openCreate() {
     setEditingEvent(undefined)
@@ -202,7 +223,7 @@ export function InboxPage() {
 
   const groups = new Map<Group, Event[]>()
   for (const g of GROUP_ORDER) groups.set(g, [])
-  for (const e of events) groups.get(classify(e))!.push(e)
+  for (const e of visibleEvents) groups.get(classify(e))!.push(e)
 
   // sort each group
   for (const [key, list] of groups) {
@@ -214,12 +235,19 @@ export function InboxPage() {
     })
   }
 
-  const hasAny = events.length > 0
+  const hasAny = visibleEvents.length > 0
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <PageHeader
-        title="Inbox"
+        title={
+          activeCategory ? (
+            <span className="flex items-center gap-2">
+              <CategoryIcon icon={activeCategory.icon} color={activeCategory.color} size={15} strokeWidth={2} />
+              {activeCategory.name}
+            </span>
+          ) : 'Inbox'
+        }
         action={
           <Button size="sm" onClick={openCreate}>
             <Plus className="mr-1.5 h-3.5 w-3.5" strokeWidth={2.5} />

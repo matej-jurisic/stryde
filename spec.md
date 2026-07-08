@@ -82,7 +82,7 @@ Scheduling an event means setting its start datetime (and optionally end datetim
 
 ### Repeats
 
-Repeat rules follow a stored rule model (not pre-materialized instances). The next occurrence is generated on completion or skip of the current one.
+Repeat rules use a **virtual-rendering model**: future occurrences are computed from a stored rule and rendered by the calendar for any requested date range — they are never pre-stored in the database. Event lists (Inbox, Daily Plan, recommendations) show only the next upcoming instance.
 
 Supported patterns: daily, weekly on specific days, every N days/weeks/months, monthly on a date.
 
@@ -95,12 +95,26 @@ A rule is stored as a `Pattern` discriminator plus a JSON `Config`:
 | `everyN` | `{ "n": 3, "unit": "days" \| "weeks" \| "months" }` | every 3 weeks |
 | `monthly` | `{ "day": 15 }` (clamped to the month's last day) | the 15th monthly |
 
-Next-instance generation must be idempotent: re-marking an already done/skipped event does not spawn another instance.
-
-Behavior on completion: next instance generated immediately.
-Behavior on skip: next instance generated, current marked skipped (does not count toward goal progress).
+Behavior on completion: current instance is marked done; calendar continues showing future occurrences derived from the rule.
+Behavior on skip: current instance is marked skipped (does not count toward goal progress); calendar continues showing future occurrences.
 Behavior on reschedule: datetimes of current instance moved, repeat rule unchanged.
-Behavior on delete: user is prompted — delete this instance only, or all future instances.
+Behavior on delete: user is prompted — delete this instance only, or delete the rule (stops all future occurrences).
+
+### Base Events
+
+A Base Event is a reusable template that identifies a kind of work. Every event is linked to exactly one Base Event.
+
+| Field | Notes |
+|---|---|
+| Title | Required |
+| Category | Optional |
+| Goals | Optional |
+
+**Auto-creation:** When creating an event without linking to an existing Base Event, a new Base Event is silently created from the event's title, category, and goals.
+
+**Linking:** When creating a new event, the user can search for and link to an existing Base Event. The event's title, category, and goals are pre-filled from the Base Event and are editable after. The link UI lives in the event creation/edit modal — there is no standalone Base Events management page.
+
+Base Events are the grouping unit for the recommendation engine's day-of-week pattern detection.
 
 ### Creation
 
@@ -179,17 +193,16 @@ The start of a day (when "today" rolls over) is user-configurable in settings. S
 
 ### Recommendations (Rule-Based)
 
-Recommendations are ranked by the following rules in order:
+The recommendation panel answers: "what should I add to today's schedule?" It never surfaces events already placed on the calendar — those are visible in the plan and calendar views.
 
-1. Events due today, not yet done
-2. Events overdue (missed due date)
-3. Events linked to a Focus goal with lagging actual progress
-4. Events linked to Active goals with lagging actual progress
-5. Floating events linked to Focus goals
-6. Floating events linked to Active goals
-7. Floating events linked to Bench goals (only if nothing above exists)
+Recommendations are ranked:
 
-Within each tier, events are sorted by due date ascending (end datetime, falling back to start), then by duration ascending (shorter first, to fill gaps); events without a duration sort last. An event that qualifies for several tiers appears once, in its highest tier.
+1. Floating events linked to Focus goals
+2. Floating events linked to Active goals
+3. Base Events with a day-of-week pattern matching today (≥2 completions on this weekday in the past 6 weeks), where no instance is already on today's schedule — sorted by frequency descending within the tier
+4. Floating events linked to Bench goals (only if tiers 1-3 are empty)
+
+Within each tier, events are sorted by due date ascending (end datetime, falling back to start), then by duration ascending (shorter first); no-duration events sort last. An event appears at most once.
 
 **LLM expansion slot:** The recommendation engine is designed to be replaceable or augmentable with an LLM-powered planner. Out of scope for v1.
 

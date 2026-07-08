@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, Check } from 'lucide-react'
+import { Plus, Pencil, Trash2, Check, MoreHorizontal } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { goalsApi, checkpointsApi, ApiError } from '@/lib/api'
-import type { Goal, GoalStatus, Checkpoint } from '@/lib/types'
+import type { Goal, GoalStatus, Checkpoint, CheckpointSize } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { GoalModal } from '@/components/goals/GoalModal'
@@ -20,10 +20,17 @@ const TIER_META: Record<Tier, { label: string; dot: string; badge: 'focus' | 'ac
   bench:  { label: 'Bench',  dot: 'bg-goal-bench',   badge: 'bench' },
 }
 
+const SIZE_WEIGHT: Record<CheckpointSize, number> = {
+  tiny: 1, small: 2, normal: 3, big: 5, huge: 8,
+}
+
 function believedProgress(checkpoints: Checkpoint[]): number {
-  return checkpoints
+  const total = checkpoints.reduce((sum, c) => sum + SIZE_WEIGHT[c.size], 0)
+  if (total === 0) return 0
+  const reached = checkpoints
     .filter((c) => c.status === 'reached')
-    .reduce((sum, c) => sum + c.plannedProgress, 0)
+    .reduce((sum, c) => sum + SIZE_WEIGHT[c.size], 0)
+  return (reached / total) * 100
 }
 
 const STATUS_TRANSITIONS: Record<GoalStatus, { label: string; value: GoalStatus }[]> = {
@@ -91,8 +98,8 @@ function CheckpointRow({ checkpoint, goalId, isLast, onEdit }: CheckpointRowProp
       <div className={`flex min-w-0 flex-1 items-start justify-between gap-2 ${isLast ? '' : 'pb-3'}`}>
         <span className={`text-sm ${reached ? 'text-muted-foreground line-through' : 'text-foreground'}`}>
           {checkpoint.title}
-          {checkpoint.plannedProgress > 0 && (
-            <span className="ml-1.5 text-[11px] text-muted-foreground">+{checkpoint.plannedProgress}%</span>
+          {checkpoint.size !== 'normal' && (
+            <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">{checkpoint.size}</span>
           )}
         </span>
         <div className="flex shrink-0 items-center gap-0.5 transition-opacity opacity-100 md:opacity-0 group-hover:opacity-100">
@@ -111,6 +118,54 @@ function CheckpointRow({ checkpoint, goalId, isLast, onEdit }: CheckpointRowProp
         </div>
       </div>
     </li>
+  )
+}
+
+function StatusDropdown({
+  transitions,
+  isPending,
+  onSelect,
+}: {
+  transitions: { label: string; value: GoalStatus }[]
+  isPending: boolean
+  onSelect: (value: GoalStatus) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function close(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        disabled={isPending}
+        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+        title="Change status"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 z-50 mb-1 min-w-[148px] rounded-lg border border-border bg-card py-1 shadow-pop">
+          {transitions.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => { onSelect(t.value); setOpen(false) }}
+              className="w-full px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -224,17 +279,12 @@ function GoalCard({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalCardP
           <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
           Add checkpoint
         </button>
-        <div className="ml-auto flex flex-wrap gap-1.5">
-          {transitions.map((t) => (
-            <button
-              key={t.value}
-              onClick={() => statusMutation.mutate(t.value)}
-              disabled={statusMutation.isPending}
-              className="rounded-md border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
-            >
-              {t.label}
-            </button>
-          ))}
+        <div className="ml-auto">
+          <StatusDropdown
+            transitions={transitions}
+            isPending={statusMutation.isPending}
+            onSelect={(status) => statusMutation.mutate(status)}
+          />
         </div>
       </div>
 

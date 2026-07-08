@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Stryde.Core.Data;
 
@@ -10,27 +11,14 @@ using Stryde.Core.Data;
 namespace Stryde.Core.Migrations
 {
     [DbContext(typeof(StrydeDbContext))]
-    partial class StrydeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260708112911_AddCategoryIcon")]
+    partial class AddCategoryIcon
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
-
-            modelBuilder.Entity("BaseEventGoal", b =>
-                {
-                    b.Property<Guid>("BaseEventId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("GoalsId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("BaseEventId", "GoalsId");
-
-                    b.HasIndex("GoalsId");
-
-                    b.ToTable("BaseEventGoals", (string)null);
-                });
 
             modelBuilder.Entity("EventGoal", b =>
                 {
@@ -45,34 +33,6 @@ namespace Stryde.Core.Migrations
                     b.HasIndex("GoalsId");
 
                     b.ToTable("EventGoals", (string)null);
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.BaseEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("CategoryId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CategoryId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("BaseEvents");
                 });
 
             modelBuilder.Entity("Stryde.Core.Entities.Category", b =>
@@ -145,9 +105,6 @@ namespace Stryde.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("BaseEventId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("TEXT");
 
@@ -175,8 +132,6 @@ namespace Stryde.Core.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("BaseEventId");
 
                     b.HasIndex("CategoryId");
 
@@ -310,21 +265,6 @@ namespace Stryde.Core.Migrations
                     b.ToTable("UserSettings");
                 });
 
-            modelBuilder.Entity("BaseEventGoal", b =>
-                {
-                    b.HasOne("Stryde.Core.Entities.BaseEvent", null)
-                        .WithMany()
-                        .HasForeignKey("BaseEventId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Stryde.Core.Entities.Goal", null)
-                        .WithMany()
-                        .HasForeignKey("GoalsId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("EventGoal", b =>
                 {
                     b.HasOne("Stryde.Core.Entities.Event", null)
@@ -338,24 +278,6 @@ namespace Stryde.Core.Migrations
                         .HasForeignKey("GoalsId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.BaseEvent", b =>
-                {
-                    b.HasOne("Stryde.Core.Entities.Category", "Category")
-                        .WithMany()
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("Stryde.Core.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Category");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Stryde.Core.Entities.Category", b =>
@@ -382,11 +304,6 @@ namespace Stryde.Core.Migrations
 
             modelBuilder.Entity("Stryde.Core.Entities.Event", b =>
                 {
-                    b.HasOne("Stryde.Core.Entities.BaseEvent", "BaseEvent")
-                        .WithMany()
-                        .HasForeignKey("BaseEventId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Stryde.Core.Entities.Category", "Category")
                         .WithMany()
                         .HasForeignKey("CategoryId")
@@ -395,8 +312,6 @@ namespace Stryde.Core.Migrations
                     b.HasOne("Stryde.Core.Entities.RepeatRule", "RepeatRule")
                         .WithMany()
                         .HasForeignKey("RepeatRuleId");
-
-                    b.Navigation("BaseEvent");
 
                     b.Navigation("Category");
 

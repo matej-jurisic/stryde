@@ -1,6 +1,7 @@
 using Stryde.Core.Common;
 using Stryde.Core.Dtos;
 using Stryde.Core.Entities;
+using Stryde.Core.Enums;
 
 namespace Stryde.Tests.Unit;
 
@@ -26,42 +27,53 @@ public class CheckpointServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_rejects_total_planned_progress_over_100()
+    public async Task CreateAsync_defaults_to_normal_size()
     {
         var (userId, goalId) = await CreateUserWithGoalAsync();
-        await _ctx.CheckpointService.CreateAsync(goalId, userId, new CreateCheckpointRequest("First", 60, null));
 
-        var result = await _ctx.CheckpointService.CreateAsync(goalId, userId, new CreateCheckpointRequest("Second", 50, null));
-
-        Assert.False(result.IsSuccess);
-        Assert.Equal(ErrorType.Validation, result.Error!.Type);
-    }
-
-    [Fact]
-    public async Task CreateAsync_allows_total_of_exactly_100()
-    {
-        var (userId, goalId) = await CreateUserWithGoalAsync();
-        await _ctx.CheckpointService.CreateAsync(goalId, userId, new CreateCheckpointRequest("First", 60, null));
-
-        var result = await _ctx.CheckpointService.CreateAsync(goalId, userId, new CreateCheckpointRequest("Second", 40, null));
+        var result = await _ctx.CheckpointService.CreateAsync(goalId, userId,
+            new CreateCheckpointRequest("Learn a scale", CheckpointSize.normal, null));
 
         Assert.True(result.IsSuccess);
+        Assert.Equal("normal", result.Value!.Size);
     }
 
     [Fact]
-    public async Task UpdateAsync_excludes_own_value_from_the_cap()
+    public async Task CreateAsync_stores_specified_size()
     {
         var (userId, goalId) = await CreateUserWithGoalAsync();
-        var first = (await _ctx.CheckpointService.CreateAsync(goalId, userId, new CreateCheckpointRequest("First", 60, null))).Value!;
-        await _ctx.CheckpointService.CreateAsync(goalId, userId, new CreateCheckpointRequest("Second", 40, null));
 
-        // Re-saving at the same value stays at 100 total and must pass
-        var same = await _ctx.CheckpointService.UpdateAsync(first.Id, goalId, userId, new UpdateCheckpointRequest("First", 60, null));
-        Assert.True(same.IsSuccess);
+        var result = await _ctx.CheckpointService.CreateAsync(goalId, userId,
+            new CreateCheckpointRequest("Learn first full song", CheckpointSize.huge, null));
 
-        // Raising it would push the total to 101 and must fail
-        var over = await _ctx.CheckpointService.UpdateAsync(first.Id, goalId, userId, new UpdateCheckpointRequest("First", 61, null));
-        Assert.False(over.IsSuccess);
-        Assert.Equal(ErrorType.Validation, over.Error!.Type);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("huge", result.Value!.Size);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_changes_size()
+    {
+        var (userId, goalId) = await CreateUserWithGoalAsync();
+        var created = (await _ctx.CheckpointService.CreateAsync(goalId, userId,
+            new CreateCheckpointRequest("Learn a scale", CheckpointSize.small, null))).Value!;
+
+        var updated = await _ctx.CheckpointService.UpdateAsync(created.Id, goalId, userId,
+            new UpdateCheckpointRequest("Learn a scale", CheckpointSize.big, null));
+
+        Assert.True(updated.IsSuccess);
+        Assert.Equal("big", updated.Value!.Size);
+    }
+
+    [Fact]
+    public async Task CreateAsync_allows_any_number_of_checkpoints()
+    {
+        var (userId, goalId) = await CreateUserWithGoalAsync();
+
+        for (var i = 0; i < 5; i++)
+        {
+            var r = await _ctx.CheckpointService.CreateAsync(goalId, userId,
+                new CreateCheckpointRequest($"Step {i}", CheckpointSize.huge, null));
+            Assert.True(r.IsSuccess);
+        }
     }
 }

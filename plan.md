@@ -170,30 +170,57 @@ Unplanned correctness and polish work done after Phase 8:
 
 ---
 
-## Phase 9 — Repeat Rules
+## Phase 9 — Base Events & Recommendation Rework
 
-**Goal:** Events can repeat. The engine generates next instances correctly and handles deletion gracefully.
+**Goal:** Introduce Base Events as event templates and rework the recommendation engine to answer "what should I add to today's schedule?" rather than echoing what is already there.
+
+**Backend**
+- `BaseEvent` entity: `Id, UserId, Title, CategoryId?, CreatedAt`; many-to-many `BaseEvent ↔ Goal`
+- `Event.BaseEventId?` FK added via migration; null for existing events
+- `EventService.CreateAsync` auto-creates a `BaseEvent` (mirroring title, category, goals) when none is provided; sets `BaseEventId` on the new event
+- `GET /api/base-events/search?q=` — searches user's base events by title for the link UI
+- `RecommendationService` rework:
+  - Remove tiers 1 (due today) and 2 (overdue) — those belong in the inbox and daily plan
+  - Tier 1: floating events linked to Focus goals
+  - Tier 2: floating events linked to Active goals
+  - Tier 3: BaseEvents with ≥2 completions on today's weekday in the past 6 weeks, no instance on today's schedule — frequency desc within tier
+  - Tier 4: floating events linked to Bench goals (only when tiers 1-3 are empty)
+
+**Frontend**
+- Event creation/edit modal: "Link to existing" search field; on select, pre-fills title, category, goals from the chosen Base Event
+- Update recommendation panel tier labels and groups to match new tiers
+- Tier 3 recommendation items show the Base Event title with a "create from this" action (creates a new floating or scheduled event pre-filled from the Base Event)
+
+**Done when:** Every new event has a BaseEventId. Recommendations surface what to add to the schedule, not what's already on it. Pattern suggestions (tier 3) appear once ≥2 completions on a weekday exist.
+
+---
+
+## Phase 10 — Repeat Rules
+
+**Goal:** Events can repeat. The calendar renders all future occurrences virtually; lists show only the next upcoming instance.
 
 **Supported patterns:** daily, weekly on specific days, every N days/weeks/months, monthly on a date.
 
 **Backend**
 - Repeat rule stored as structured JSON (pattern type + config — schema is specced in spec.md, Repeats)
-- Recurrence date math goes through `Common/DayMath.cs` (user timezone + day boundary), same as recommendations
-- On event complete: next instance generated with same rule, linked to same goals
-- On event skip: same as complete, current marked skipped
-- Idempotent: re-marking an already done/skipped event must not spawn another instance
-- On event reschedule: datetimes updated, rule unchanged
-- On event delete: request body specifies `scope` — `this` (current instance only) or `future` (current + all future)
+- `Recurrence/RecurrenceCalculator.cs` — enumerates occurrences for a date range from a `RepeatRule` via `DayMath`; virtual (no DB writes for future instances)
+- Calendar endpoint expands repeat rules across the requested date range and merges with real events
+- Inbox and recommendations show only the next upcoming instance of a repeating event
+- On event complete/skip: current instance is marked; no new record created — future occurrences continue to be derived from the rule
+- Idempotent: re-marking an already done/skipped instance must not produce another
+- On event reschedule: datetimes of current instance updated, rule unchanged
+- On event delete: scope `this` (current instance only) or `future` (deletes the rule, stopping all future occurrences)
 
 **Frontend**
 - Repeat rule picker in the event creation/edit modal
-- On delete of a repeating event: prompt the user — "Delete this event only" or "Delete this and all future repeats"
+- Calendar renders virtual occurrences alongside real events
+- On delete of a repeating event: prompt — "Delete this event only" or "Delete this and all future repeats"
 
-**Done when:** A repeating event cycles correctly through completions, skips, and reschedules. Deletion prompt works for both scopes.
+**Done when:** A repeating daily event at 05:00-07:00 appears on every future day in the calendar. Only the next pending instance shows in lists. Completion, skip, reschedule, and both delete scopes work correctly.
 
 ---
 
-## Phase 10 — Progress Insights & Polish
+## Phase 11 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.
 
@@ -210,9 +237,8 @@ Unplanned correctness and polish work done after Phase 8:
 - Form validation error messages consistent across all modals
 - Empty states for all list views
 - Page titles and basic navigation structure finalized
-- Recommendation "lagging actual progress" filter for tiers 3/4 (deferred from Phase 8)
 - Drag-and-drop: drag a recommendation onto the calendar grid to schedule it; drag/resize existing calendar blocks to reschedule
-- Delete confirmations for events and goals (repeat-scope prompt ships with Phase 9)
+- Delete confirmations for events and goals (repeat-scope prompt ships with Phase 10)
 
 **Docker Compose production hardening**
 - `docker-compose.prod.yml` override (or env-based config) with production-appropriate settings
@@ -225,7 +251,7 @@ Unplanned correctness and polish work done after Phase 8:
 
 ---
 
-## Phase 11 — Daily Plan Page
+## Phase 12 — Daily Plan Page
 
 **Goal:** `/plan` becomes a real execution view instead of a placeholder. See spec.md (Daily Plan) for the full definition.
 
@@ -247,3 +273,4 @@ Unplanned correctness and polish work done after Phase 8:
 | 2 | ~~Recommendation rule tie-breaking within tiers~~ | Resolved in Phase 8: due date asc, duration asc, no-duration last, dedupe into highest tier |
 | 3 | Time ribbon layout details | Resolved in Phase 7 (hour grid, drag-create, snap to 15 min) |
 | 4 | Goal list ordering | Resolved in Phase 5: grouped Focus → Active → Bench → Closed, creation order within a group |
+| 5 | Base Event mutation policy | When a user edits a Base Event directly (if ever exposed), do linked event instances update? Currently: no — instances are independent after creation. |

@@ -17,78 +17,104 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         var ctx = await settings.GetDayContextAsync(userId);
         var today = date ?? DayMath.Today(ctx, now);
 
-        var events = await db.Events
+        var pendingEvents = await db.Events
             .Include(e => e.Goals)
+            .Include(e => e.Category)
             .Where(e => e.UserId == userId && e.Status == EventStatus.pending)
             .ToListAsync();
 
-        bool IsDueToday(Event e) => DayMath.EventDay(e, ctx) == today;
-
-        bool IsOverdue(Event e) =>
-            DayMath.EventDay(e, ctx) < today && DayMath.IsOverdue(e, ctx, now);
-
         bool IsFloating(Event e) => e.StartAt == null;
 
-        var result = new List<(int tier, Event e)>();
-        var seen = new HashSet<Guid>();
+        // BaseEventIds already on today's schedule — excluded from pattern suggestions
+        var todayBaseEventIds = pendingEvents
+            .Where(e => !IsFloating(e) && DayMath.EventDay(e, ctx) == today && e.BaseEventId.HasValue)
+            .Select(e => e.BaseEventId!.Value)
+            .ToHashSet();
 
-        void Add(int tier, Event e)
+        var eventRecs = new List<(int tier, Event e)>();
+        var seenEventIds = new HashSet<Guid>();
+
+        void AddEvent(int tier, Event e)
         {
-            if (seen.Add(e.Id))
-                result.Add((tier, e));
+            if (seenEventIds.Add(e.Id))
+                eventRecs.Add((tier, e));
         }
 
-        // Tier 1: due today
-        foreach (var e in events.Where(IsDueToday))
-            Add(1, e);
-
-        // Tier 2: overdue (not already captured in tier 1)
-        foreach (var e in events.Where(IsOverdue))
-            Add(2, e);
-
-        // Tiers 3 & 4: scheduled events linked to focus/active goals.
-        // "Lagging" filter is deferred to Phase 10 when the fixed progress increment is defined;
-        // for now, all pending scheduled events linked to focus/active goals qualify.
-        foreach (var e in events.Where(ev => !IsFloating(ev) && !IsDueToday(ev) && !IsOverdue(ev)))
-        {
+        // Tier 1: floating events linked to Focus goals
+        foreach (var e in pendingEvents.Where(IsFloating))
             if (e.Goals.Any(g => g.Status == GoalStatus.focus))
-                Add(3, e);
-            else if (e.Goals.Any(g => g.Status == GoalStatus.active))
-                Add(4, e);
+                AddEvent(1, e);
+
+        // Tier 2: floating events linked to Active goals
+        foreach (var e in pendingEvents.Where(IsFloating))
+            if (e.Goals.Any(g => g.Status == GoalStatus.active))
+                AddEvent(2, e);
+
+        // Tier 3: BaseEvents with a day-of-week pattern (≥2 completions on today's weekday in past 6 weeks)
+        var todayDow = today.DayOfWeek;
+
+        var recentCompleted = await db.Events
+            .Where(e => e.UserId == userId
+                && e.Status == EventStatus.done
+                && e.BaseEventId.HasValue
+                && e.StartAt != null)
+            .ToListAsync();
+
+        var patternedBaseEventIds = recentCompleted
+            .Where(e => e.StartAt!.Value >= now.AddDays(-42))
+            .GroupBy(e => e.BaseEventId!.Value)
+            .Select(g => new { BaseEventId = g.Key, Count = g.Count(e => DayMath.DayOf(e.StartAt!.Value, ctx).DayOfWeek == todayDow) })
+            .Where(x => x.Count >= 2 && !todayBaseEventIds.Contains(x.BaseEventId))
+            .OrderByDescending(x => x.Count)
+            .ToList();
+
+        List<BaseEventSummaryDto> baseEventRecs = [];
+        if (patternedBaseEventIds.Count > 0)
+        {
+            var ids = patternedBaseEventIds.Select(x => x.BaseEventId).ToList();
+            var baseEvents = await db.BaseEvents
+                .Include(b => b.Category)
+                .Include(b => b.Goals)
+                .Where(b => ids.Contains(b.Id))
+                .ToListAsync();
+
+            baseEventRecs = patternedBaseEventIds
+                .Select(p => baseEvents.FirstOrDefault(b => b.Id == p.BaseEventId))
+                .Where(b => b is not null)
+                .Select(b => BaseEventSummaryDto.FromEntity(b!))
+                .ToList();
         }
 
-        // Tiers 5 & 6: floating events linked to focus/active goals
-        foreach (var e in events.Where(IsFloating))
+        // Tier 4: floating events linked to Bench goals — only when tiers 1-3 are all empty
+        if (eventRecs.Count == 0 && baseEventRecs.Count == 0)
         {
-            if (e.Goals.Any(g => g.Status == GoalStatus.focus))
-                Add(5, e);
-            else if (e.Goals.Any(g => g.Status == GoalStatus.active))
-                Add(6, e);
-        }
-
-        // Tier 7: floating events linked to bench goals — only when tiers 1-6 are empty
-        if (result.Count == 0)
-        {
-            foreach (var e in events.Where(IsFloating))
-            {
+            foreach (var e in pendingEvents.Where(IsFloating))
                 if (e.Goals.Any(g => g.Status == GoalStatus.bench))
-                    Add(7, e);
-            }
+                    AddEvent(4, e);
         }
 
-        static DateTimeOffset SortDate(Event e) =>
-            e.EndAt ?? e.StartAt ?? DateTimeOffset.MaxValue;
-
+        static DateTimeOffset SortDate(Event e) => e.EndAt ?? e.StartAt ?? DateTimeOffset.MaxValue;
         static double Duration(Event e) =>
             e.StartAt.HasValue && e.EndAt.HasValue
                 ? (e.EndAt.Value - e.StartAt.Value).TotalMinutes
                 : double.MaxValue;
 
-        return result
-            .OrderBy(x => x.tier)
-            .ThenBy(x => SortDate(x.e))
-            .ThenBy(x => Duration(x.e))
-            .Select(x => new RecommendationDto(x.tier, EventDto.FromEntity(x.e, ctx, now)))
-            .ToList();
+        var result = new List<RecommendationDto>();
+
+        // Tiers 1 and 2 (event type), sorted by date then duration within each tier
+        foreach (var (tier, e) in eventRecs.Where(x => x.tier < 3)
+                     .OrderBy(x => x.tier).ThenBy(x => SortDate(x.e)).ThenBy(x => Duration(x.e)))
+            result.Add(new RecommendationDto(tier, "event", EventDto.FromEntity(e, ctx, now), null));
+
+        // Tier 3 (base_event pattern), already in frequency-desc order
+        foreach (var be in baseEventRecs)
+            result.Add(new RecommendationDto(3, "base_event", null, be));
+
+        // Tier 4 (bench fallback), sorted by date then duration
+        foreach (var (tier, e) in eventRecs.Where(x => x.tier == 4)
+                     .OrderBy(x => SortDate(x.e)).ThenBy(x => Duration(x.e)))
+            result.Add(new RecommendationDto(tier, "event", EventDto.FromEntity(e, ctx, now), null));
+
+        return result;
     }
 }

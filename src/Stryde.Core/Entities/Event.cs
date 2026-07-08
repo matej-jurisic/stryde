@@ -13,6 +13,11 @@ public class Event
     public Guid? RepeatRuleId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    public Guid? CategoryId { get; set; }
+    public Guid? BaseEventId { get; set; }
+
     public RepeatRule? RepeatRule { get; set; }
+    public Category? Category { get; set; }
+    public BaseEvent? BaseEvent { get; set; }
     public List<Goal> Goals { get; set; } = [];
 }

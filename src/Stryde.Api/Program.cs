@@ -74,6 +74,8 @@ app.MapEventEndpoints();
 app.MapCheckpointEndpoints();
 app.MapSettingsEndpoints();
 app.MapRecommendationEndpoints();
+app.MapCategoryEndpoints();
+app.MapBaseEventEndpoints();
 
 app.MapFallbackToFile("index.html");
 

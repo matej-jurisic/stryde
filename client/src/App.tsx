@@ -44,8 +44,8 @@ function AppRoutes() {
         <Route path="/plan"     element={<PlanPage />} />
         <Route path="/inbox"    element={<InboxPage />} />
         <Route path="/calendar" element={<CalendarPage />} />
-        <Route path="/goals"    element={<GoalsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/goals"      element={<GoalsPage />} />
+<Route path="/settings"   element={<SettingsPage />} />
         <Route path="/"       element={<Navigate to="/plan" replace />} />
         <Route path="*"       element={<Navigate to="/plan" replace />} />
       </Routes>

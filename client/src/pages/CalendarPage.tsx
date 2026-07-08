@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { eventsApi, settingsApi } from '@/lib/api'
-import type { Event } from '@/lib/types'
-import { Button } from '@/components/ui/Button'
+import type { BaseEventSummary, Event } from '@/lib/types'
 import { EventModal } from '@/components/events/EventModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 
@@ -54,14 +53,14 @@ function formatDateInput(d: Date): string {
 // ── Label helpers ──────────────────────────────────────────────────────────
 
 function hourLabel(h: number): string {
-  return String(h).padStart(2, '0')
+  return `${String(h).padStart(2, '0')}:00`
 }
 
 function timeLabel(iso: string): string {
   const d = new Date(iso)
   const h = d.getHours()
   const m = d.getMinutes()
-  return m === 0 ? `${h}:00` : `${h}:${String(m).padStart(2, '0')}`
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 function pageTitle(view: 'day' | 'week', days: Date[]): string {
@@ -146,40 +145,36 @@ function layoutDay(events: Event[]): LayoutEvent[] {
 
 // ── Event coloring ──────────────────────────────────────────────────────────
 
-type EventColors = { bg: string; leftColor: string; textClass: string }
+type EventColors = { bgClass: string; bgHex?: string; leftColor: string; textClass: string }
 
 function eventColors(event: Event, overdue: boolean): EventColors {
   if (overdue) {
     return {
-      bg: 'bg-destructive/10',
+      bgClass: 'bg-destructive/10',
       leftColor: 'var(--color-destructive)',
       textClass: 'text-destructive',
     }
   }
   const g = event.goals[0]
-  if (!g) {
-    return { bg: 'bg-muted', leftColor: 'var(--color-border)', textClass: 'text-foreground' }
+  if (g) {
+    switch (g.status) {
+      case 'focus':
+        return { bgClass: 'bg-goal-focus/10', leftColor: 'var(--color-goal-focus)', textClass: 'text-goal-focus' }
+      case 'active':
+        return { bgClass: 'bg-goal-active/10', leftColor: 'var(--color-goal-active)', textClass: 'text-goal-active' }
+      default:
+        return { bgClass: 'bg-goal-bench/10', leftColor: 'var(--color-goal-bench)', textClass: 'text-muted-foreground' }
+    }
   }
-  switch (g.status) {
-    case 'focus':
-      return {
-        bg: 'bg-goal-focus/10',
-        leftColor: 'var(--color-goal-focus)',
-        textClass: 'text-goal-focus',
-      }
-    case 'active':
-      return {
-        bg: 'bg-goal-active/10',
-        leftColor: 'var(--color-goal-active)',
-        textClass: 'text-goal-active',
-      }
-    default:
-      return {
-        bg: 'bg-goal-bench/10',
-        leftColor: 'var(--color-goal-bench)',
-        textClass: 'text-muted-foreground',
-      }
+  if (event.category) {
+    return {
+      bgClass: '',
+      bgHex: event.category.color,
+      leftColor: event.category.color,
+      textClass: 'text-foreground',
+    }
   }
+  return { bgClass: 'bg-muted', leftColor: 'var(--color-border)', textClass: 'text-foreground' }
 }
 
 // ── EventBlock ──────────────────────────────────────────────────────────────
@@ -192,7 +187,7 @@ function EventBlock({
   onClick: (e: Event) => void
 }) {
   const { event, col, totalCols, topPx, heightPx } = layout
-  const { bg, leftColor, textClass } = eventColors(event, event.isOverdue)
+  const { bgClass, bgHex, leftColor, textClass } = eventColors(event, event.isOverdue)
   const isDone = event.status !== 'pending'
 
   const GAP = 2
@@ -217,7 +212,10 @@ function EventBlock({
         onClick(event)
       }}
     >
-      <div className={`absolute inset-0 ${bg}`} />
+      <div
+        className={`absolute inset-0 ${bgClass}`}
+        style={bgHex ? { backgroundColor: bgHex + '22' } : undefined}
+      />
       <div className="relative flex h-full">
         <div style={{ width: 3, minWidth: 3, background: leftColor }} className="shrink-0" />
         <div className="min-w-0 flex-1 px-1.5 py-0.5">
@@ -303,7 +301,7 @@ function DayColumn({ day, allEvents, onEventClick, overlay, isToday, borderLeft 
       {Array.from({ length: 24 }, (_, h) => (
         <div
           key={`hh${h}`}
-          className="absolute inset-x-0 border-t border-border/40"
+          className="absolute inset-x-0 border-t border-border/25"
           style={{ top: h * HOUR_PX + HOUR_PX / 2 }}
         />
       ))}
@@ -337,12 +335,18 @@ function DayColumn({ day, allEvents, onEventClick, overlay, isToday, borderLeft 
 type ViewMode = 'day' | 'week'
 
 export function CalendarPage() {
-  const [view, setView] = useState<ViewMode>('day')
+  const [view, setView] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('stryde-calendar-view')
+    return saved === 'week' ? 'week' : 'day'
+  })
+  const [viewDropOpen, setViewDropOpen] = useState(false)
+  const viewDropRef = useRef<HTMLDivElement>(null)
   const [current, setCurrent] = useState(() => new Date())
   const [modalOpen, setModalOpen] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
   const [defaultStartAt, setDefaultStartAt] = useState<string | undefined>()
   const [defaultEndAt, setDefaultEndAt] = useState<string | undefined>()
+  const [defaultBaseEvent, setDefaultBaseEvent] = useState<BaseEventSummary | undefined>()
   const [focusStartAt, setFocusStartAt] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -405,6 +409,15 @@ export function CalendarPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!viewDropOpen) return
+    function close(e: MouseEvent) {
+      if (viewDropRef.current && !viewDropRef.current.contains(e.target as Node)) setViewDropOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [viewDropOpen])
+
   daysRef.current = days
 
   // Non-passive touchmove so we can preventDefault during drag (blocks scroll)
@@ -413,16 +426,18 @@ export function CalendarPage() {
     if (!el) return
     function onTouchMove(e: TouchEvent) {
       const touch = e.touches[0]
-      // Cancel hold if finger moves too far before timer fires
+      // During the hold window: prevent scroll; cancel if finger moves too far
       if (holdTimerRef.current !== null) {
         if (!touchStartRef.current) return
         const dx = touch.clientX - touchStartRef.current.clientX
         const dy = touch.clientY - touchStartRef.current.clientY
-        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+        if (Math.sqrt(dx * dx + dy * dy) > 20) {
           clearTimeout(holdTimerRef.current)
           holdTimerRef.current = null
           touchStartRef.current = null
+          return
         }
+        e.preventDefault()
         return
       }
       if (!dragRef.current?.isDrag) return
@@ -478,7 +493,17 @@ export function CalendarPage() {
     setCurrent(effectiveToday)
   }
 
+  function openFromBaseEvent(baseEvent: BaseEventSummary) {
+    setEditingEvent(undefined)
+    setDefaultStartAt(undefined)
+    setDefaultEndAt(undefined)
+    setDefaultBaseEvent(baseEvent)
+    setFocusStartAt(true)
+    setModalOpen(true)
+  }
+
   function openCreate(startAt?: string, endAt?: string) {
+    setDefaultBaseEvent(undefined)
     setEditingEvent(undefined)
     setDefaultStartAt(startAt)
     setDefaultEndAt(endAt)
@@ -487,6 +512,7 @@ export function CalendarPage() {
   }
 
   function openEdit(event: Event) {
+    setDefaultBaseEvent(undefined)
     setEditingEvent(event)
     setDefaultStartAt(undefined)
     setDefaultEndAt(undefined)
@@ -672,14 +698,11 @@ export function CalendarPage() {
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      {/* Recommendation panel — day view only */}
-      {view === 'day' && (
-        <RecommendationPanel
-          date={formatDateInput(days[0])}
-          onEventClick={openEdit}
-          onNewEvent={() => openCreate()}
-        />
-      )}
+      <RecommendationPanel
+        date={formatDateInput(effectiveToday)}
+        onEventClick={openEdit}
+        onBaseEventClick={openFromBaseEvent}
+      />
 
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
       {/* Header */}
@@ -721,34 +744,32 @@ export function CalendarPage() {
             className="hidden sm:block h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
           />
 
-          {/* View toggle */}
-          <div className="flex overflow-hidden rounded-md border border-border">
+          {/* View dropdown */}
+          <div className="relative" ref={viewDropRef}>
             <button
-              onClick={() => setView('day')}
-              className={`h-8 px-3 text-xs font-medium transition-colors ${
-                view === 'day'
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:bg-muted/50'
-              }`}
+              onClick={() => setViewDropOpen((o) => !o)}
+              className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             >
-              Day
+              {view === 'day' ? 'Day' : 'Week'}
+              <ChevronDown className="h-3 w-3 text-muted-foreground" strokeWidth={2} />
             </button>
-            <button
-              onClick={() => setView('week')}
-              className={`h-8 border-l border-border px-3 text-xs font-medium transition-colors ${
-                view === 'week'
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:bg-muted/50'
-              }`}
-            >
-              Week
-            </button>
+            {viewDropOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1 min-w-[80px] rounded-lg border border-border bg-card py-1 shadow-pop">
+                {(['day', 'week'] as ViewMode[]).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => { setView(v); localStorage.setItem('stryde-calendar-view', v); setViewDropOpen(false) }}
+                    className={`w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted ${
+                      view === v ? 'font-semibold text-foreground' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {v === 'day' ? 'Day' : 'Week'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          <Button size="sm" onClick={() => openCreate()} className="!px-2 sm:!px-3">
-            <Plus className="h-3.5 w-3.5 sm:mr-1" strokeWidth={2.5} />
-            <span className="hidden sm:inline">New Event</span>
-          </Button>
         </div>
       </header>
 
@@ -824,6 +845,7 @@ export function CalendarPage() {
         focusStartAt={focusStartAt}
         defaultStartAt={defaultStartAt}
         defaultEndAt={defaultEndAt}
+        defaultBaseEvent={defaultBaseEvent}
       />
     </div>
   )

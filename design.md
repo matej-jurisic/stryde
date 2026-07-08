@@ -25,9 +25,9 @@ Modern, clean, minimalist web-based dashboard. Spacious, organized, strictly pro
 
 ### Accent & Brand Colors
 
-- **Primary Brand:** Vibrant Purple `#8B5CF6`. Logo text, active nav icons, primary action buttons, checkboxes (checked state), active progress bars.
+- **Primary Brand:** Slate Blue `#8499B1`. Logo text, active nav icons, primary action buttons, checkboxes (checked state), active progress bars.
 - **Goal Status Colors (calendar blocks and tags):**
-  - Focus Goals: Purple/Pink tones
+  - Focus Goals: Primary/blue tones
   - Active Goals: Teal/Light Blue tones
   - Bench Goals: Neutral Gray
 - Event blocks use a very light (low-opacity) background of their parent goal's color, with a solid 1px border of the same color. Events without goals use neutral gray.
@@ -60,9 +60,9 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 ### 1. Left Sidebar (240px fixed)
 
 - White background (`--card`).
-- **Top:** Brand name "Stryde" in `text-primary` (purple), semibold. Bottom border.
+- **Top:** Brand name "Stryde" in `text-primary`, semibold. Bottom border.
 - **Middle:** Vertical nav. Items: icon + label. Gap `gap-0.5` between items. Padding `px-3 py-4`.
-- **Active nav item:** `bg-accent` (gray tint) pill. Icon in `text-primary` (purple). Label in `text-foreground font-semibold`.
+- **Active nav item:** `bg-accent` (gray tint) pill. Icon in `text-primary`. Label in `text-foreground font-semibold`.
 - **Inactive nav item:** Icon and label both in `text-muted-foreground`. Hover: `bg-accent`.
 - **Bottom (pinned):** Settings item, separated by `border-t`.
 - Sidebar is `sticky top-0 h-screen` — does not scroll.
@@ -74,7 +74,7 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - **Top:** Column header ("Recommendations"), followed by a full-width outlined "+ New Event" button.
 - **Content:** Events grouped by recommendation tier label (e.g., "Due Today", "Overdue", "Focus", "Floating").
 - **Event list items:**
-  - Custom checkbox (square, 4px radius, purple fill with white checkmark when done).
+  - Custom checkbox (square, 4px radius, primary fill with white checkmark when done).
   - Event title (strikethrough + muted when done/skipped).
   - Duration floated right (e.g., `00:30`).
   - Goal tag pills below the title (small text, color-matched to goal status).
@@ -119,7 +119,7 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 ### Badges / Tags
 
 - Small pill: `px-2 py-0.5`, `rounded-full`, `text-xs font-medium`.
-- Colors via `color-mix`: soft tinted bg + saturated text. Tones: `neutral | violet | red | blue | amber | green`.
+- Colors via `color-mix`: soft tinted bg + saturated text. Tones: `neutral | red | blue | amber | green`.
 
 ### Modals
 

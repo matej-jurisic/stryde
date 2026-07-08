@@ -1,5 +1,5 @@
 import { useAuthStore } from '@/store/auth'
-import type { AuthResponse, User, Goal, GoalStatus, Checkpoint, CheckpointStatus, UserSettings, Recommendation } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Event, BaseEventSummary } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -66,21 +66,21 @@ export const eventsApi = {
     if (params?.startFrom) q.set('startFrom', params.startFrom)
     if (params?.endBefore) q.set('endBefore', params.endBefore)
     if (params?.floating) q.set('floating', 'true')
-    return request<import('./types').Event[]>(`/api/events${q.size ? `?${q}` : ''}`)
+    return request<Event[]>(`/api/events${q.size ? `?${q}` : ''}`)
   },
 
-  get: (id: string) => request<import('./types').Event>(`/api/events/${id}`),
+  get: (id: string) => request<Event>(`/api/events/${id}`),
 
-  create: (body: { title: string; startAt?: string | null; endAt?: string | null; goalIds?: string[] }) =>
-    request<import('./types').Event>('/api/events', { method: 'POST', body: JSON.stringify(body) }),
+  create: (body: { title: string; startAt?: string | null; endAt?: string | null; goalIds?: string[]; categoryId?: string | null; baseEventId?: string | null }) =>
+    request<Event>('/api/events', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title: string; startAt?: string | null; endAt?: string | null; goalIds?: string[] }) =>
-    request<import('./types').Event>(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  update: (id: string, body: { title: string; startAt?: string | null; endAt?: string | null; goalIds?: string[]; categoryId?: string | null }) =>
+    request<Event>(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (id: string) => request<void>(`/api/events/${id}`, { method: 'DELETE' }),
 
   setStatus: (id: string, status: import('./types').EventStatus) =>
-    request<import('./types').Event>(`/api/events/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+    request<Event>(`/api/events/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
 }
 
 export const goalsApi = {
@@ -105,10 +105,10 @@ export const goalsApi = {
 }
 
 export const checkpointsApi = {
-  create: (goalId: string, body: { title: string; plannedProgress: number; targetDate?: string | null }) =>
+  create: (goalId: string, body: { title: string; size: string; targetDate?: string | null }) =>
     request<Checkpoint>(`/api/goals/${goalId}/checkpoints`, { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (goalId: string, id: string, body: { title: string; plannedProgress: number; targetDate?: string | null }) =>
+  update: (goalId: string, id: string, body: { title: string; size: string; targetDate?: string | null }) =>
     request<Checkpoint>(`/api/goals/${goalId}/checkpoints/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (goalId: string, id: string) =>
@@ -122,6 +122,23 @@ export const settingsApi = {
   get: () => request<UserSettings>('/api/settings'),
   update: (body: { maxFocusGoals: number; dayBoundaryTime: string; timezone: string }) =>
     request<UserSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
+}
+
+export const categoriesApi = {
+  list: () => request<Category[]>('/api/categories'),
+  create: (body: { name: string; color: string; icon?: string | null }) =>
+    request<Category>('/api/categories', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: string, body: { name: string; color: string; icon?: string | null }) =>
+    request<Category>(`/api/categories/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  delete: (id: string) => request<void>(`/api/categories/${id}`, { method: 'DELETE' }),
+}
+
+export const baseEventsApi = {
+  search: (q?: string) => {
+    const params = new URLSearchParams()
+    if (q) params.set('q', q)
+    return request<BaseEventSummary[]>(`/api/base-events/search${params.size ? `?${params}` : ''}`)
+  },
 }
 
 export const recommendationsApi = {

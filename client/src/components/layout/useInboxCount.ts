@@ -8,5 +8,5 @@ export function useInboxCount() {
     queryFn: () => eventsApi.list(),
     staleTime: 30_000,
   })
-  return data.filter((e) => e.status === 'pending' && !e.startAt).length
+  return data.filter((e) => e.status === 'pending' && !e.startAt && !e.category).length
 }

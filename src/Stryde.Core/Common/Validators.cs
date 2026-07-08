@@ -11,10 +11,12 @@ public static class Validators
         return null;
     }
 
-    public static Error? ValidatePlannedProgress(decimal value)
+    public static Error? ValidateColor(string? color)
     {
-        if (value < 0 || value > 100)
-            return new Error(ErrorType.Validation, "Planned progress must be between 0 and 100.");
+        if (string.IsNullOrWhiteSpace(color))
+            return new Error(ErrorType.Validation, "Color is required.");
+        if (!System.Text.RegularExpressions.Regex.IsMatch(color, @"^#[0-9A-Fa-f]{6}$"))
+            return new Error(ErrorType.Validation, "Color must be a 6-digit hex value (e.g. #3b82f6).");
         return null;
     }
 
