@@ -134,11 +134,22 @@ export const categoriesApi = {
 }
 
 export const baseEventsApi = {
-  search: (q?: string) => {
-    const params = new URLSearchParams()
-    if (q) params.set('q', q)
-    return request<BaseEventSummary[]>(`/api/base-events/search${params.size ? `?${params}` : ''}`)
-  },
+  listByGoal: (goalId: string) =>
+    request<BaseEventSummary[]>(`/api/goals/${goalId}/base-events`),
+
+  create: (goalId: string, body: { title: string; categoryId?: string | null }) =>
+    request<BaseEventSummary>(`/api/goals/${goalId}/base-events`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  update: (id: string, body: { title: string; categoryId?: string | null }) =>
+    request<BaseEventSummary>(`/api/base-events/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  delete: (id: string) => request<void>(`/api/base-events/${id}`, { method: 'DELETE' }),
 }
 
 export const recommendationsApi = {

@@ -49,13 +49,6 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
             if (be is null) return Result<EventDto>.Fail(new Error(ErrorType.NotFound, "Base event not found."));
             ev.BaseEventId = be.Id;
         }
-        else
-        {
-            var be = new BaseEvent { UserId = userId, Title = ev.Title, CategoryId = ev.CategoryId };
-            be.Goals.AddRange(ev.Goals);
-            db.BaseEvents.Add(be);
-            ev.BaseEventId = be.Id;
-        }
 
         db.Events.Add(ev);
         await db.SaveChangesAsync();
@@ -170,22 +163,8 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
         var ev = await db.Events.FirstOrDefaultAsync(e => e.Id == id && e.UserId == userId);
         if (ev is null) return Result.Fail(new Error(ErrorType.NotFound, "Event not found."));
 
-        var baseEventId = ev.BaseEventId;
         db.Events.Remove(ev);
         await db.SaveChangesAsync();
-
-        // Clean up the BaseEvent if no other events reference it
-        if (baseEventId.HasValue)
-        {
-            var hasOtherEvents = await db.Events.AnyAsync(e => e.BaseEventId == baseEventId.Value);
-            if (!hasOtherEvents)
-            {
-                var be = await db.BaseEvents.FindAsync(baseEventId.Value);
-                if (be is not null) db.BaseEvents.Remove(be);
-                await db.SaveChangesAsync();
-            }
-        }
-
         return Result.Success();
     }
 

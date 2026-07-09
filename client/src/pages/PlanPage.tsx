@@ -182,20 +182,21 @@ function AgendaRow({ event, onOpen }: AgendaRowProps) {
         )}
       </div>
 
-      {/* Skip button (hover) */}
-      {isPending && (
-        <button
-          disabled={busy}
-          onClick={() => statusMutation.mutate('skipped')}
-          title="Skip"
-          className="mt-0.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
-        >
-          <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <line x1="3" y1="3" x2="13" y2="13" />
-            <line x1="13" y1="3" x2="3" y2="13" />
-          </svg>
-        </button>
-      )}
+      {/* Skip button (hover) — always rendered to keep layout stable */}
+      <button
+        disabled={busy || !isPending}
+        onClick={() => { if (isPending) statusMutation.mutate('skipped') }}
+        title="Skip"
+        className={[
+          'mt-0.5 shrink-0 text-muted-foreground hover:text-foreground',
+          isPending ? '' : 'invisible pointer-events-none',
+        ].join(' ')}
+      >
+        <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <line x1="3" y1="3" x2="13" y2="13" />
+          <line x1="13" y1="3" x2="3" y2="13" />
+        </svg>
+      </button>
     </li>
   )
 }
@@ -293,7 +294,7 @@ export function PlanPage() {
     <div className="flex flex-1 overflow-hidden">
       <RecommendationPanel
         date={dateStr}
-        onEventClick={openDetail}
+        onEventClick={openEdit}
         onBaseEventClick={openFromBaseEvent}
         mobileOpen={drawerOpen}
         onMobileClose={() => setDrawerOpen(false)}

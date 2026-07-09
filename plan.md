@@ -195,6 +195,32 @@ Unplanned correctness and polish work done after Phase 8:
 
 ---
 
+## Base Event Redesign (July 2026) — unplanned
+
+**Problem:** Auto-creation on every event produce silent "ghost" base events the user never intended as templates. The recommendation tier-3 pattern detector fires on this noise, yielding spurious suggestions. The user has no way to see or curate base events, so the list grows unchecked.
+
+**Decision:** Base events become explicit, goal-scoped templates that the user creates intentionally.
+
+**Data model change**
+- `BaseEvent.GoalId` (required FK) replaces the many-to-many `BaseEvent ↔ Goal` join table — a base event belongs to exactly one goal.
+- `Event.BaseEventId?` stays optional; events without a base event link are valid.
+- Auto-creation in `EventService.CreateAsync` is removed.
+
+**API**
+- `POST /api/goals/{goalId}/base-events` — create a template under a goal
+- `GET /api/goals/{goalId}/base-events` — list a goal's templates
+- `PUT /api/base-events/{id}`, `DELETE /api/base-events/{id}` — edit/delete
+- `GET /api/base-events/search?q=` kept (or made goal-scoped) for event modal lookup
+
+**Frontend**
+- Goals detail view: template list per goal; add/edit/delete base events inline
+- Event modal: once a goal is selected, show that goal's base events as template options; selecting one pre-fills title and category
+- Remove the cross-goal free-text base event search from the event modal
+
+**Migration notes:** existing auto-created base events with no goal links are deleted; those with one or more links have `GoalId` set to their first linked goal, join table dropped.
+
+---
+
 ## Windowed Events (July 2026) ✅
 
 Unplanned addition after Phase 9. Adds a third event scheduling state between floating and fully scheduled.

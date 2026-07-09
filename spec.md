@@ -118,19 +118,21 @@ Behavior on delete: user is prompted — delete this instance only, or delete th
 
 ### Base Events
 
-A Base Event is a reusable template that identifies a kind of work. Every event is linked to exactly one Base Event.
+A Base Event is a reusable activity template that belongs to a specific goal. It represents a recurring kind of work within that goal.
 
 | Field | Notes |
 |---|---|
+| Goal | Required — the goal this template belongs to |
 | Title | Required |
 | Category | Optional |
-| Goals | Optional |
 
-**Auto-creation:** When creating an event without linking to an existing Base Event, a new Base Event is silently created from the event's title, category, and goals.
+Base events are created and managed from within the Goals view — there is no standalone Base Events management page. When a goal has base events, they appear as a template list on the goal detail view.
 
-**Linking:** When creating a new event, the user can search for and link to an existing Base Event. The event's title, category, and goals are pre-filled from the Base Event and are editable after. The link UI lives in the event creation/edit modal — there is no standalone Base Events management page.
+**No auto-creation.** Base events exist only when the user explicitly creates them under a goal. Creating an event with no base event link is valid — that event simply has no template ancestry and will not contribute to tier-3 pattern suggestions.
 
-Base Events are the grouping unit for the recommendation engine's day-of-week pattern detection.
+**Linking on event creation:** When creating or editing an event, if the event is linked to a goal, the user can optionally pick one of that goal's base events as the template. The event's title and category are pre-filled from the template and remain editable after.
+
+Base Events are the grouping unit for the recommendation engine's day-of-week pattern detection (tier 3).
 
 ### Creation
 

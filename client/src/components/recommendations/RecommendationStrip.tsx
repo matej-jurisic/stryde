@@ -65,7 +65,7 @@ function EventRecItem({ event, onSchedule }: { event: Event; onSchedule: () => v
       <button
         onClick={onSchedule}
         title={event.startAt ? 'Edit event' : 'Schedule event'}
-        className="mt-0.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-primary"
+        className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary"
       >
         <CalendarPlus className="h-4 w-4" />
       </button>
@@ -74,27 +74,20 @@ function EventRecItem({ event, onSchedule }: { event: Event; onSchedule: () => v
 }
 
 function BaseEventRecItem({ baseEvent, onCreate }: { baseEvent: BaseEventSummary; onCreate: () => void }) {
-  const primaryGoal =
-    baseEvent.goals.find((g) => g.status === 'focus') ??
-    baseEvent.goals.find((g) => g.status === 'active') ??
-    baseEvent.goals[0]
-
   return (
     <li className="group flex items-start gap-2 rounded-lg border border-transparent px-2 py-2.5 transition-colors hover:border-border hover:bg-muted/40">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-foreground">{baseEvent.title}</p>
-        {primaryGoal && (
-          <div className="mt-1.5">
-            <Badge tone={goalTone(primaryGoal.status)} className="max-w-[160px] truncate block">
-              {primaryGoal.title}
-            </Badge>
-          </div>
-        )}
+        <div className="mt-1.5">
+          <Badge tone={goalTone(baseEvent.goal.status)} className="max-w-[160px] truncate block">
+            {baseEvent.goal.title}
+          </Badge>
+        </div>
       </div>
       <button
         onClick={onCreate}
         title="Create event from habit"
-        className="mt-0.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-primary"
+        className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary"
       >
         <CalendarPlus className="h-4 w-4" />
       </button>

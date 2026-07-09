@@ -64,9 +64,10 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<BaseEvent>()
-            .HasMany(b => b.Goals)
+            .HasOne(b => b.Goal)
             .WithMany()
-            .UsingEntity(j => j.ToTable("BaseEventGoals"));
+            .HasForeignKey(b => b.GoalId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<UserSettings>()
             .HasKey(us => us.UserId);

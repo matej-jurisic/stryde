@@ -102,7 +102,7 @@ function CategoryCard({ category }: { category: Category }) {
         <CategoryIcon icon={category.icon} color={category.color} size={18} strokeWidth={2} />
       </div>
       <span className="flex-1 text-sm font-medium text-foreground">{category.name}</span>
-      <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="flex items-center gap-0.5">
         <button
           onClick={() => setEditing(true)}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"

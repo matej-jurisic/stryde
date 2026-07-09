@@ -139,7 +139,7 @@ function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
       </div>
 
       {/* Actions */}
-      <div className="flex shrink-0 items-center gap-0.5 transition-opacity opacity-100 md:opacity-0 group-hover:opacity-100">
+      <div className="flex shrink-0 items-center gap-0.5">
         {isPending && (
           <>
             <button

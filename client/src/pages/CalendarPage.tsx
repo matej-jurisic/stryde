@@ -292,14 +292,18 @@ function EventBlock({
   layout,
   onClick,
   onMoveStart,
+  onResizeStart,
   suppressClickRef,
   dimmed,
+  isResizing,
 }: {
   layout: LayoutEvent
   onClick: (e: Event) => void
   onMoveStart?: (e: React.PointerEvent, topPx: number) => void
+  onResizeStart?: (e: React.PointerEvent, side: 'top' | 'bottom') => void
   suppressClickRef?: { current: boolean }
   dimmed?: boolean
+  isResizing?: boolean
 }) {
   const { event, col, totalCols, topPx, heightPx } = layout
   const { bgClass, bgHex, leftColor, textClass } = eventColors(event, event.isOverdue)
@@ -313,49 +317,85 @@ function EventBlock({
     ? `${timeLabel(event.startAt)}${event.endAt ? ` – ${timeLabel(event.endAt)}` : ''}`
     : ''
 
+  // Handles show always when resizing (touch mode), or on mouse hover via CSS
+  const handleVisibility = isResizing ? 'flex' : 'hidden group-hover/calev:flex'
+
+  function stopAll(e: React.SyntheticEvent) {
+    e.stopPropagation()
+  }
+
   return (
-    <button
-      className={`absolute overflow-hidden rounded-[4px] border border-border/50 bg-card text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-50' : ''} ${dimmed ? 'opacity-20' : ''}`}
+    <div
+      className={`absolute group/calev ${dimmed ? 'opacity-20' : ''}`}
+      data-event-id={event.id}
       style={{
         top: topPx + GAP,
         height: Math.max(heightPx - GAP, 20),
         left: `calc(${leftPct}% + ${GAP}px)`,
         width: `calc(${widthPct}% - ${GAP * 2}px)`,
-      }}
-      onPointerDown={(e) => {
-        if (e.pointerType === 'mouse' && e.button !== 0) return
-        onMoveStart?.(e, topPx)
-      }}
-      onClick={(e) => {
-        if (suppressClickRef?.current) return
-        e.stopPropagation()
-        onClick(event)
+        zIndex: isResizing ? 25 : undefined,
       }}
     >
+      {/* Top resize handle */}
       <div
-        className={`absolute inset-0 ${bgClass}`}
-        style={bgHex ? { backgroundColor: bgHex + '22' } : undefined}
-      />
-      <div className="relative flex h-full">
-        <div style={{ width: 3, minWidth: 3, background: leftColor }} className="shrink-0" />
-        <div className="@container min-w-0 flex-1 px-1.5 py-0.5">
-          {heightPx >= 20 && (
-            <p
-              className={`@max-[10px]:hidden break-all overflow-hidden text-[11px] font-medium leading-tight ${
-                isDone ? 'line-through text-muted-foreground' : textClass
-              }`}
-            >
-              {event.title}
-            </p>
-          )}
-          {heightPx >= 44 && timeText && (
-            <p className={`@max-[10px]:hidden overflow-hidden whitespace-nowrap text-[10px] leading-tight opacity-70 ${isDone ? 'text-muted-foreground' : textClass}`}>
-              {timeText}
-            </p>
-          )}
-        </div>
+        data-resize-handle="true"
+        className={`absolute inset-x-0 top-0 z-20 h-2.5 cursor-ns-resize ${handleVisibility} items-center justify-center`}
+        onMouseDown={stopAll}
+        onPointerDown={(e) => { e.stopPropagation(); onResizeStart?.(e, 'top') }}
+        onClick={stopAll}
+      >
+        <div className="h-0.5 w-6 rounded-full bg-primary/70" />
       </div>
-    </button>
+
+      {/* Event body */}
+      <button
+        className={`absolute inset-0 overflow-hidden rounded-[4px] border bg-card text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-50' : ''} ${isResizing ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border/50'}`}
+        onPointerDown={(e) => {
+          if (e.pointerType === 'mouse' && e.button !== 0) return
+          onMoveStart?.(e, topPx)
+        }}
+        onClick={(e) => {
+          if (suppressClickRef?.current) return
+          e.stopPropagation()
+          onClick(event)
+        }}
+      >
+        <div
+          className={`absolute inset-0 ${bgClass}`}
+          style={bgHex ? { backgroundColor: bgHex + '22' } : undefined}
+        />
+        <div className="relative flex h-full">
+          <div style={{ width: 3, minWidth: 3, background: leftColor }} className="shrink-0" />
+          <div className="@container min-w-0 flex-1 px-1.5 py-0.5">
+            {heightPx >= 20 && (
+              <p
+                className={`@max-[10px]:hidden break-all overflow-hidden text-[11px] font-medium leading-tight ${
+                  isDone ? 'line-through text-muted-foreground' : textClass
+                }`}
+              >
+                {event.title}
+              </p>
+            )}
+            {heightPx >= 44 && timeText && (
+              <p className={`@max-[10px]:hidden overflow-hidden whitespace-nowrap text-[10px] leading-tight opacity-70 ${isDone ? 'text-muted-foreground' : textClass}`}>
+                {timeText}
+              </p>
+            )}
+          </div>
+        </div>
+      </button>
+
+      {/* Bottom resize handle */}
+      <div
+        data-resize-handle="true"
+        className={`absolute inset-x-0 bottom-0 z-20 h-2.5 cursor-ns-resize ${handleVisibility} items-center justify-center`}
+        onMouseDown={stopAll}
+        onPointerDown={(e) => { e.stopPropagation(); onResizeStart?.(e, 'bottom') }}
+        onClick={stopAll}
+      >
+        <div className="h-0.5 w-6 rounded-full bg-primary/70" />
+      </div>
+    </div>
   )
 }
 
@@ -385,14 +425,17 @@ interface DayColumnProps {
   onEventClick: (e: Event) => void
   overlay: { topPx: number; heightPx: number } | null
   moveOverlay: { topPx: number; heightPx: number } | null
+  resizeOverlay: { topPx: number; heightPx: number } | null
   isToday: boolean
   borderLeft: boolean
   onEventMoveStart: (e: React.PointerEvent, event: Event, topPx: number) => void
+  onEventResizeStart: (e: React.PointerEvent, event: Event, side: 'top' | 'bottom') => void
   suppressClickRef: { current: boolean }
   movingEventId: string | null
+  resizingEventId: string | null
 }
 
-function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, moveOverlay, isToday, borderLeft, onEventMoveStart, suppressClickRef, movingEventId }: DayColumnProps) {
+function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
@@ -442,7 +485,7 @@ function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, move
       {/* Current time indicator */}
       {isToday && (
         <div
-          className="pointer-events-none absolute inset-x-0 z-10 flex items-center"
+          className="pointer-events-none absolute inset-x-0 z-[5] flex items-center"
           style={{ top: nowPx }}
         >
           <div className="h-[9px] w-[9px] shrink-0 rounded-full bg-destructive -ml-[5px]" />
@@ -463,6 +506,13 @@ function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, move
           style={{ top: moveOverlay.topPx, height: moveOverlay.heightPx }}
         />
       )}
+      {/* Event resize ghost */}
+      {resizeOverlay && (
+        <div
+          className="pointer-events-none absolute inset-x-0 z-30 rounded-[4px] border-2 border-dashed border-primary/80 bg-primary/10"
+          style={{ top: resizeOverlay.topPx, height: resizeOverlay.heightPx }}
+        />
+      )}
       {/* Windowed event blocks (rendered below regular events) */}
       {windowed.map((s) => (
         <WindowedEventBlock key={`w-${s.event.id}`} segment={s} onClick={onEventClick} />
@@ -474,8 +524,10 @@ function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, move
           layout={l}
           onClick={onEventClick}
           onMoveStart={(e, topPx) => onEventMoveStart(e, l.event, topPx)}
+          onResizeStart={(e, side) => onEventResizeStart(e, l.event, side)}
           suppressClickRef={suppressClickRef}
           dimmed={l.event.id === movingEventId}
+          isResizing={l.event.id === resizingEventId}
         />
       ))}
     </div>
@@ -533,6 +585,9 @@ export function CalendarPage() {
   const suppressClickRef = useRef(false)
   const [moveOverlay, setMoveOverlay] = useState<{ dayIdx: number; topPx: number; heightPx: number } | null>(null)
   const [movingEventId, setMovingEventId] = useState<string | null>(null)
+  const [resizingEventId, setResizingEventId] = useState<string | null>(null)
+  const [resizeOverlay, setResizeOverlay] = useState<{ dayIdx: number; topPx: number; heightPx: number } | null>(null)
+  const resizeDragActiveRef = useRef(false)
 
   const queryClient = useQueryClient()
 
@@ -642,6 +697,15 @@ export function CalendarPage() {
   function handleEventMoveStart(e: React.PointerEvent, event: Event, topPx: number) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     if (!event.startAt) return
+    // Dismiss any active touch resize mode when interacting with an event body
+    if (resizingEventId) {
+      setResizingEventId(null)
+      if (resizingEventId === event.id) {
+        suppressClickRef.current = true
+        setTimeout(() => { suppressClickRef.current = false }, 0)
+        return
+      }
+    }
     e.stopPropagation()
 
     const durationMs = event.endAt
@@ -702,7 +766,15 @@ export function CalendarPage() {
         eventMoveRef.current = null
         setMoveOverlay(null)
         setMovingEventId(null)
-        if (!isDragging) return
+        if (!isDragging) {
+          // Hold-and-release without drag: enter resize mode (touch only; mouse uses hover handles)
+          if (isTouch) {
+            suppressClickRef.current = true
+            setTimeout(() => { suppressClickRef.current = false }, 0)
+            setResizingEventId(ev.id)
+          }
+          return
+        }
         suppressClickRef.current = true
         setTimeout(() => { suppressClickRef.current = false }, 0)
         const curY = getYInGrid(mu.clientY)
@@ -795,6 +867,91 @@ export function CalendarPage() {
       queryClient.invalidateQueries({ queryKey: ['events'] })
       queryClient.invalidateQueries({ queryKey: ['recommendations'] })
     })
+  }
+
+  // ── Event resize drag ──────────────────────────────────────────────────────
+
+  function handleResizeStart(e: React.PointerEvent, event: Event, side: 'top' | 'bottom') {
+    if (!event.startAt) return
+    e.stopPropagation()
+
+    const origStartMs = new Date(event.startAt).getTime()
+    const origEndMs = event.endAt
+      ? new Date(event.endAt).getTime()
+      : origStartMs + 15 * 60 * 1000
+
+    const dayIdx = Math.max(0, days.findIndex((d) => isSameDay(d, sod(new Date(event.startAt!)))))
+    const day = days[dayIdx]
+    const dayStartMs = sod(day).getTime()
+
+    resizeDragActiveRef.current = true
+    document.body.style.cursor = 'ns-resize'
+
+    function onPointerMove(mv: PointerEvent) {
+      const curY = getYInGrid(mv.clientY)
+      const snapped = snapToGrid(day, Math.max(0, Math.min(curY, HOUR_PX * 24 - 1)))
+      const snappedMs = snapped.getTime()
+
+      let topPx: number
+      let heightPx: number
+
+      if (side === 'top') {
+        const newStartMs = Math.max(dayStartMs, Math.min(snappedMs, origEndMs - 15 * 60 * 1000))
+        const startMin = (newStartMs - dayStartMs) / 60000
+        const endMin = (origEndMs - dayStartMs) / 60000
+        topPx = (startMin / 60) * HOUR_PX
+        heightPx = Math.max(((endMin - startMin) / 60) * HOUR_PX, 20)
+      } else {
+        const newEndMs = Math.max(snappedMs, origStartMs + 15 * 60 * 1000)
+        const startMin = (origStartMs - dayStartMs) / 60000
+        const endMin = (newEndMs - dayStartMs) / 60000
+        topPx = (startMin / 60) * HOUR_PX
+        heightPx = Math.max(((endMin - startMin) / 60) * HOUR_PX, 20)
+      }
+
+      setResizeOverlay({ dayIdx, topPx, heightPx })
+    }
+
+    function cleanup() {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
+      resizeDragActiveRef.current = false
+      document.body.style.cursor = ''
+    }
+
+    function onPointerUp(mu: PointerEvent) {
+      cleanup()
+      setResizeOverlay(null)
+
+      const curY = getYInGrid(mu.clientY)
+      const snapped = snapToGrid(day, Math.max(0, Math.min(curY, HOUR_PX * 24 - 1)))
+      const snappedMs = snapped.getTime()
+
+      let newStart: Date
+      let newEnd: Date
+
+      if (side === 'top') {
+        const newStartMs = Math.max(dayStartMs, Math.min(snappedMs, origEndMs - 15 * 60 * 1000))
+        newStart = new Date(newStartMs)
+        newEnd = new Date(origEndMs)
+      } else {
+        const newEndMs = Math.max(snappedMs, origStartMs + 15 * 60 * 1000)
+        newStart = new Date(origStartMs)
+        newEnd = new Date(newEndMs)
+      }
+
+      rescheduleEvent(event, newStart, newEnd)
+    }
+
+    function onPointerCancel() {
+      cleanup()
+      setResizeOverlay(null)
+    }
+
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerCancel)
   }
 
   // ── Grid drag helpers ────────────────────────────────────────────────────
@@ -913,11 +1070,26 @@ export function CalendarPage() {
   // touch handlers as passive, so this has to be a native listener.
   useEffect(() => {
     function onTouchMove(e: TouchEvent) {
-      if (dragRef.current?.isDrag || eventMoveRef.current?.isDragging) e.preventDefault()
+      if (dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current) e.preventDefault()
     }
     document.addEventListener('touchmove', onTouchMove, { passive: false })
     return () => document.removeEventListener('touchmove', onTouchMove)
   }, [])
+
+  // Dismiss touch resize mode when the user taps outside the event or its handles
+  useEffect(() => {
+    if (!resizingEventId) return
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target as Element
+      if (
+        target.closest('[data-resize-handle]') ||
+        target.closest(`[data-event-id="${resizingEventId}"]`)
+      ) return
+      setResizingEventId(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [resizingEventId])
 
   function stopAutoScroll() {
     if (autoScrollRef.current) {
@@ -1054,7 +1226,7 @@ export function CalendarPage() {
     <div className="flex flex-1 overflow-hidden">
       <RecommendationPanel
         date={formatDateInput(effectiveToday)}
-        onEventClick={openDetail}
+        onEventClick={openEdit}
         onBaseEventClick={openFromBaseEvent}
         mobileOpen={drawerOpen}
         onMobileClose={() => setDrawerOpen(false)}
@@ -1164,7 +1336,6 @@ export function CalendarPage() {
               {allDayEvents.length > 0 && (
                 <div className="flex border-b border-border">
                   <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
-                    <span className="select-none text-[9px] leading-tight text-muted-foreground">all{'\n'}day</span>
                   </div>
                   {days.map((day, idx) => {
                     const ds = sod(day); const de = addDays(ds, 1)
@@ -1235,11 +1406,14 @@ export function CalendarPage() {
                   onEventClick={openDetail}
                   overlay={dragOverlays.get(idx) ?? null}
                   moveOverlay={moveOverlay?.dayIdx === idx ? { topPx: moveOverlay.topPx, heightPx: moveOverlay.heightPx } : null}
+                  resizeOverlay={resizeOverlay?.dayIdx === idx ? { topPx: resizeOverlay.topPx, heightPx: resizeOverlay.heightPx } : null}
                   isToday={isSameDay(day, effectiveToday)}
                   borderLeft={idx === 0 || view !== 'day'}
                   onEventMoveStart={handleEventMoveStart}
+                  onEventResizeStart={handleResizeStart}
                   suppressClickRef={suppressClickRef}
                   movingEventId={movingEventId}
+                  resizingEventId={resizingEventId}
                 />
               ))}
             </div>

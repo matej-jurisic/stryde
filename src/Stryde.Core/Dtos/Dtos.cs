@@ -127,13 +127,16 @@ public sealed record CreateCategoryRequest(string Name, string Color, string? Ic
 public sealed record UpdateCategoryRequest(string Name, string Color, string? Icon);
 
 // Base Events
-public sealed record BaseEventSummaryDto(Guid Id, string Title, CategorySummaryDto? Category, List<GoalSummaryDto> Goals)
+public sealed record BaseEventSummaryDto(Guid Id, Guid GoalId, string Title, CategorySummaryDto? Category, GoalSummaryDto Goal)
 {
     public static BaseEventSummaryDto FromEntity(BaseEvent b) => new(
-        b.Id, b.Title,
+        b.Id, b.GoalId, b.Title,
         b.Category is not null ? CategorySummaryDto.FromEntity(b.Category) : null,
-        b.Goals.Select(GoalSummaryDto.FromEntity).ToList());
+        GoalSummaryDto.FromEntity(b.Goal));
 }
+
+public sealed record CreateBaseEventRequest(string Title, Guid? CategoryId);
+public sealed record UpdateBaseEventRequest(string Title, Guid? CategoryId);
 
 // Recommendations
 // Type is "event" (tiers 1, 2, 4) or "base_event" (tier 3 pattern suggestions)

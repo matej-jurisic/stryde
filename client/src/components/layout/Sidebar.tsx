@@ -105,7 +105,7 @@ function CategoryItem({
           <span className="truncate">{name}</span>
         </span>
       </NavLink>
-      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
         <button
           onClick={onEdit}
           className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"

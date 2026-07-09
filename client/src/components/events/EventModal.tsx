@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import { Plus, X, Check } from 'lucide-react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { eventsApi, goalsApi, categoriesApi, baseEventsApi } from '@/lib/api'
 import type { BaseEventSummary, Event } from '@/lib/types'
-import { CategoryIcon } from '@/components/categories/categoryIcons'
 
 interface FormState {
   title: string
@@ -96,7 +95,7 @@ function buildInitialForm(
       title: defaultBaseEvent.title,
       startAt: defaultStartAt ?? '',
       endAt: defaultEndAt ?? '',
-      goalIds: defaultBaseEvent.goals.map((g) => g.id),
+      goalIds: [defaultBaseEvent.goalId],
       categoryId: defaultBaseEvent.category?.id ?? null,
       baseEventId: defaultBaseEvent.id,
       windowStart: '',
@@ -134,28 +133,13 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
     event ? Boolean(event.endAt) : Boolean(defaultEndAt),
   )
   const [useWindow, setUseWindow] = useState(() => Boolean(event?.windowStart))
-  const [baseEventSearch, setBaseEventSearch] = useState('')
-  const [showBaseEventResults, setShowBaseEventResults] = useState(false)
-  const [showLinkSearch, setShowLinkSearch] = useState(false)
   const [linkedBaseEvent, setLinkedBaseEvent] = useState<BaseEventSummary | null>(() =>
     defaultBaseEvent && !event ? defaultBaseEvent : null,
   )
-  const searchRef = useRef<HTMLDivElement>(null)
-  const [showGoalPicker, setShowGoalPicker] = useState(false)
-  const [goalSearch, setGoalSearch] = useState('')
-  const [showCatPicker, setShowCatPicker] = useState(false)
-  const [catSearch, setCatSearch] = useState('')
 
   useEffect(() => {
     if (open) {
-      setBaseEventSearch('')
-      setShowBaseEventResults(false)
-      setShowLinkSearch(false)
       setErrors({})
-      setShowGoalPicker(false)
-      setGoalSearch('')
-      setShowCatPicker(false)
-      setCatSearch('')
     }
   }, [open])
 
@@ -165,12 +149,15 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
     enabled: open,
   })
 
-  const { data: baseEventResults = [] } = useQuery({
-    queryKey: ['base-events', 'search', baseEventSearch],
-    queryFn: () => baseEventsApi.search(baseEventSearch || undefined),
-    enabled: open && showBaseEventResults,
-    staleTime: 10 * 1000,
+  const templateQueries = useQueries({
+    queries: form.goalIds.map((goalId) => ({
+      queryKey: ['base-events', goalId],
+      queryFn: () => baseEventsApi.listByGoal(goalId),
+      enabled: open && !isEdit && form.goalIds.length > 0,
+      staleTime: 30 * 1000,
+    })),
   })
+  const availableTemplates = templateQueries.flatMap((q) => q.data ?? [])
 
   const { data: categories = [] } = useQuery({
     queryKey: ['categories'],
@@ -245,7 +232,12 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
     setUseWindow(true)
     setUseStartEnd(false)
     setIsAllDay(false)
-    setForm((f) => ({ ...f, endAt: '' }))
+    setForm((f) => ({
+      ...f,
+      endAt: '',
+      windowStart: f.windowStart || f.startAt,
+      windowEnd: f.windowEnd || f.endAt,
+    }))
     setErrors({})
   }
 
@@ -260,12 +252,9 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
     setForm((f) => ({
       ...f,
       title: be.title,
-      goalIds: be.goals.map((g) => g.id),
       categoryId: be.category?.id ?? null,
       baseEventId: be.id,
     }))
-    setBaseEventSearch('')
-    setShowBaseEventResults(false)
   }
 
   function clearBaseEvent() {
@@ -460,47 +449,18 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
               </span>
             ))}
             {activeGoals.some((g) => !form.goalIds.includes(g.id)) && (
-              <button
-                type="button"
-                onClick={() => { setShowGoalPicker((v) => !v); setGoalSearch('') }}
-                aria-label="Add goal"
-                className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${showGoalPicker ? 'border-primary/50 bg-primary/10 text-primary' : 'border-dashed border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}`}
+              <select
+                value=""
+                onChange={(e) => { if (e.target.value) toggleGoal(e.target.value) }}
+                className="h-8 rounded-lg border border-dashed border-border bg-background px-2 text-sm text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                <Plus className="h-4 w-4" />
-              </button>
+                <option value="">Add goal...</option>
+                {activeGoals.filter((g) => !form.goalIds.includes(g.id)).map((g) => (
+                  <option key={g.id} value={g.id}>{g.title}</option>
+                ))}
+              </select>
             )}
           </div>
-          {showGoalPicker && (
-            <div className="overflow-hidden rounded-lg border border-border">
-              <div className="border-b border-border px-3 py-2">
-                <input
-                  type="text"
-                  placeholder="Search goals..."
-                  value={goalSearch}
-                  onChange={(e) => setGoalSearch(e.target.value)}
-                  autoFocus
-                  className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                />
-              </div>
-              <div className="max-h-40 overflow-y-auto">
-                {activeGoals
-                  .filter((g) => !form.goalIds.includes(g.id) && g.title.toLowerCase().includes(goalSearch.toLowerCase()))
-                  .map((g) => (
-                    <button
-                      key={g.id}
-                      type="button"
-                      onClick={() => toggleGoal(g.id)}
-                      className="w-full px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
-                    >
-                      {g.title}
-                    </button>
-                  ))}
-                {activeGoals.filter((g) => !form.goalIds.includes(g.id) && g.title.toLowerCase().includes(goalSearch.toLowerCase())).length === 0 && (
-                  <p className="px-3 py-2.5 text-sm text-muted-foreground">No goals found.</p>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -508,78 +468,27 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
       {categories.length > 0 && (
         <div className="flex flex-col gap-2">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Category</span>
-          <div className="flex flex-wrap items-center gap-2">
-            {(() => {
-              const cat = categories.find((c) => c.id === form.categoryId)
-              if (!cat) return null
-              return (
-                <span className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium" style={{ borderColor: cat.color, backgroundColor: cat.color + '22', color: cat.color }}>
-                  <CategoryIcon icon={cat.icon} color={cat.color} size={13} strokeWidth={2} />
-                  {cat.name}
-                  <button
-                    type="button"
-                    onClick={() => { setForm((f) => ({ ...f, categoryId: null })); setShowCatPicker(false) }}
-                    aria-label="Remove category"
-                    className="ml-0.5 opacity-60 transition-opacity hover:opacity-100"
-                    style={{ color: cat.color }}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              )
-            })()}
-            <button
-              type="button"
-              onClick={() => { setShowCatPicker((v) => !v); setCatSearch('') }}
-              aria-label={form.categoryId ? 'Change category' : 'Add category'}
-              className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${showCatPicker ? 'border-primary/50 bg-primary/10 text-primary' : 'border-dashed border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}`}
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </div>
-          {showCatPicker && (
-            <div className="overflow-hidden rounded-lg border border-border">
-              <div className="border-b border-border px-3 py-2">
-                <input
-                  type="text"
-                  placeholder="Search categories..."
-                  value={catSearch}
-                  onChange={(e) => setCatSearch(e.target.value)}
-                  autoFocus
-                  className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                />
-              </div>
-              <div className="max-h-40 overflow-y-auto">
-                {categories
-                  .filter((c) => c.name.toLowerCase().includes(catSearch.toLowerCase()))
-                  .map((cat) => (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => { setForm((f) => ({ ...f, categoryId: cat.id })); setShowCatPicker(false); setCatSearch('') }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
-                    >
-                      <CategoryIcon icon={cat.icon} color={cat.color} size={14} strokeWidth={2} />
-                      {cat.name}
-                      {form.categoryId === cat.id && <Check className="ml-auto h-3.5 w-3.5 text-primary" />}
-                    </button>
-                  ))}
-                {categories.filter((c) => c.name.toLowerCase().includes(catSearch.toLowerCase())).length === 0 && (
-                  <p className="px-3 py-2.5 text-sm text-muted-foreground">No categories found.</p>
-                )}
-              </div>
-            </div>
-          )}
+          <select
+            value={form.categoryId ?? ''}
+            onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value || null }))}
+            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">No category</option>
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
         </div>
       )}
 
-      {/* Link to base event (create only) */}
-      {!isEdit && (
-        <div className="flex flex-col gap-1.5" ref={searchRef}>
+      {/* Template picker (create only, shown when a goal is selected and templates exist) */}
+      {!isEdit && availableTemplates.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Template</span>
           {linkedBaseEvent ? (
             <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-3">
               <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-xs text-muted-foreground">Linked pattern</span>
+                <span className="text-xs text-muted-foreground">Using template</span>
                 <span className="truncate text-sm font-medium text-foreground">{linkedBaseEvent.title}</span>
               </div>
               <button
@@ -587,49 +496,23 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
                 onClick={clearBaseEvent}
                 className="ml-3 shrink-0 text-xs text-muted-foreground transition-colors hover:text-destructive"
               >
-                Remove
+                Clear
               </button>
             </div>
-          ) : showLinkSearch ? (
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Search event patterns..."
-                value={baseEventSearch}
-                onChange={(e) => { setBaseEventSearch(e.target.value); setShowBaseEventResults(true) }}
-                onFocus={() => setShowBaseEventResults(true)}
-                onBlur={() => setTimeout(() => { setShowBaseEventResults(false); setShowLinkSearch(false) }, 150)}
-                autoFocus
-                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-              />
-              {showBaseEventResults && baseEventResults.length > 0 && (
-                <ul className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-card shadow-pop">
-                  {baseEventResults.map((be) => (
-                    <li key={be.id}>
-                      <button
-                        type="button"
-                        onMouseDown={() => selectBaseEvent(be)}
-                        className="w-full px-3 py-3 text-left text-sm text-foreground hover:bg-muted/60"
-                      >
-                        {be.title}
-                        {be.goals.length > 0 && (
-                          <span className="ml-2 text-xs text-muted-foreground">{be.goals[0].title}</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => setShowLinkSearch(true)}
-              className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+            <select
+              value=""
+              onChange={(e) => {
+                const be = availableTemplates.find((t) => t.id === e.target.value)
+                if (be) selectBaseEvent(be)
+              }}
+              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <span className="text-base leading-none font-medium">+</span>
-              Link to existing event pattern
-            </button>
+              <option value="">Use a template...</option>
+              {availableTemplates.map((t) => (
+                <option key={t.id} value={t.id}>{t.title}</option>
+              ))}
+            </select>
           )}
         </div>
       )}

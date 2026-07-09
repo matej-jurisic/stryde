@@ -73,7 +73,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             var ids = patternedBaseEventIds.Select(x => x.BaseEventId).ToList();
             var baseEvents = await db.BaseEvents
                 .Include(b => b.Category)
-                .Include(b => b.Goals)
+                .Include(b => b.Goal)
                 .Where(b => ids.Contains(b.Id))
                 .ToListAsync();
 

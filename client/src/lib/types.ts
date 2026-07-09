@@ -76,9 +76,10 @@ export interface Event {
 
 export interface BaseEventSummary {
   id: string
+  goalId: string
   title: string
   category: CategorySummary | null
-  goals: GoalSummary[]
+  goal: GoalSummary
 }
 
 export type Recommendation =

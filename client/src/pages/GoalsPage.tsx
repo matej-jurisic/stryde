@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, Check, MoreHorizontal } from 'lucide-react'
+import { Plus, Pencil, Trash2, Check, MoreHorizontal, Layers } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { goalsApi, checkpointsApi, ApiError } from '@/lib/api'
-import type { Goal, GoalStatus, Checkpoint, CheckpointSize } from '@/lib/types'
+import { goalsApi, checkpointsApi, baseEventsApi, ApiError } from '@/lib/api'
+import type { Goal, GoalStatus, Checkpoint, CheckpointSize, BaseEventSummary } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { GoalModal } from '@/components/goals/GoalModal'
@@ -102,7 +102,7 @@ function CheckpointRow({ checkpoint, goalId, isLast, onEdit }: CheckpointRowProp
             <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">{checkpoint.size}</span>
           )}
         </span>
-        <div className="flex shrink-0 items-center gap-0.5 transition-opacity opacity-100 md:opacity-0 group-hover:opacity-100">
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             onClick={() => onEdit(checkpoint)}
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -164,6 +164,168 @@ function StatusDropdown({
             </button>
           ))}
         </div>
+      )}
+    </div>
+  )
+}
+
+// ── Templates section ──────────────────────────────────────────────────────
+
+interface TemplateRowProps {
+  template: BaseEventSummary
+  onDelete: () => void
+}
+
+function TemplateRow({ template, onDelete }: TemplateRowProps) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState(template.title)
+
+  const updateMutation = useMutation({
+    mutationFn: () => baseEventsApi.update(template.id, { title: title.trim() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['base-events', template.goalId] })
+      setEditing(false)
+    },
+  })
+
+  if (editing) {
+    return (
+      <li className="flex items-center gap-2 py-1">
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') updateMutation.mutate()
+            if (e.key === 'Escape') { setTitle(template.title); setEditing(false) }
+          }}
+          className="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <button
+          onClick={() => updateMutation.mutate()}
+          disabled={updateMutation.isPending || !title.trim()}
+          className="rounded px-2 py-1 text-xs font-medium text-primary hover:bg-muted disabled:opacity-50"
+        >
+          Save
+        </button>
+        <button
+          onClick={() => { setTitle(template.title); setEditing(false) }}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          Cancel
+        </button>
+      </li>
+    )
+  }
+
+  return (
+    <li className="group flex items-center gap-2 py-1">
+      <Layers className="h-3 w-3 shrink-0 text-muted-foreground/60" strokeWidth={2} />
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{template.title}</span>
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={() => setEditing(true)}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <Pencil className="h-3 w-3" strokeWidth={2} />
+        </button>
+        <button
+          onClick={onDelete}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+        >
+          <Trash2 className="h-3 w-3" strokeWidth={2} />
+        </button>
+      </div>
+    </li>
+  )
+}
+
+function TemplatesSection({ goalId }: { goalId: string }) {
+  const qc = useQueryClient()
+  const [adding, setAdding] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+
+  const { data: templates = [] } = useQuery({
+    queryKey: ['base-events', goalId],
+    queryFn: () => baseEventsApi.listByGoal(goalId),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: () => baseEventsApi.create(goalId, { title: newTitle.trim() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['base-events', goalId] })
+      setNewTitle('')
+      setAdding(false)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => baseEventsApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['base-events', goalId] }),
+  })
+
+  if (templates.length === 0 && !adding) {
+    return (
+      <button
+        onClick={() => setAdding(true)}
+        className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors"
+      >
+        <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+        Add template
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Templates · {templates.length}
+      </p>
+      <ul className="flex flex-col">
+        {templates.map((t) => (
+          <TemplateRow
+            key={t.id}
+            template={t}
+            onDelete={() => deleteMutation.mutate(t.id)}
+          />
+        ))}
+      </ul>
+      {adding ? (
+        <div className="flex items-center gap-2 mt-1">
+          <input
+            autoFocus
+            placeholder="Template title..."
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newTitle.trim()) createMutation.mutate()
+              if (e.key === 'Escape') { setNewTitle(''); setAdding(false) }
+            }}
+            className="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <button
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending || !newTitle.trim()}
+            className="rounded px-2 py-1 text-xs font-medium text-primary hover:bg-muted disabled:opacity-50"
+          >
+            Add
+          </button>
+          <button
+            onClick={() => { setNewTitle(''); setAdding(false) }}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors mt-0.5"
+        >
+          <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+          Add template
+        </button>
       )}
     </div>
   )
@@ -267,6 +429,13 @@ function GoalCard({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalCardP
               />
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Templates (active goals only) */}
+      {goal.status !== 'closed' && (
+        <div className="mt-5">
+          <TemplatesSection goalId={goal.id} />
         </div>
       )}
 

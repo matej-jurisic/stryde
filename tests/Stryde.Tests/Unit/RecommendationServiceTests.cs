@@ -43,11 +43,12 @@ public class RecommendationServiceTests : IDisposable
         return ev;
     }
 
-    private async Task<BaseEvent> AddBaseEventAsync(Guid userId, string title, GoalStatus? goalStatus = null)
+    private async Task<BaseEvent> AddBaseEventAsync(Guid userId, string title, GoalStatus goalStatus = GoalStatus.active)
     {
-        var be = new BaseEvent { UserId = userId, Title = title };
-        if (goalStatus.HasValue)
-            be.Goals.Add(new Goal { UserId = userId, Title = title + " goal", Status = goalStatus.Value });
+        var goal = new Goal { UserId = userId, Title = title + " goal", Status = goalStatus };
+        _ctx.Db.Goals.Add(goal);
+        await _ctx.Db.SaveChangesAsync();
+        var be = new BaseEvent { UserId = userId, Title = title, GoalId = goal.Id, Goal = goal };
         _ctx.Db.BaseEvents.Add(be);
         await _ctx.Db.SaveChangesAsync();
         return be;
