@@ -41,8 +41,8 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ paddingBottom: `max(1rem, ${kbOffset}px)` }}
+      className="fixed inset-0 z-50 flex flex-col justify-end sm:items-center sm:justify-center sm:p-4"
+      style={{ paddingBottom: kbOffset > 0 ? `${kbOffset}px` : undefined }}
       aria-modal="true"
       role="dialog"
       aria-labelledby="modal-title"
@@ -53,9 +53,19 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
         aria-hidden="true"
       />
       <div
-        className="relative z-10 flex w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-background"
-        style={{ boxShadow: 'var(--shadow-pop-value)', maxHeight: `calc(100vh - 2rem - ${kbOffset}px)` }}
+        className="relative z-10 flex w-full flex-col overflow-hidden rounded-t-2xl border-t border-x border-border bg-background sm:rounded-xl sm:border sm:max-w-lg"
+        style={{
+          boxShadow: 'var(--shadow-pop-value)',
+          maxHeight: kbOffset > 0
+            ? `calc(100vh - ${kbOffset}px - 2.5rem)`
+            : 'min(90vh, calc(100vh - 2.5rem))',
+        }}
       >
+        {/* Drag handle — mobile only */}
+        <div className="flex shrink-0 justify-center pt-2.5 sm:hidden">
+          <div className="h-1 w-8 rounded-full bg-border" />
+        </div>
+
         <div className="flex items-start justify-between border-b border-border px-5 py-4">
           <h2 id="modal-title" className="min-w-0 mr-3 text-base font-semibold text-foreground break-words">{title}</h2>
           <button
@@ -70,7 +80,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
           {children}
         </div>
         {footer && (
-          <div className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4 pb-6 sm:pb-4">
             {footer}
           </div>
         )}

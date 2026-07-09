@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, X, Pencil, Trash2, Clock, Tag } from 'lucide-react'
+import { Check, X, Pencil, Trash2, Clock } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -82,35 +82,43 @@ export function EventDetailModal({ open, onClose, event, onEdit }: EventDetailMo
       title={event.title}
       footer={
         <>
-          <Button
-            variant="destructive"
+          {/* Delete — icon only, destructive, pinned left */}
+          <button
             onClick={() => deleteMutation.mutate()}
-            loading={deleteMutation.isPending}
-            disabled={statusMutation.isPending}
-            className="mr-auto"
+            disabled={busy}
+            aria-label="Delete"
+            className="mr-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
           >
-            <Trash2 className="mr-1.5 h-3.5 w-3.5" strokeWidth={2} />
-            Delete
-          </Button>
-          <Button
-            variant="ghost"
+            {deleteMutation.isPending
+              ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              : <Trash2 className="h-4 w-4" strokeWidth={2} />}
+          </button>
+
+          {/* Edit — icon only */}
+          <button
             onClick={() => { onClose(); onEdit(event) }}
             disabled={busy}
+            aria-label="Edit"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
           >
-            <Pencil className="mr-1.5 h-3.5 w-3.5" strokeWidth={2} />
-            Edit
-          </Button>
+            <Pencil className="h-4 w-4" strokeWidth={2} />
+          </button>
+
           {isPending && (
             <>
-              <Button
-                variant="ghost"
+              {/* Skip — icon only */}
+              <button
                 onClick={() => statusMutation.mutate('skipped')}
-                loading={statusMutation.isPending && statusMutation.variables === 'skipped'}
-                disabled={deleteMutation.isPending}
+                disabled={busy}
+                aria-label="Skip"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
               >
-                <X className="mr-1.5 h-3.5 w-3.5" strokeWidth={2.5} />
-                Skip
-              </Button>
+                {statusMutation.isPending && statusMutation.variables === 'skipped'
+                  ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  : <X className="h-4 w-4" strokeWidth={2.5} />}
+              </button>
+
+              {/* Done — keeps text, it's the primary action */}
               <Button
                 onClick={() => statusMutation.mutate('done')}
                 loading={statusMutation.isPending && statusMutation.variables === 'done'}
@@ -134,11 +142,8 @@ export function EventDetailModal({ open, onClose, event, onEdit }: EventDetailMo
 
         {event.category && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Tag className="h-4 w-4 shrink-0" strokeWidth={2} />
-            <span className="flex items-center gap-1.5">
-              <CategoryIcon icon={event.category.icon} color={event.category.color} size={13} strokeWidth={2} />
-              {event.category.name}
-            </span>
+            <CategoryIcon icon={event.category.icon} color={event.category.color} size={16} strokeWidth={2} />
+            {event.category.name}
           </div>
         )}
 

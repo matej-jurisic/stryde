@@ -110,19 +110,22 @@ interface LayoutEvent {
   heightPx: number
 }
 
-function minOfDay(iso: string): number {
-  const d = new Date(iso)
-  return Math.min(d.getHours() * 60 + d.getMinutes(), 24 * 60 - 1)
-}
+function layoutDay(events: Event[], day: Date): LayoutEvent[] {
+  const dayStartMs = sod(day).getTime()
 
-function layoutDay(events: Event[]): LayoutEvent[] {
   const items = events
     .filter((e) => e.startAt)
     .map((e) => {
-      const s = minOfDay(e.startAt!)
-      const end = e.endAt ? Math.max(minOfDay(e.endAt), s + 15) : s + 15
+      const startMs = new Date(e.startAt!).getTime()
+      const endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
+      // Clip to this day's boundaries (handles cross-midnight events)
+      const clipStartMin = Math.max((startMs - dayStartMs) / 60000, 0)
+      const clipEndMin = Math.min((endMs - dayStartMs) / 60000, 24 * 60)
+      const s = clipStartMin
+      const end = Math.max(clipEndMin, s + 15)
       return { event: e, s, end: Math.min(end, 24 * 60) }
     })
+    .filter((it) => it.s < 24 * 60 && it.end > it.s)
     .sort((a, b) => a.s - b.s)
 
   const colEnds: number[] = []
@@ -397,8 +400,10 @@ function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, move
     () =>
       allEvents.filter((e) => {
         if (!e.startAt) return false
-        const t = new Date(e.startAt).getTime()
-        return t >= dayStart.getTime() && t < dayEnd.getTime()
+        const startMs = new Date(e.startAt).getTime()
+        const endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
+        // Include events that overlap this day (catches cross-midnight continuations)
+        return startMs < dayEnd.getTime() && endMs > dayStart.getTime()
       }),
     [allEvents, dayStart.getTime(), dayEnd.getTime()],
   )
@@ -408,7 +413,7 @@ function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, move
     [windowedEvents, day],
   )
 
-  const layout = useMemo(() => layoutDay(dayEvents), [dayEvents])
+  const layout = useMemo(() => layoutDay(dayEvents, day), [dayEvents, day])
 
   const now = new Date()
   const nowPx = ((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_PX
@@ -726,33 +731,40 @@ export function CalendarPage() {
       let cancelled = false
       let timer: ReturnType<typeof setTimeout>
 
-      function onEarlyMove(mv: PointerEvent) {
-        if (mv.pointerId !== pointerId) return
-        const dx = mv.clientX - startClientX
-        const dy = mv.clientY - startClientY
-        if (Math.sqrt(dx * dx + dy * dy) > 15) {
-          cancelled = true
-          clearTimeout(timer)
-          window.removeEventListener('pointermove', onEarlyMove)
-          window.removeEventListener('pointerup', onEarlyUp)
-        }
-      }
-
-      function onEarlyUp(up: PointerEvent) {
-        if (up.pointerId !== pointerId) return
+      function cancelEarly() {
         cancelled = true
         clearTimeout(timer)
         window.removeEventListener('pointermove', onEarlyMove)
         window.removeEventListener('pointerup', onEarlyUp)
+        window.removeEventListener('pointercancel', onEarlyCancel)
+      }
+
+      function onEarlyMove(mv: PointerEvent) {
+        if (mv.pointerId !== pointerId) return
+        const dx = mv.clientX - startClientX
+        const dy = mv.clientY - startClientY
+        if (Math.sqrt(dx * dx + dy * dy) > 10) cancelEarly()
+      }
+
+      function onEarlyUp(up: PointerEvent) {
+        if (up.pointerId !== pointerId) return
+        cancelEarly()
+      }
+
+      function onEarlyCancel(pc: PointerEvent) {
+        if (pc.pointerId !== pointerId) return
+        cancelEarly()
       }
 
       window.addEventListener('pointermove', onEarlyMove)
       window.addEventListener('pointerup', onEarlyUp)
+      window.addEventListener('pointercancel', onEarlyCancel)
 
       timer = setTimeout(() => {
         if (cancelled) return
         window.removeEventListener('pointermove', onEarlyMove)
         window.removeEventListener('pointerup', onEarlyUp)
+        window.removeEventListener('pointercancel', onEarlyCancel)
         if (navigator.vibrate) navigator.vibrate(30)
         startDragging()
       }, 500)

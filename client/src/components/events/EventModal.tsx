@@ -118,6 +118,8 @@ function buildInitialForm(
   }
 }
 
+type ScheduleMode = 'due' | 'scheduled' | 'window'
+
 export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt, defaultEndAt, defaultBaseEvent }: EventModalProps) {
   const qc = useQueryClient()
   const isEdit = Boolean(event)
@@ -139,7 +141,6 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
   )
   const searchRef = useRef<HTMLDivElement>(null)
 
-  // Reset auxiliary UI state when the modal re-opens for the same event
   useEffect(() => {
     if (open) {
       setBaseEventSearch('')
@@ -199,8 +200,6 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
   const deleteMutation = useMutation({
     mutationFn: () => eventsApi.delete(event!.id),
     onSuccess: () => {
-      // Remove the event from every cached events list synchronously so the
-      // calendar doesn't flash the deletion through the translucent backdrop.
       qc.setQueriesData<Event[]>({ queryKey: ['events'] }, (old) =>
         old ? old.filter((e) => e.id !== event!.id) : old,
       )
@@ -284,7 +283,33 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
     }))
   }
 
+  function switchMode(mode: ScheduleMode) {
+    if (mode === 'due') {
+      if (useWindow) disableWindow()
+      if (useStartEnd) disableStartEnd()
+    } else if (mode === 'scheduled') {
+      enableStartEnd()
+    } else {
+      enableWindow()
+    }
+  }
+
+  const scheduleMode: ScheduleMode = useWindow ? 'window' : useStartEnd ? 'scheduled' : 'due'
   const activeGoals = goals.filter((g) => g.status !== 'closed')
+
+  const segmentClass = (active: boolean) =>
+    `flex-1 rounded-md py-2 text-xs font-medium transition-colors ${
+      active
+        ? 'bg-background text-foreground shadow-sm'
+        : 'text-muted-foreground hover:text-foreground'
+    }`
+
+  const pillClass = (selected: boolean) =>
+    `px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+      selected
+        ? 'bg-primary/10 border-primary text-primary'
+        : 'bg-transparent border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+    }`
 
   return (
     <Modal
@@ -311,117 +336,66 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
         </>
       }
     >
-      <Field
-        label="Title"
-        value={form.title}
-        onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-        placeholder="What needs to get done?"
-        error={errors.title}
-        autoFocus
-      />
+      {/* Title */}
+      <div className="flex flex-col gap-1.5">
+        <label className="text-sm font-medium text-foreground">Title</label>
+        <input
+          type="text"
+          placeholder="What needs to get done?"
+          value={form.title}
+          onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
+          autoFocus
+          className={`h-11 rounded-lg border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring ${errors.title ? 'border-destructive' : 'border-input'}`}
+        />
+        {errors.title && <p className="text-xs text-destructive">{errors.title}</p>}
+      </div>
 
-      {useWindow ? (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-foreground">Flexible window</span>
-            <button type="button" onClick={disableWindow} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Use due date</button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field
-              label="Window start"
-              type="datetime-local"
-              value={form.windowStart}
-              onChange={(e) => setForm((f) => ({ ...f, windowStart: e.target.value }))}
+      {/* Scheduling section */}
+      <div className="flex flex-col gap-3">
+        {/* Mode selector */}
+        <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+          <button type="button" onClick={() => switchMode('due')} className={segmentClass(scheduleMode === 'due')}>Due date</button>
+          <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(scheduleMode === 'scheduled')}>Scheduled</button>
+          <button type="button" onClick={() => switchMode('window')} className={segmentClass(scheduleMode === 'window')}>Window</button>
+        </div>
+
+        {/* Due date fields */}
+        {scheduleMode === 'due' && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
+              <button
+                type="button"
+                onClick={toggleAllDay}
+                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  isAllDay
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-transparent text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                }`}
+              >
+                All day
+              </button>
+            </div>
+            <input
+              type={isAllDay ? 'date' : 'datetime-local'}
+              value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
+              onChange={(e) => {
+                if (isAllDay) {
+                  setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
+                } else {
+                  setForm((f) => ({ ...f, startAt: e.target.value }))
+                }
+              }}
               autoFocus={focusStartAt}
-            />
-            <Field
-              label="Window end"
-              type="datetime-local"
-              value={form.windowEnd}
-              onChange={(e) => setForm((f) => ({ ...f, windowEnd: e.target.value }))}
-              error={errors.windowEnd}
+              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-foreground">Duration</label>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="0"
-                  value={form.windowDurationHours}
-                  onChange={(e) => setForm((f) => ({ ...f, windowDurationHours: e.target.value }))}
-                  className="h-9 w-16 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <span className="text-sm text-muted-foreground">h</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  placeholder="0"
-                  value={form.windowDurationMins}
-                  onChange={(e) => setForm((f) => ({ ...f, windowDurationMins: e.target.value }))}
-                  className="h-9 w-16 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <span className="text-sm text-muted-foreground">min</span>
-              </div>
-            </div>
-            {errors.windowDuration && <p className="text-xs text-destructive">{errors.windowDuration}</p>}
-          </div>
-        </div>
-      ) : !useStartEnd ? (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <label htmlFor="due-date" className="text-sm font-medium text-foreground">Due date</label>
-            <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={isAllDay}
-                onChange={toggleAllDay}
-                className="h-3.5 w-3.5 rounded border-border accent-primary"
-              />
-              All day
-            </label>
-          </div>
-          <input
-            id="due-date"
-            type={isAllDay ? 'date' : 'datetime-local'}
-            value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
-            onChange={(e) => {
-              if (isAllDay) {
-                setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
-              } else {
-                setForm((f) => ({ ...f, startAt: e.target.value }))
-              }
-            }}
-            autoFocus={focusStartAt}
-            className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          {!isAllDay && (
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={enableStartEnd}
-                className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                + Set start and end time
-              </button>
-              <button
-                type="button"
-                onClick={enableWindow}
-                className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                + Set flexible window
-              </button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        )}
+
+        {/* Scheduled (start + end) fields */}
+        {scheduleMode === 'scheduled' && (
+          <div className="grid grid-cols-2 gap-3">
             <Field
               label="Start"
               type="datetime-local"
@@ -437,58 +411,88 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
               error={errors.endAt}
             />
           </div>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={disableStartEnd}
-              className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Use due date only
-            </button>
-            <button
-              type="button"
-              onClick={enableWindow}
-              className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              + Set flexible window
-            </button>
-          </div>
-        </div>
-      )}
+        )}
 
+        {/* Window fields */}
+        {scheduleMode === 'window' && (
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field
+                label="Window start"
+                type="datetime-local"
+                value={form.windowStart}
+                onChange={(e) => setForm((f) => ({ ...f, windowStart: e.target.value }))}
+                autoFocus={focusStartAt}
+              />
+              <Field
+                label="Window end"
+                type="datetime-local"
+                value={form.windowEnd}
+                onChange={(e) => setForm((f) => ({ ...f, windowEnd: e.target.value }))}
+                error={errors.windowEnd}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">Duration</label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={form.windowDurationHours}
+                    onChange={(e) => setForm((f) => ({ ...f, windowDurationHours: e.target.value }))}
+                    className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
+                  />
+                  <span className="shrink-0 text-sm text-muted-foreground">h</span>
+                </div>
+                <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    placeholder="0"
+                    value={form.windowDurationMins}
+                    onChange={(e) => setForm((f) => ({ ...f, windowDurationMins: e.target.value }))}
+                    className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
+                  />
+                  <span className="shrink-0 text-sm text-muted-foreground">min</span>
+                </div>
+              </div>
+              {errors.windowDuration && <p className="text-xs text-destructive">{errors.windowDuration}</p>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Goals */}
       {activeGoals.length > 0 && (
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-foreground">Goals</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Goals</span>
           <div className="flex flex-wrap gap-2">
-            {activeGoals.map((g) => {
-              const selected = form.goalIds.includes(g.id)
-              return (
-                <button
-                  key={g.id}
-                  type="button"
-                  onClick={() => toggleGoal(g.id)}
-                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                    selected
-                      ? 'bg-primary/10 border-primary text-primary'
-                      : 'bg-transparent border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
-                  }`}
-                >
-                  {g.title}
-                </button>
-              )
-            })}
+            {activeGoals.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => toggleGoal(g.id)}
+                className={pillClass(form.goalIds.includes(g.id))}
+              >
+                {g.title}
+              </button>
+            ))}
           </div>
         </div>
       )}
 
+      {/* Category */}
       {categories.length > 0 && (
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-foreground">Category</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Category</span>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setForm((f) => ({ ...f, categoryId: null }))}
-              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
                 form.categoryId === null
                   ? 'bg-muted border-foreground/30 text-foreground'
                   : 'bg-transparent border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'
@@ -503,14 +507,14 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
                   key={cat.id}
                   type="button"
                   onClick={() => setForm((f) => ({ ...f, categoryId: cat.id }))}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
                     selected
                       ? 'border-transparent text-foreground'
                       : 'bg-transparent border-border text-muted-foreground hover:text-foreground'
                   }`}
                   style={selected ? { backgroundColor: cat.color + '22', borderColor: cat.color } : undefined}
                 >
-                  <CategoryIcon icon={cat.icon} color={selected ? cat.color : 'currentColor'} size={11} strokeWidth={2} />
+                  <CategoryIcon icon={cat.icon} color={selected ? cat.color : 'currentColor'} size={13} strokeWidth={2} />
                   {cat.name}
                 </button>
               )
@@ -519,33 +523,43 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
         </div>
       )}
 
+      {/* Link to base event (create only) */}
       {!isEdit && (
         <div className="flex flex-col gap-1.5" ref={searchRef}>
           {linkedBaseEvent ? (
-            <div className="flex items-center justify-between rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-              <span className="text-foreground">Linked: <span className="font-medium">{linkedBaseEvent.title}</span></span>
-              <button type="button" onClick={clearBaseEvent} className="text-xs text-muted-foreground hover:text-foreground">Remove</button>
+            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-3">
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-xs text-muted-foreground">Linked pattern</span>
+                <span className="truncate text-sm font-medium text-foreground">{linkedBaseEvent.title}</span>
+              </div>
+              <button
+                type="button"
+                onClick={clearBaseEvent}
+                className="ml-3 shrink-0 text-xs text-muted-foreground transition-colors hover:text-destructive"
+              >
+                Remove
+              </button>
             </div>
           ) : showLinkSearch ? (
             <div className="relative">
               <input
                 type="text"
-                placeholder="Search events..."
+                placeholder="Search event patterns..."
                 value={baseEventSearch}
                 onChange={(e) => { setBaseEventSearch(e.target.value); setShowBaseEventResults(true) }}
                 onFocus={() => setShowBaseEventResults(true)}
                 onBlur={() => setTimeout(() => { setShowBaseEventResults(false); setShowLinkSearch(false) }, 150)}
                 autoFocus
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
               />
               {showBaseEventResults && baseEventResults.length > 0 && (
-                <ul className="absolute z-10 mt-1 w-full rounded-md border border-border bg-card shadow-pop">
+                <ul className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-card shadow-pop">
                   {baseEventResults.map((be) => (
                     <li key={be.id}>
                       <button
                         type="button"
                         onMouseDown={() => selectBaseEvent(be)}
-                        className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-muted/60"
+                        className="w-full px-3 py-3 text-left text-sm text-foreground hover:bg-muted/60"
                       >
                         {be.title}
                         {be.goals.length > 0 && (
@@ -561,9 +575,10 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
             <button
               type="button"
               onClick={() => setShowLinkSearch(true)}
-              className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
             >
-              + Link to existing event
+              <span className="text-base leading-none font-medium">+</span>
+              Link to existing event pattern
             </button>
           )}
         </div>
