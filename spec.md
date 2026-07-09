@@ -118,21 +118,21 @@ Behavior on delete: user is prompted — delete this instance only, or delete th
 
 ### Base Events
 
-A Base Event is a reusable activity template that belongs to a specific goal. It represents a recurring kind of work within that goal.
+A Base Event is a reusable activity template. It may optionally belong to a goal, or exist independently for recurring activities that have no goal (e.g. "Work", "Exercise").
 
 | Field | Notes |
 |---|---|
-| Goal | Required — the goal this template belongs to |
+| Goal | Optional — the goal this template belongs to |
 | Title | Required |
 | Category | Optional |
 
-Base events are created and managed from within the Goals view — there is no standalone Base Events management page. When a goal has base events, they appear as a template list on the goal detail view.
+Base events are created and managed from within the Goals view — there is no standalone Base Events management page. Goal-linked templates appear within their goal's card. Templates without a goal appear in the **"Other Templates"** section at the bottom of the Goals view.
 
-**No auto-creation.** Base events exist only when the user explicitly creates them under a goal. Creating an event with no base event link is valid — that event simply has no template ancestry and will not contribute to tier-3 pattern suggestions.
+**No auto-creation.** Base events exist only when the user explicitly creates them. Creating an event with no base event link is valid — that event simply has no template ancestry and will not contribute to tier-3 pattern suggestions.
 
 **Linking on event creation:** When creating or editing an event, if the event is linked to a goal, the user can optionally pick one of that goal's base events as the template. The event's title and category are pre-filled from the template and remain editable after.
 
-Base Events are the grouping unit for the recommendation engine's day-of-week pattern detection (tier 3).
+Base Events are the grouping unit for the recommendation engine's day-of-week pattern detection (tier 3). Goal-less base events participate in tier-3 suggestions identically to goal-linked ones; their recommendation items simply show no goal badge.
 
 ### Creation
 

@@ -221,6 +221,28 @@ Unplanned correctness and polish work done after Phase 8:
 
 ---
 
+## Goal-less Base Events (July 2026) ✅
+
+**Problem:** `BaseEvent.GoalId` was required, so recurring activities with no goal (e.g. "Work", "Exercise") could not be given a template and were invisible to the tier-3 habit-detection system.
+
+**Change:** `BaseEvent.GoalId` is now nullable (`Guid?`). Base events without a goal are first-class templates.
+
+**Backend**
+- `BaseEvent.GoalId` → `Guid?`, navigation property `Goal?`; migration `BaseEventGoalOptional`
+- `BaseEventService.CreateAsync` accepts `Guid? goalId`; validates goal only when provided
+- `BaseEventService.ListGoallessAsync` — returns all user templates with no goal
+- `GET /api/base-events/goalless` — list goal-less templates
+- `POST /api/base-events/` — create a goal-less template
+- `BaseEventSummaryDto`: `GoalId?`, `Goal?`; `FromEntity` null-safe
+
+**Frontend**
+- `BaseEventSummary` type: `goalId: string | null`, `goal: GoalSummary | null`
+- `GoalsPage`: new `GoallessTemplatesSection` at the bottom of the page (visible even with no goals); uses query key `['base-events', null]`
+- `RecommendationStrip`: `BaseEventRecItem` shows goal badge only when `goal` is non-null
+- `EventModal`: `goalIds` pre-fill skips null `goalId` when opening a goal-less template
+
+---
+
 ## Windowed Events (July 2026) ✅
 
 Unplanned addition after Phase 9. Adds a third event scheduling state between floating and fully scheduled.

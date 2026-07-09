@@ -145,7 +145,7 @@ function AgendaRow({ event, onEdit }: AgendaRowProps) {
   const cat = event.category
 
   return (
-    <li className="group flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/40">
+    <li className="flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/40">
       {/* Status checkbox */}
       <button
         disabled={busy}
@@ -195,10 +195,7 @@ function AgendaRow({ event, onEdit }: AgendaRowProps) {
         {(cat || event.goals.length > 0) && (
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {cat && (
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: cat.color }} />
-                {cat.name}
-              </span>
+              <span className="text-[11px] text-muted-foreground">{cat.name}</span>
             )}
             {event.goals.map((g) => (
               <Badge key={g.id} tone={GOAL_TONE[g.status] ?? 'neutral'}>{g.title}</Badge>
@@ -212,7 +209,7 @@ function AgendaRow({ event, onEdit }: AgendaRowProps) {
         <button
           disabled={busy}
           onClick={() => setMenuOpen((o) => !o)}
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
         >
           <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
         </button>
