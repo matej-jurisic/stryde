@@ -26,6 +26,10 @@ public sealed record EventDto(
     Guid? RepeatRuleId,
     DateTimeOffset CreatedAt,
     bool IsOverdue,
+    bool IsAllDay,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes,
     List<GoalSummaryDto> Goals,
     CategorySummaryDto? Category)
 {
@@ -33,6 +37,8 @@ public sealed record EventDto(
         e.Id, e.UserId, e.Title, e.StartAt, e.EndAt,
         e.Status.ToString(), e.RepeatRuleId, e.CreatedAt,
         Common.DayMath.IsOverdue(e, ctx, nowUtc),
+        e.IsAllDay,
+        e.WindowStart, e.WindowEnd, e.WindowDurationMinutes,
         e.Goals.Select(GoalSummaryDto.FromEntity).ToList(),
         e.Category is not null ? CategorySummaryDto.FromEntity(e.Category) : null);
 }
@@ -51,6 +57,10 @@ public sealed record CreateEventRequest(
     string Title,
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
+    bool IsAllDay,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes,
     List<Guid>? GoalIds,
     Guid? CategoryId,
     Guid? BaseEventId);
@@ -59,6 +69,10 @@ public sealed record UpdateEventRequest(
     string Title,
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
+    bool IsAllDay,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes,
     List<Guid>? GoalIds,
     Guid? CategoryId);
 

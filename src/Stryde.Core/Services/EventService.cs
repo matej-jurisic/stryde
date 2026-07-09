@@ -12,10 +12,21 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
     public async Task<Result<EventDto>> CreateAsync(Guid userId, CreateEventRequest req)
     {
         var err = Validators.ValidateTitle(req.Title, "Title")
-            ?? Validators.ValidateDateRange(req.StartAt, req.EndAt);
+            ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
+            ?? ValidateWindow(req.StartAt, req.WindowStart, req.WindowEnd, req.WindowDurationMinutes);
         if (err is not null) return Result<EventDto>.Fail(err);
 
-        var ev = new Event { UserId = userId, Title = req.Title.Trim(), StartAt = req.StartAt, EndAt = req.EndAt };
+        var ev = new Event
+        {
+            UserId = userId,
+            Title = req.Title.Trim(),
+            StartAt = req.StartAt,
+            EndAt = req.IsAllDay ? null : req.EndAt,
+            IsAllDay = req.IsAllDay,
+            WindowStart = req.WindowStart,
+            WindowEnd = req.WindowEnd,
+            WindowDurationMinutes = req.WindowDurationMinutes,
+        };
 
         if (req.CategoryId.HasValue)
         {
@@ -74,19 +85,32 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
             .Where(e => e.UserId == userId);
 
         if (status.HasValue) query = query.Where(e => e.Status == status.Value);
-        if (floatingOnly) query = query.Where(e => e.StartAt == null);
+        // floatingOnly excludes windowed events (they belong on the calendar, not the inbox)
+        if (floatingOnly) query = query.Where(e => e.StartAt == null && e.WindowStart == null);
 
         var all = await query.ToListAsync();
 
         // DateTimeOffset comparisons must be done client-side on SQLite
         IEnumerable<Event> events = all;
-        if (startFrom.HasValue) events = events.Where(e => e.StartAt >= startFrom.Value);
-        if (endBefore.HasValue) events = events.Where(e => e.StartAt < endBefore.Value);
+        if (startFrom.HasValue || endBefore.HasValue)
+        {
+            events = events.Where(e =>
+            {
+                if (e.StartAt is not null)
+                    return (!startFrom.HasValue || e.StartAt >= startFrom.Value)
+                        && (!endBefore.HasValue || e.StartAt < endBefore.Value);
+                // Include windowed events whose window overlaps the requested range
+                if (e.WindowStart is not null && e.WindowEnd is not null)
+                    return (!endBefore.HasValue || e.WindowStart < endBefore.Value)
+                        && (!startFrom.HasValue || e.WindowEnd > startFrom.Value);
+                return false;
+            });
+        }
 
         var ctx = await settings.GetDayContextAsync(userId);
         var now = DateTimeOffset.UtcNow;
         return events
-            .OrderBy(e => e.StartAt ?? DateTimeOffset.MaxValue)
+            .OrderBy(e => e.StartAt ?? e.WindowStart ?? DateTimeOffset.MaxValue)
             .ThenBy(e => e.CreatedAt)
             .Select(e => EventDto.FromEntity(e, ctx, now))
             .ToList();
@@ -95,7 +119,8 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
     public async Task<Result<EventDto>> UpdateAsync(Guid id, Guid userId, UpdateEventRequest req)
     {
         var err = Validators.ValidateTitle(req.Title, "Title")
-            ?? Validators.ValidateDateRange(req.StartAt, req.EndAt);
+            ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
+            ?? ValidateWindow(req.StartAt, req.WindowStart, req.WindowEnd, req.WindowDurationMinutes);
         if (err is not null) return Result<EventDto>.Fail(err);
 
         var ev = await db.Events
@@ -106,7 +131,11 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
 
         ev.Title = req.Title.Trim();
         ev.StartAt = req.StartAt;
-        ev.EndAt = req.EndAt;
+        ev.EndAt = req.IsAllDay ? null : req.EndAt;
+        ev.IsAllDay = req.IsAllDay;
+        ev.WindowStart = req.WindowStart;
+        ev.WindowEnd = req.WindowEnd;
+        ev.WindowDurationMinutes = req.WindowDurationMinutes;
         ev.CategoryId = req.CategoryId;
 
         if (req.CategoryId.HasValue)
@@ -176,5 +205,29 @@ public class EventService(StrydeDbContext db, UserSettingsService settings)
     {
         var ctx = await settings.GetDayContextAsync(userId);
         return EventDto.FromEntity(ev, ctx, DateTimeOffset.UtcNow);
+    }
+
+    private static Error? ValidateWindow(
+        DateTimeOffset? startAt,
+        DateTimeOffset? windowStart,
+        DateTimeOffset? windowEnd,
+        int? durationMinutes)
+    {
+        var hasWindow = windowStart.HasValue || windowEnd.HasValue || durationMinutes.HasValue;
+        if (!hasWindow) return null;
+
+        if (startAt.HasValue)
+            return new Error(ErrorType.Validation, "A windowed event cannot also have a start time.");
+        if (!windowStart.HasValue || !windowEnd.HasValue || !durationMinutes.HasValue)
+            return new Error(ErrorType.Validation, "Window start, window end, and duration must all be provided together.");
+        if (windowEnd.Value <= windowStart.Value)
+            return new Error(ErrorType.Validation, "Window end must be after window start.");
+        if (durationMinutes.Value <= 0)
+            return new Error(ErrorType.Validation, "Duration must be greater than zero.");
+        var windowMinutes = (int)(windowEnd.Value - windowStart.Value).TotalMinutes;
+        if (durationMinutes.Value > windowMinutes)
+            return new Error(ErrorType.Validation, "Duration cannot exceed the length of the window.");
+
+        return null;
     }
 }

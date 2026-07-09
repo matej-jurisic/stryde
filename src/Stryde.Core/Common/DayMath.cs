@@ -53,6 +53,7 @@ public static class DayMath
 
     /// <summary>
     /// Overdue: pending, and either the end datetime has passed, or (start-only) the event's day has ended.
+    /// All-day events are overdue when the calendar date has passed (ignoring day boundary).
     /// Floating events are never overdue.
     /// </summary>
     public static bool IsOverdue(Event e, DayContext ctx, DateTimeOffset nowUtc)
@@ -60,6 +61,11 @@ public static class DayMath
         if (e.Status != EventStatus.pending) return false;
         if (e.StartAt is null) return false;
         if (e.EndAt.HasValue) return e.EndAt.Value < nowUtc;
+        if (e.IsAllDay)
+        {
+            var eventDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(e.StartAt.Value, ctx.TimeZone).DateTime);
+            return eventDate < Today(ctx, nowUtc);
+        }
         return EndOfDay(DayOf(e.StartAt.Value, ctx), ctx) <= nowUtc;
     }
 }

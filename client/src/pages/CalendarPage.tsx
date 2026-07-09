@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, ChevronDown, Menu } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { eventsApi, settingsApi } from '@/lib/api'
 import type { BaseEventSummary, Event } from '@/lib/types'
 import { EventModal } from '@/components/events/EventModal'
+import { EventDetailModal } from '@/components/events/EventDetailModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ function timeLabel(iso: string): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
-function pageTitle(view: 'day' | 'week', days: Date[]): string {
+function pageTitle(view: ViewMode, days: Date[]): string {
   if (view === 'day') {
     return days[0].toLocaleDateString('en-US', {
       weekday: 'long',
@@ -73,7 +74,7 @@ function pageTitle(view: 'day' | 'week', days: Date[]): string {
     })
   }
   const f = days[0]
-  const l = days[6]
+  const l = days[days.length - 1]
   if (f.getFullYear() !== l.getFullYear()) {
     return `${f.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${l.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
   }
@@ -83,12 +84,12 @@ function pageTitle(view: 'day' | 'week', days: Date[]): string {
   return `${f.toLocaleDateString('en-US', { month: 'long' })} ${f.getDate()} – ${l.getDate()}, ${l.getFullYear()}`
 }
 
-function compactTitle(view: 'day' | 'week', days: Date[]): string {
+function compactTitle(view: ViewMode, days: Date[]): string {
   if (view === 'day') {
     return days[0].toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
   }
   const f = days[0]
-  const l = days[6]
+  const l = days[days.length - 1]
   if (f.getMonth() === l.getMonth() && f.getFullYear() === l.getFullYear()) {
     return `${f.toLocaleDateString('en-US', { month: 'short' })} ${f.getDate()}-${l.getDate()}`
   }
@@ -119,7 +120,7 @@ function layoutDay(events: Event[]): LayoutEvent[] {
     .filter((e) => e.startAt)
     .map((e) => {
       const s = minOfDay(e.startAt!)
-      const end = e.endAt ? Math.max(minOfDay(e.endAt), s + 15) : s + 30
+      const end = e.endAt ? Math.max(minOfDay(e.endAt), s + 15) : s + 15
       return { event: e, s, end: Math.min(end, 24 * 60) }
     })
     .sort((a, b) => a.s - b.s)
@@ -189,14 +190,113 @@ function eventColors(event: Event, overdue: boolean): EventColors {
   return { bgClass: 'bg-muted', leftColor: 'var(--color-border)', textClass: 'text-foreground' }
 }
 
+function eventAllDayColors(event: Event): string {
+  if (event.isOverdue) return 'bg-destructive/10 text-destructive'
+  const g = event.goals[0]
+  if (g) {
+    switch (g.status) {
+      case 'focus': return 'bg-goal-focus/15 text-goal-focus'
+      case 'active': return 'bg-goal-active/15 text-goal-active'
+      default: return 'bg-goal-bench/15 text-goal-bench'
+    }
+  }
+  return 'bg-primary/10 text-primary'
+}
+
+// ── Windowed event helpers ──────────────────────────────────────────────────
+
+interface WindowedSegment {
+  event: Event
+  topPx: number
+  heightPx: number
+}
+
+function windowedSegmentsForDay(events: Event[], day: Date): WindowedSegment[] {
+  const dayStartMs = sod(day).getTime()
+  const dayEndMs = dayStartMs + 86400000
+  const segments: WindowedSegment[] = []
+  for (const e of events) {
+    if (!e.windowStart || !e.windowEnd) continue
+    const wsMs = new Date(e.windowStart).getTime()
+    const weMs = new Date(e.windowEnd).getTime()
+    const clipStartMs = Math.max(wsMs, dayStartMs)
+    const clipEndMs = Math.min(weMs, dayEndMs)
+    if (clipStartMs >= clipEndMs) continue
+    const startMin = (clipStartMs - dayStartMs) / 60000
+    const endMin = (clipEndMs - dayStartMs) / 60000
+    segments.push({
+      event: e,
+      topPx: (startMin / 60) * HOUR_PX,
+      heightPx: Math.max(((endMin - startMin) / 60) * HOUR_PX, 20),
+    })
+  }
+  return segments
+}
+
+function WindowedEventBlock({
+  segment,
+  onClick,
+}: {
+  segment: WindowedSegment
+  onClick: (e: Event) => void
+}) {
+  const { event, topPx, heightPx } = segment
+  const isDone = event.status !== 'pending'
+  const g = event.goals[0]
+  let accentColor = 'var(--color-border)'
+  if (g) {
+    if (g.status === 'focus') accentColor = 'var(--color-goal-focus)'
+    else if (g.status === 'active') accentColor = 'var(--color-goal-active)'
+    else accentColor = 'var(--color-goal-bench)'
+  } else if (event.category) {
+    accentColor = event.category.color
+  }
+
+  const durationLabel = event.windowDurationMinutes
+    ? event.windowDurationMinutes >= 60
+      ? `~${Math.floor(event.windowDurationMinutes / 60)}h${event.windowDurationMinutes % 60 ? `${event.windowDurationMinutes % 60}m` : ''}`
+      : `~${event.windowDurationMinutes}m`
+    : null
+
+  return (
+    <button
+      className={`absolute inset-x-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 ${isDone ? 'opacity-40' : 'opacity-70'}`}
+      style={{
+        top: topPx + 1,
+        height: Math.max(heightPx - 2, 16),
+        left: 2,
+        right: 2,
+        width: 'calc(100% - 4px)',
+        background: `repeating-linear-gradient(135deg, transparent, transparent 4px, ${accentColor}18 4px, ${accentColor}18 8px)`,
+        border: `1.5px dashed ${accentColor}60`,
+      }}
+      onClick={(e) => { e.stopPropagation(); onClick(event) }}
+    >
+      <div className="px-1.5 py-0.5">
+        {heightPx >= 20 && (
+          <p className="overflow-hidden whitespace-nowrap text-[10px] font-medium leading-tight" style={{ color: accentColor }}>
+            {event.title}{durationLabel ? ` ${durationLabel}` : ''}
+          </p>
+        )}
+      </div>
+    </button>
+  )
+}
+
 // ── EventBlock ──────────────────────────────────────────────────────────────
 
 function EventBlock({
   layout,
   onClick,
+  onMoveStart,
+  suppressClickRef,
+  dimmed,
 }: {
   layout: LayoutEvent
   onClick: (e: Event) => void
+  onMoveStart?: (e: React.MouseEvent, topPx: number) => void
+  suppressClickRef?: { current: boolean }
+  dimmed?: boolean
 }) {
   const { event, col, totalCols, topPx, heightPx } = layout
   const { bgClass, bgHex, leftColor, textClass } = eventColors(event, event.isOverdue)
@@ -212,14 +312,19 @@ function EventBlock({
 
   return (
     <button
-      className={`absolute overflow-hidden rounded-[4px] border border-border/50 bg-card text-left transition-opacity hover:opacity-80 ${isDone ? 'opacity-50' : ''}`}
+      className={`absolute overflow-hidden rounded-[4px] border border-border/50 bg-card text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-50' : ''} ${dimmed ? 'opacity-20' : ''}`}
       style={{
         top: topPx + GAP,
         height: Math.max(heightPx - GAP, 20),
         left: `calc(${leftPct}% + ${GAP}px)`,
         width: `calc(${widthPct}% - ${GAP * 2}px)`,
       }}
+      onMouseDown={(e) => {
+        if (e.button !== 0) return
+        onMoveStart?.(e, topPx)
+      }}
       onClick={(e) => {
+        if (suppressClickRef?.current) return
         e.stopPropagation()
         onClick(event)
       }}
@@ -273,13 +378,18 @@ function snapToGrid(day: Date, yPx: number): Date {
 interface DayColumnProps {
   day: Date
   allEvents: Event[]
+  windowedEvents: Event[]
   onEventClick: (e: Event) => void
   overlay: { topPx: number; heightPx: number } | null
+  moveOverlay: { topPx: number; heightPx: number } | null
   isToday: boolean
   borderLeft: boolean
+  onEventMoveStart: (e: React.MouseEvent, event: Event, topPx: number) => void
+  suppressClickRef: { current: boolean }
+  movingEventId: string | null
 }
 
-function DayColumn({ day, allEvents, onEventClick, overlay, isToday, borderLeft }: DayColumnProps) {
+function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, moveOverlay, isToday, borderLeft, onEventMoveStart, suppressClickRef, movingEventId }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
@@ -291,6 +401,11 @@ function DayColumn({ day, allEvents, onEventClick, overlay, isToday, borderLeft 
         return t >= dayStart.getTime() && t < dayEnd.getTime()
       }),
     [allEvents, dayStart.getTime(), dayEnd.getTime()],
+  )
+
+  const windowed = useMemo(
+    () => windowedSegmentsForDay(windowedEvents, day),
+    [windowedEvents, day],
   )
 
   const layout = useMemo(() => layoutDay(dayEvents), [dayEvents])
@@ -336,9 +451,27 @@ function DayColumn({ day, allEvents, onEventClick, overlay, isToday, borderLeft 
           style={{ top: overlay.topPx, height: overlay.heightPx }}
         />
       )}
+      {/* Event move ghost */}
+      {moveOverlay && (
+        <div
+          className="pointer-events-none absolute inset-x-0 z-30 rounded-[4px] border-2 border-primary bg-primary/20"
+          style={{ top: moveOverlay.topPx, height: moveOverlay.heightPx }}
+        />
+      )}
+      {/* Windowed event blocks (rendered below regular events) */}
+      {windowed.map((s) => (
+        <WindowedEventBlock key={`w-${s.event.id}`} segment={s} onClick={onEventClick} />
+      ))}
       {/* Event blocks */}
       {layout.map((l) => (
-        <EventBlock key={l.event.id} layout={l} onClick={onEventClick} />
+        <EventBlock
+          key={l.event.id}
+          layout={l}
+          onClick={onEventClick}
+          onMoveStart={(e, topPx) => onEventMoveStart(e, l.event, topPx)}
+          suppressClickRef={suppressClickRef}
+          dimmed={l.event.id === movingEventId}
+        />
       ))}
     </div>
   )
@@ -346,13 +479,13 @@ function DayColumn({ day, allEvents, onEventClick, overlay, isToday, borderLeft 
 
 // ── CalendarPage ─────────────────────────────────────────────────────────────
 
-type ViewMode = 'day' | 'week'
+type ViewMode = 'day' | '3day' | 'week'
 
 export function CalendarPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [view, setView] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('stryde-calendar-view')
-    return saved === 'week' ? 'week' : 'day'
+    return saved === 'week' ? 'week' : saved === '3day' ? '3day' : 'day'
   })
   const [viewDropOpen, setViewDropOpen] = useState(false)
   const viewDropRef = useRef<HTMLDivElement>(null)
@@ -363,6 +496,8 @@ export function CalendarPage() {
   const [defaultEndAt, setDefaultEndAt] = useState<string | undefined>()
   const [defaultBaseEvent, setDefaultBaseEvent] = useState<BaseEventSummary | undefined>()
   const [focusStartAt, setFocusStartAt] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailEvent, setDetailEvent] = useState<Event | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
@@ -384,6 +519,17 @@ export function CalendarPage() {
   const [dragOverlays, setDragOverlays] = useState<Map<number, { topPx: number; heightPx: number }>>(
     () => new Map(),
   )
+  const eventMoveRef = useRef<{
+    event: Event
+    durationMs: number
+    offsetPx: number
+    isDragging: boolean
+  } | null>(null)
+  const suppressClickRef = useRef(false)
+  const [moveOverlay, setMoveOverlay] = useState<{ dayIdx: number; topPx: number; heightPx: number } | null>(null)
+  const [movingEventId, setMovingEventId] = useState<string | null>(null)
+
+  const queryClient = useQueryClient()
 
   const { data: settings } = useQuery({
     queryKey: ['settings'],
@@ -404,6 +550,7 @@ export function CalendarPage() {
   // Days to render
   const days = useMemo<Date[]>(() => {
     if (view === 'day') return [sod(current)]
+    if (view === '3day') return Array.from({ length: 3 }, (_, i) => addDays(sod(current), i))
     const ws = startOfWeek(current)
     return Array.from({ length: 7 }, (_, i) => addDays(ws, i))
   }, [view, current])
@@ -440,11 +587,13 @@ export function CalendarPage() {
 
 
   function prev() {
-    setCurrent((d) => addDays(d, view === 'day' ? -1 : -7))
+    const step = view === 'day' ? -1 : view === '3day' ? -3 : -7
+    setCurrent((d) => addDays(d, step))
   }
 
   function next() {
-    setCurrent((d) => addDays(d, view === 'day' ? 1 : 7))
+    const step = view === 'day' ? 1 : view === '3day' ? 3 : 7
+    setCurrent((d) => addDays(d, step))
   }
 
   function goToday() {
@@ -469,6 +618,11 @@ export function CalendarPage() {
     setModalOpen(true)
   }
 
+  function openDetail(event: Event) {
+    setDetailEvent(event)
+    setDetailOpen(true)
+  }
+
   function openEdit(event: Event) {
     setDefaultBaseEvent(undefined)
     setEditingEvent(event)
@@ -476,6 +630,93 @@ export function CalendarPage() {
     setDefaultEndAt(undefined)
     setFocusStartAt(!event.startAt)
     setModalOpen(true)
+  }
+
+  // ── Event move drag ──────────────────────────────────────────────────────
+
+  function handleEventMoveStart(e: React.MouseEvent, event: Event, topPx: number) {
+    if (e.button !== 0 || !event.startAt) return
+    e.stopPropagation()
+
+    const durationMs = event.endAt
+      ? new Date(event.endAt).getTime() - new Date(event.startAt).getTime()
+      : 15 * 60 * 1000
+    const gridY = getYInGrid(e.clientY)
+    const offsetPx = gridY - topPx
+    const startClientX = e.clientX
+    const startClientY = e.clientY
+
+    eventMoveRef.current = { event, durationMs, offsetPx, isDragging: false }
+
+    function onMouseMove(mv: MouseEvent) {
+      if (!eventMoveRef.current) return
+      const dx = mv.clientX - startClientX
+      const dy = mv.clientY - startClientY
+      if (!eventMoveRef.current.isDragging && Math.abs(dx) + Math.abs(dy) < 8) return
+      if (!eventMoveRef.current.isDragging) {
+        eventMoveRef.current.isDragging = true
+        setMovingEventId(event.id)
+        document.body.style.cursor = 'grabbing'
+      }
+      const curY = getYInGrid(mv.clientY)
+      const anchorY = Math.max(0, curY - eventMoveRef.current.offsetPx)
+      const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
+      const startSnapped = snapToGrid(days[curDayIdx], anchorY)
+      const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
+      const durationMin = eventMoveRef.current.durationMs / 60000
+      setMoveOverlay({
+        dayIdx: curDayIdx,
+        topPx: (startMin / 60) * HOUR_PX,
+        heightPx: Math.max((durationMin / 60) * HOUR_PX, 20),
+      })
+    }
+
+    function onMouseUp(mu: MouseEvent) {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+      document.body.style.cursor = ''
+      if (!eventMoveRef.current) return
+      const { event: ev, durationMs: dur, offsetPx: off, isDragging } = eventMoveRef.current
+      eventMoveRef.current = null
+      setMoveOverlay(null)
+      setMovingEventId(null)
+      if (!isDragging) return
+      suppressClickRef.current = true
+      setTimeout(() => { suppressClickRef.current = false }, 0)
+      const curY = getYInGrid(mu.clientY)
+      const anchorY = Math.max(0, curY - off)
+      const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
+      const newStart = snapToGrid(days[curDayIdx], anchorY)
+      const newEnd = new Date(newStart.getTime() + dur)
+      rescheduleEvent(ev, newStart, newEnd)
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }
+
+  function rescheduleEvent(ev: Event, newStart: Date, newEnd: Date) {
+    queryClient.setQueryData<Event[]>(
+      ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
+      (old) => old?.map((e) => e.id === ev.id
+        ? { ...e, startAt: newStart.toISOString(), endAt: newEnd.toISOString() }
+        : e
+      ),
+    )
+    eventsApi.update(ev.id, {
+      title: ev.title,
+      startAt: newStart.toISOString(),
+      endAt: newEnd.toISOString(),
+      isAllDay: ev.isAllDay,
+      windowStart: ev.windowStart,
+      windowEnd: ev.windowEnd,
+      windowDurationMinutes: ev.windowDurationMinutes,
+      goalIds: ev.goals.map((g) => g.id),
+      categoryId: ev.category?.id ?? null,
+    }).finally(() => {
+      queryClient.invalidateQueries({ queryKey: ['events'] })
+      queryClient.invalidateQueries({ queryKey: ['recommendations'] })
+    })
   }
 
   // ── Grid drag helpers ────────────────────────────────────────────────────
@@ -727,11 +968,15 @@ export function CalendarPage() {
     if (scrollRef.current) scrollRef.current.style.overflowY = ''
   }
 
+  const allDayEvents = events.filter((e) => e.isAllDay && e.startAt)
+  const windowedEvents = events.filter((e) => e.windowStart && e.windowEnd)
+  const timedEvents = events.filter((e) => !e.isAllDay && !e.windowStart)
+
   return (
     <div className="flex flex-1 overflow-hidden">
       <RecommendationPanel
         date={formatDateInput(effectiveToday)}
-        onEventClick={openEdit}
+        onEventClick={openDetail}
         onBaseEventClick={openFromBaseEvent}
         mobileOpen={drawerOpen}
         onMobileClose={() => setDrawerOpen(false)}
@@ -792,12 +1037,12 @@ export function CalendarPage() {
               onClick={() => setViewDropOpen((o) => !o)}
               className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
             >
-              {view === 'day' ? 'Day' : 'Week'}
+              {view === 'day' ? 'Day' : view === '3day' ? '3 Days' : 'Week'}
               <ChevronDown className="h-3 w-3 text-muted-foreground" strokeWidth={2} />
             </button>
             {viewDropOpen && (
               <div className="absolute right-0 top-full z-50 mt-1 min-w-[80px] rounded-lg border border-border bg-card py-1 shadow-pop">
-                {(['day', 'week'] as ViewMode[]).map((v) => (
+                {(['day', '3day', 'week'] as ViewMode[]).map((v) => (
                   <button
                     key={v}
                     onClick={() => { setView(v); localStorage.setItem('stryde-calendar-view', v); setViewDropOpen(false) }}
@@ -805,7 +1050,7 @@ export function CalendarPage() {
                       view === v ? 'font-semibold text-foreground' : 'text-muted-foreground'
                     }`}
                   >
-                    {v === 'day' ? 'Day' : 'Week'}
+                    {v === 'day' ? 'Day' : v === '3day' ? '3 Days' : 'Week'}
                   </button>
                 ))}
               </div>
@@ -822,22 +1067,63 @@ export function CalendarPage() {
         </div>
       ) : (
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
-          {/* Week day headers — inside the scroll container so they share the same width as the columns */}
-          {view === 'week' && (
-            <div className="sticky top-0 z-10 flex border-b border-border bg-background">
-              <div className="w-12 shrink-0" />
-              {days.map((day) => (
-                <div
-                  key={day.toISOString()}
-                  className={`flex-1 border-l border-border py-2 text-center text-xs ${
-                    isSameDay(day, effectiveToday) ? 'font-semibold text-primary' : 'text-muted-foreground'
-                  }`}
-                >
-                  {dayHeader(day)}
+          {/* Multi-day headers + all-day row — sticky, inside scroll container to share column widths */}
+          {view !== 'day' && (
+            <div className="sticky top-0 z-10 bg-background">
+              <div className="flex border-b border-border">
+                <div className="w-12 shrink-0" />
+                {days.map((day) => (
+                  <div
+                    key={day.toISOString()}
+                    className={`flex-1 border-l border-border py-2 text-center text-xs ${
+                      isSameDay(day, effectiveToday) ? 'font-semibold text-primary' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {dayHeader(day)}
+                  </div>
+                ))}
+              </div>
+              {allDayEvents.length > 0 && (
+                <div className="flex border-b border-border">
+                  <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
+                    <span className="select-none text-[9px] leading-tight text-muted-foreground">all{'\n'}day</span>
+                  </div>
+                  {days.map((day, idx) => {
+                    const ds = sod(day); const de = addDays(ds, 1)
+                    const dayAll = allDayEvents.filter((e) => { const t = new Date(e.startAt!).getTime(); return t >= ds.getTime() && t < de.getTime() })
+                    return (
+                      <div key={day.toISOString()} className={`flex flex-1 flex-col gap-0.5 px-0.5 py-0.5 ${idx === 0 ? 'border-l border-border' : 'border-l border-border'}`}>
+                        {dayAll.map((e) => (
+                          <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e)}`}>
+                            {e.title}
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })}
                 </div>
-              ))}
+              )}
             </div>
           )}
+
+          {/* Day view all-day row */}
+          {view === 'day' && allDayEvents.some((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 }) && (
+            <div className="sticky top-0 z-10 flex border-b border-border bg-background">
+              <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
+                <span className="select-none text-[9px] leading-tight text-muted-foreground">all{'\n'}day</span>
+              </div>
+              <div className="flex flex-1 flex-col gap-0.5 border-l border-border px-0.5 py-0.5">
+                {allDayEvents
+                  .filter((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 })
+                  .map((e) => (
+                    <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e)}`}>
+                      {e.title}
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex" style={{ height: HOUR_PX * 24 }}>
             {/* Hour labels */}
             <div className="relative w-12 shrink-0">
@@ -866,11 +1152,16 @@ export function CalendarPage() {
                 <DayColumn
                   key={day.toISOString()}
                   day={day}
-                  allEvents={events}
-                  onEventClick={openEdit}
+                  allEvents={timedEvents}
+                  windowedEvents={windowedEvents}
+                  onEventClick={openDetail}
                   overlay={dragOverlays.get(idx) ?? null}
+                  moveOverlay={moveOverlay?.dayIdx === idx ? { topPx: moveOverlay.topPx, heightPx: moveOverlay.heightPx } : null}
                   isToday={isSameDay(day, effectiveToday)}
-                  borderLeft={idx === 0 || view === 'week'}
+                  borderLeft={idx === 0 || view !== 'day'}
+                  onEventMoveStart={handleEventMoveStart}
+                  suppressClickRef={suppressClickRef}
+                  movingEventId={movingEventId}
                 />
               ))}
             </div>
@@ -879,6 +1170,13 @@ export function CalendarPage() {
       )}
 
       </div>
+
+      <EventDetailModal
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        event={detailEvent}
+        onEdit={(ev) => { setDetailOpen(false); openEdit(ev) }}
+      />
 
       <EventModal
         key={editingEvent?.id ?? defaultStartAt ?? defaultBaseEvent?.id ?? 'new'}

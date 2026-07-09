@@ -170,7 +170,7 @@ Unplanned correctness and polish work done after Phase 8:
 
 ---
 
-## Phase 9 — Base Events & Recommendation Rework
+## Phase 9 — Base Events & Recommendation Rework ✅
 
 **Goal:** Introduce Base Events as event templates and rework the recommendation engine to answer "what should I add to today's schedule?" rather than echoing what is already there.
 
@@ -191,11 +191,46 @@ Unplanned correctness and polish work done after Phase 8:
 - Update recommendation panel tier labels and groups to match new tiers
 - Tier 3 recommendation items show the Base Event title with a "create from this" action (creates a new floating or scheduled event pre-filled from the Base Event)
 
-**Done when:** Every new event has a BaseEventId. Recommendations surface what to add to the schedule, not what's already on it. Pattern suggestions (tier 3) appear once ≥2 completions on a weekday exist.
+**Done when:** Every new event has a BaseEventId. Recommendations surface what to add to the schedule, not what's already on it. Pattern suggestions (tier 3) appear once ≥2 completions on a weekday exist. ✔
 
 ---
 
-## Phase 10 — Repeat Rules
+## Windowed Events (July 2026) ✅
+
+Unplanned addition after Phase 9. Adds a third event scheduling state between floating and fully scheduled.
+
+**Problem:** Users often know an event will take a specific amount of time but haven't decided exactly when it will occur within a window (e.g., "this 2-hour workout will happen somewhere on Sunday" or "anytime between Friday 15:00 and Saturday 22:00"). The existing model forced a choice between no time at all (floating, inbox only) or a pinned start time.
+
+**Backend**
+- `Event` entity: `WindowStart DateTimeOffset?`, `WindowEnd DateTimeOffset?`, `WindowDurationMinutes int?`
+- Migration: `AddWindowedEventFields`
+- `EventService.ValidateWindow`: all three fields must be provided together, cannot combine with `StartAt`, end > start, duration > 0, duration ≤ window length
+- `EventService.ListAsync`: `floatingOnly` now excludes windowed events; calendar range queries include windowed events whose window overlaps the requested range
+
+**Frontend**
+- `Event` type extended with `windowStart`, `windowEnd`, `windowDurationMinutes`
+- `EventModal`: third scheduling mode "Flexible window" — window start/end pickers plus h/min duration inputs; reachable via "+ Set flexible window" from due-date or start/end modes
+- `CalendarPage`: `WindowedEventBlock` renders windowed events as dashed, diagonally striped blocks spanning their window within each day column; multi-day windows clip correctly per column; colored by first linked goal status or category
+
+**Done when:** A windowed event appears on the calendar spanning its window as a dashed block, is excluded from the Inbox, and can be created/edited via the flexible window mode in the event modal.
+
+---
+
+## Phase 10 — Daily Plan Page
+
+**Goal:** `/plan` becomes a real execution view instead of a placeholder. See spec.md (Daily Plan) for the full definition.
+
+- Today's agenda: the day's scheduled events as an ordered list with one-click done/skip
+- Recommendations in the middle column (reuse `RecommendationPanel`)
+- Goal health strip: Focus goals with believed vs actual progress
+- Day navigation (prev/next/today), same day-boundary semantics as the calendar
+- Mobile: single column, agenda first
+
+**Done when:** Logging in lands on a Daily Plan that answers "what should I do right now" without opening the calendar.
+
+---
+
+## Phase 11 — Repeat Rules
 
 **Goal:** Events can repeat. The calendar renders all future occurrences virtually; lists show only the next upcoming instance.
 
@@ -220,7 +255,7 @@ Unplanned correctness and polish work done after Phase 8:
 
 ---
 
-## Phase 11 — Progress Insights & Polish
+## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.
 
@@ -238,7 +273,7 @@ Unplanned correctness and polish work done after Phase 8:
 - Empty states for all list views
 - Page titles and basic navigation structure finalized
 - Drag-and-drop: drag a recommendation onto the calendar grid to schedule it; drag/resize existing calendar blocks to reschedule
-- Delete confirmations for events and goals (repeat-scope prompt ships with Phase 10)
+- Delete confirmations for events and goals (repeat-scope prompt ships with Phase 11)
 
 **Docker Compose production hardening**
 - `docker-compose.prod.yml` override (or env-based config) with production-appropriate settings
@@ -251,25 +286,11 @@ Unplanned correctness and polish work done after Phase 8:
 
 ---
 
-## Phase 12 — Daily Plan Page
-
-**Goal:** `/plan` becomes a real execution view instead of a placeholder. See spec.md (Daily Plan) for the full definition.
-
-- Today's agenda: the day's scheduled events as an ordered list with one-click done/skip
-- Recommendations in the middle column (reuse `RecommendationPanel`)
-- Goal health strip: Focus goals with believed vs actual progress
-- Day navigation (prev/next/today), same day-boundary semantics as the calendar
-- Mobile: single column, agenda first
-
-**Done when:** Logging in lands on a Daily Plan that answers "what should I do right now" without opening the calendar.
-
----
-
 ## Open Decisions to Resolve During Build
 
 | # | Decision | Target Phase |
 |---|---|---|
-| 1 | Event → goal progress attribution | Phase 10 (fixed increment for v1) |
+| 1 | Event → goal progress attribution | Phase 12 (fixed increment for v1) |
 | 2 | ~~Recommendation rule tie-breaking within tiers~~ | Resolved in Phase 8: due date asc, duration asc, no-duration last, dedupe into highest tier |
 | 3 | Time ribbon layout details | Resolved in Phase 7 (hour grid, drag-create, snap to 15 min) |
 | 4 | Goal list ordering | Resolved in Phase 5: grouped Focus → Active → Bench → Closed, creation order within a group |

@@ -55,26 +55,42 @@ An event is the atomic unit of work. Every event has:
 |---|---|
 | Title | Required |
 | Goals | Optional — can link to zero, one, or many goals |
-| Start datetime | Optional — if absent, the event is floating |
+| Start datetime | Optional — absent for floating and windowed events |
 | End datetime | Optional — defines duration when combined with start |
+| Window start | Optional — start of the flexible scheduling window (windowed events only) |
+| Window end | Optional — end of the flexible scheduling window (windowed events only) |
+| Window duration | Optional — how long the event is expected to take, in minutes (windowed events only) |
 | Repeat rule | Optional — see Repeats below |
 | Status | `pending`, `done`, `skipped` |
 
-Duration is derived: `end datetime − start datetime`. There is no separate duration field.
+Events exist in one of three scheduling states:
 
 ### Floating Events
 
-An event with no start datetime is floating. It lives in the Inbox and surfaces in Daily Plan recommendations when relevant. It is not overdue and carries no urgency signal by itself.
+An event with no start datetime and no window is floating. It lives in the Inbox and surfaces in Daily Plan recommendations when relevant. It is not overdue and carries no urgency signal by itself.
 
-### Standard Events
+### Windowed Events
 
-An event with a start datetime is standard. It participates in scheduling, overdue detection, and goal progress.
+An event with a known duration but no fixed start time, constrained to a time window (`WindowStart`, `WindowEnd`, `WindowDurationMinutes`). The user knows the event will take a certain amount of time but hasn't decided exactly when within the window it will happen.
+
+- Windowed events appear on the calendar spanning their full window, rendered as dashed blocks with a diagonal stripe pattern.
+- They do not appear in the Inbox — they already have calendar placement context.
+- They are not overdue. The window is a constraint, not a deadline.
+- The window and all three window fields must be provided together; they cannot be combined with a start datetime.
+- Duration must be positive and must not exceed the length of the window.
+- Windowed events are visible to the recommendation engine as candidates for future planning enhancements.
+
+### Scheduled Events
+
+An event with a start datetime is scheduled. It participates in scheduling, overdue detection, and goal progress.
 
 ### Overdue
 
 An event is overdue if it is still pending and:
 - It has an end datetime and that datetime has passed, **or**
 - It has a start datetime (no end) and its day has ended (the day boundary on the following date has passed, in the user's timezone — see Timezone & Day Semantics).
+
+Floating events and windowed events are never overdue.
 
 ### Scheduling
 

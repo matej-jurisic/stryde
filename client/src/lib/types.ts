@@ -63,6 +63,10 @@ export interface Event {
   startAt: string | null
   endAt: string | null
   status: EventStatus
+  isAllDay: boolean
+  windowStart: string | null
+  windowEnd: string | null
+  windowDurationMinutes: number | null
   repeatRuleId: string | null
   createdAt: string
   isOverdue: boolean

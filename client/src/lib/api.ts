@@ -71,10 +71,10 @@ export const eventsApi = {
 
   get: (id: string) => request<Event>(`/api/events/${id}`),
 
-  create: (body: { title: string; startAt?: string | null; endAt?: string | null; goalIds?: string[]; categoryId?: string | null; baseEventId?: string | null }) =>
+  create: (body: { title: string; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null; goalIds?: string[]; categoryId?: string | null; baseEventId?: string | null }) =>
     request<Event>('/api/events', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title: string; startAt?: string | null; endAt?: string | null; goalIds?: string[]; categoryId?: string | null }) =>
+  update: (id: string, body: { title: string; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null; goalIds?: string[]; categoryId?: string | null }) =>
     request<Event>(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (id: string) => request<void>(`/api/events/${id}`, { method: 'DELETE' }),

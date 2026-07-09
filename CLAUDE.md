@@ -1,8 +1,20 @@
 # CLAUDE.md
 
-Guidance for working in the Stryde repository. See `spec.md` for the full product spec and `plan.md` for the phased implementation plan.
+Working guide for the Stryde repository.
+- **`spec.md`** — product spec: what the app does, domain rules, data model fields.
+- **`plan.md`** — build history and upcoming phases.
+- **`design.md`** — visual/UX spec.
 
-> **Keep the docs in sync.** When you add a feature or change how something works, update `CLAUDE.md`, `spec.md`, and `plan.md` to match. `CLAUDE.md` is the implementation/architecture reference; `spec.md` is the product spec; `plan.md` is the build sequence.
+## Doc sync rule
+
+**After every feature or meaningful change, update the docs before closing the task.**
+
+- `CLAUDE.md` — update the file map or conventions if the codebase structure changed.
+- `spec.md` — update if product behaviour, domain rules, or the data model changed.
+- `plan.md` — add an entry (or update a phase) if a feature shipped or a decision was made.
+- `design.md` — update if the UI or visual language changed.
+
+Keep `CLAUDE.md` small: it is a navigation and convention guide, not a product spec. Domain rules belong in `spec.md`; visual rules belong in `design.md`; build history belongs in `plan.md`.
 
 ## What this is
 
@@ -42,48 +54,38 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 **Backend (`Stryde.Core`)**
 - `Entities/` — POCOs; `Guid Id = Guid.NewGuid()` + `DateTimeOffset CreatedAt`, no base class.
   Key entities: `User, Event, BaseEvent, Goal, Checkpoint, RepeatRule, EventGoal (join), UserSettings`.
-  `BaseEvent` — reusable template (title, categoryId?, goals[]); every `Event` has `BaseEventId?` FK.
-  Auto-created silently by `EventService` when a new event doesn't link to an existing one.
-  `Event.Status` is `pending | done | skipped`. `Goal.Status` is `focus | active | bench | closed`.
-  `Checkpoint.Status` is `pending | reached`.
 - `Enums/` — stored as strings (`HasConversion<string>`).
 - `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. Many-to-many via skip nav (`Event.Goals`).
 - `Common/Result.cs` — `Result`/`Result<T>` + `Error(ErrorType, msg)`. **Expected failures = Results, not exceptions.**
-- `Common/Validators.cs` — shared static validation rules (incl. `ValidateTimezone`).
-- `Common/DayMath.cs` — `DayContext(TimeZoneInfo, TimeOnly)` + pure day-bucketing: `DayOf`, `Today`,
-  `EndOfDay`, `EventDay`, `IsOverdue`. **All "which day / overdue?" logic goes through here**, in the
-  user's IANA timezone offset by the day boundary. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
+- `Common/Validators.cs` — shared static validation rules.
+- `Common/DayMath.cs` — all "which day / is this overdue?" logic goes through here, in the user's IANA
+  timezone offset by `DayBoundaryTime`. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
-  `EventDto.IsOverdue` is computed server-side; the client must not re-derive it.
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
-- `Recurrence/RecurrenceCalculator.cs` — *planned for Phase 10, does not exist yet*; uses **virtual rendering** — enumerates future occurrences from a `RepeatRule` for a date range via `DayMath`; does not pre-store instances.
 - ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
 
 **Backend (`Stryde.Api`)**
 - `Program.cs` — registers core services, JWT + auth policy, SPA fallback. JWT config is read
-  **eagerly** from `builder.Configuration` (same pattern as Turnly): `var jwt = builder.Configuration.GetSection(...).Get<JwtOptions>()`.
+  **eagerly** from `builder.Configuration`: `var jwt = builder.Configuration.GetSection(...).Get<JwtOptions>()`.
   Both `JwtSecurityTokenHandler.DefaultMapInboundClaims = false` and `options.MapInboundClaims = false`
-  must be set — the static property alone is not enough (the `JwtBearerOptions.TokenHandlers` instance
-  captures the static value at construction time).
+  must be set — the static property alone is not enough.
 - `Endpoints/*Endpoints.cs` — thin: parse → service → `result.ToProblem()`. Auth required on all routes except `/api/auth/*`.
 - `Endpoints/ApiResults.cs` — `Error.ToProblem()` + `principal.GetUserId()` (reads `sub` claim).
 
 **Frontend (`client/src`)**
-- `App.tsx` — auth-gated routing; index → `/plan` (Daily Plan — currently a stub, see plan.md Phase 11).
+- `App.tsx` — auth-gated routing; index → `/plan`.
 - `pages/` — `PlanPage` (stub), `InboxPage`, `CalendarPage`, `GoalsPage`, `SettingsPage`.
 - `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh).
 - `lib/types.ts` — mirrors backend DTOs.
-- `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`), toggles `.dark` on `<html>`; `initTheme()` runs in `main.tsx`.
+- `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
 - `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field`.
-- `components/layout/useInboxCount.ts` — shared nav badge hook (shares the `['events', 'all']` cache with InboxPage).
+- `components/layout/useInboxCount.ts` — shared nav badge hook (shares `['events', 'all']` cache with InboxPage).
 
 **Tests**
 - `Unit/TestContext.cs` — in-memory SQLite + real services. Naming: `Method_scenario`.
 - `Integration/StrydeApiFactory.cs` + `HttpHelpers.cs` — `SetupUserAsync`, `LoginAsync`, `UseBearer`, `ReadAsync<T>`. Fresh factory per class (`IDisposable`).
-  ⚠️ **JWT secret in tests:** use `builder.UseSetting("Jwt:Secret", testSecret)` in `ConfigureWebHost`.
-  This feeds into `builder.Configuration` before Program.cs reads it eagerly. Do NOT use
-  `services.Configure<JwtOptions>(...)` override — the eager read already happened by then.
+  ⚠️ **JWT secret in tests:** use `builder.UseSetting("Jwt:Secret", testSecret)` in `ConfigureWebHost` — not `services.Configure<JwtOptions>()`, the eager read already happened.
 
 **EF migrations:** prefix `PATH="$PATH:$HOME/.dotnet/tools"` if `dotnet ef` not found. SQLite only.
 
@@ -98,57 +100,17 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - **Auth model:** JWT access token in response body (~15 min); 6-month refresh token in httpOnly
   `Secure` cookie (path `/api/auth`), rotated on every refresh. Read user id from `sub` claim
   (`principal.GetUserId()`). Logic in `TokenService.cs`; cookie I/O in `RefreshCookieManager.cs`.
-- **Enums as strings** in DB and on the frontend (e.g. `GoalStatus = 'focus' | 'active' | 'bench' | 'closed'`).
+- **Enums as strings** in DB and on the frontend.
 - **Theming:** semantic CSS variables in `index.css` → Tailwind via `@theme inline`. Never hardcode
-  `bg-slate-*` / `text-*-600`. Dark mode = `.dark` on `<html>`, controlled by `lib/theme.ts`
-  (light/dark/system on the Settings page, persisted in localStorage).
-- **Day math is server-side.** Anything that decides "which day is this / is this overdue / what is today"
-  uses `DayMath` + `DayContext` in the user's timezone. The client consumes `event.isOverdue`; it never
-  recomputes overdue locally. Purely presentational date formatting (labels, grouping headers) may stay client-side.
+  `bg-slate-*` / `text-*-600`. Dark mode = `.dark` on `<html>`, controlled by `lib/theme.ts`.
+- **Day math is server-side.** The client consumes `event.isOverdue`; it never recomputes overdue
+  locally. Purely presentational date formatting may stay client-side.
 - **Frontend:** `verbatimModuleSyntax` — use `import type` for type-only imports. TanStack Query for
   server state; Zustand for auth (access token in memory).
-- **Query keys:** every event list lives under the `['events', ...]` prefix (`['events', 'all']` for
-  Inbox + nav badge, `['events', 'calendar', ...]` for calendar ranges). After any event write invalidate
-  `['events']` and `['recommendations']`. After any goal write invalidate `['goals']`, `['events']`, and
-  `['recommendations']` (goal titles/statuses are embedded in event DTOs and drive tiers).
-
-## Design language
-
-See `design.md` for the full visual spec. Summary of key decisions:
-
-- **Three-pane layout.** Fixed left sidebar 240px (`md:`+), recommendations column 320px, fluid canvas. Below `md` → drawer.
-- **Color:** light-gray canvas (`--background` `#f3f4f6`), white cards/panels (`--card` `#ffffff`). Primary brand: slate blue (`--primary` `#8499B1`). Borders: `#e5e7eb`.
-- **Active nav state:** `bg-accent` (gray tint) + `font-semibold` text. NOT a primary-color tint. Hover: `bg-accent`.
-- **Shadows: strictly flat.** No shadow on cards or internal elements. Only `shadow-pop` on modals and floating menus.
-- **Status pills** via `Badge`: soft `color-mix` bg + saturated text. Tones: `neutral | red | blue | amber | green`.
-- **Corners:** 6-8px buttons/tags, 8-12px cards/modals (`--radius-md/lg/xl`).
-- **Typography:** Inter, regular body / semibold headers. Don't bold body, labels, or buttons.
-- **Icons:** outline/stroke, 2px stroke-width, `currentColor`.
-- **Goal status colors:** Focus = primary/blue, Active = teal/blue, Bench = neutral gray.
-- **Sidebar:** Stryde brand in `text-primary`. Main nav items in middle. Settings pinned to bottom.
-
-## Key domain rules
-
-- **Floating events** (no `StartAt`) live in Inbox. Not overdue, no urgency signal.
-- **An event belongs to the day it starts on** (user timezone, day-boundary-adjusted). Cross-midnight
-  events are not split; the calendar renders them on their start day, clamped.
-- **Overdue:** pending, and `EndAt` passed, or `StartAt`-only and the event's day has ended (day boundary
-  on the following date, user timezone). Computed in `DayMath.IsOverdue`, exposed as `EventDto.IsOverdue`.
-- **Focus limit:** moving a goal to `focus` is blocked if `UserSettings.MaxFocusGoals` is already reached — `Conflict` error.
-- **Checkpoint cap:** a goal's checkpoints may not plan more than 100% total progress — `Validation` error
-  (cross-field rule in `CheckpointService`).
-- **Repeat rules — virtual rendering:** future occurrences are derived from the stored rule and rendered by the calendar for any requested date range; never pre-stored. Lists (inbox, plan, recommendations) show only the next upcoming instance. Completing/skipping marks that instance; the calendar continues rendering future occurrences from the rule.
-- **Repeat delete scope:** `this` (current instance only) or `future` (deletes the rule, stopping all future occurrences). Always prompt on frontend.
-- **Recommendation ranking (4 tiers):** answers "what should I add to today's schedule?" — never echoes events already on the calendar.
-  1. Floating events linked to Focus goals
-  2. Floating events linked to Active goals
-  3. BaseEvents with ≥2 completions on today's weekday in the past 6 weeks, no instance on today's schedule — frequency desc within tier
-  4. Floating events linked to Bench goals (only when tiers 1-3 are empty)
-  Within each tier: sort by due date asc, then duration asc (shorter first). An event appears at most once.
-- **Goal progress — believed:** sum of `PlannedProgress` of all `reached` checkpoints.
-- **Goal progress — actual:** count of completed linked events × fixed increment (v1: each completion = fixed increment, exact value TBD in Phase 10).
-- **Day boundary:** user-configurable time at which "today" rolls over (default midnight). Stored in
-  `UserSettings.DayBoundaryTime`; applied everywhere via `DayMath` (a day runs boundary to boundary).
+- **Query keys:** every event list lives under `['events', ...]` (`['events', 'all']` for Inbox + nav
+  badge, `['events', 'calendar', ...]` for calendar ranges). After any event write invalidate `['events']`
+  and `['recommendations']`. After any goal write also invalidate `['goals']`.
+- **Design:** see `design.md`. Use semantic color tokens, not hardcoded values.
 
 ## Gotchas
 

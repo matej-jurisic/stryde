@@ -14,19 +14,36 @@ interface FormState {
   goalIds: string[]
   categoryId: string | null
   baseEventId: string | null
+  windowStart: string
+  windowEnd: string
+  windowDurationHours: string
+  windowDurationMins: string
 }
 
 interface Errors {
   title?: string
   endAt?: string
+  windowEnd?: string
+  windowDuration?: string
 }
 
-function validate(form: FormState, useStartEnd: boolean): Errors {
+function validate(form: FormState, useStartEnd: boolean, useWindow: boolean): Errors {
   const errs: Errors = {}
   if (!form.title.trim()) errs.title = 'Title is required.'
   if (form.title.length > 255) errs.title = 'Title cannot exceed 255 characters.'
   if (useStartEnd && form.startAt && form.endAt && form.endAt <= form.startAt) {
     errs.endAt = 'End time must be after start time.'
+  }
+  if (useWindow) {
+    if (form.windowEnd && form.windowStart && form.windowEnd <= form.windowStart) {
+      errs.windowEnd = 'Window end must be after window start.'
+    }
+    const totalMins = (parseInt(form.windowDurationHours || '0') * 60) + parseInt(form.windowDurationMins || '0')
+    if (totalMins <= 0) errs.windowDuration = 'Duration must be greater than zero.'
+    if (form.windowStart && form.windowEnd) {
+      const windowMins = (new Date(form.windowEnd).getTime() - new Date(form.windowStart).getTime()) / 60000
+      if (totalMins > windowMins) errs.windowDuration = 'Duration cannot exceed the length of the window.'
+    }
   }
   return errs
 }
@@ -61,12 +78,18 @@ interface EventModalProps {
   defaultBaseEvent?: BaseEventSummary  // pre-fills from a recommendation pattern suggestion
 }
 
+function durationToHM(minutes: number | null): { h: string; m: string } {
+  if (!minutes) return { h: '', m: '' }
+  return { h: String(Math.floor(minutes / 60)), m: String(minutes % 60) }
+}
+
 function buildInitialForm(
   event: Event | undefined,
   defaultBaseEvent: BaseEventSummary | undefined,
   defaultStartAt: string | undefined,
   defaultEndAt: string | undefined,
 ): FormState {
+  const dur = durationToHM(event?.windowDurationMinutes ?? null)
   if (defaultBaseEvent && !event) {
     return {
       title: defaultBaseEvent.title,
@@ -75,6 +98,10 @@ function buildInitialForm(
       goalIds: defaultBaseEvent.goals.map((g) => g.id),
       categoryId: defaultBaseEvent.category?.id ?? null,
       baseEventId: defaultBaseEvent.id,
+      windowStart: '',
+      windowEnd: '',
+      windowDurationHours: '',
+      windowDurationMins: '',
     }
   }
   return {
@@ -84,6 +111,10 @@ function buildInitialForm(
     goalIds: event?.goals.map((g) => g.id) ?? [],
     categoryId: event?.category?.id ?? null,
     baseEventId: null,
+    windowStart: event ? toInputValue(event.windowStart) : '',
+    windowEnd: event ? toInputValue(event.windowEnd) : '',
+    windowDurationHours: dur.h,
+    windowDurationMins: dur.m,
   }
 }
 
@@ -95,9 +126,11 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
     buildInitialForm(event, defaultBaseEvent, defaultStartAt, defaultEndAt),
   )
   const [errors, setErrors] = useState<Errors>({})
+  const [isAllDay, setIsAllDay] = useState(() => event?.isAllDay ?? false)
   const [useStartEnd, setUseStartEnd] = useState(() =>
     event ? Boolean(event.endAt) : Boolean(defaultEndAt),
   )
+  const [useWindow, setUseWindow] = useState(() => Boolean(event?.windowStart))
   const [baseEventSearch, setBaseEventSearch] = useState('')
   const [showBaseEventResults, setShowBaseEventResults] = useState(false)
   const [showLinkSearch, setShowLinkSearch] = useState(false)
@@ -137,10 +170,17 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
 
   const mutation = useMutation({
     mutationFn: () => {
+      const windowDurationMinutes = useWindow
+        ? (parseInt(form.windowDurationHours || '0') * 60) + parseInt(form.windowDurationMins || '0')
+        : null
       const payload = {
         title: form.title.trim(),
-        startAt: toIso(form.startAt),
-        endAt: useStartEnd ? toIso(form.endAt) : null,
+        startAt: useWindow ? null : toIso(form.startAt),
+        endAt: useWindow || isAllDay ? null : (useStartEnd ? toIso(form.endAt) : null),
+        isAllDay: useWindow ? false : isAllDay,
+        windowStart: useWindow ? toIso(form.windowStart) : null,
+        windowEnd: useWindow ? toIso(form.windowEnd) : null,
+        windowDurationMinutes: useWindow ? windowDurationMinutes : null,
         goalIds: form.goalIds,
         categoryId: form.categoryId,
         baseEventId: form.baseEventId,
@@ -171,7 +211,7 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
   })
 
   function handleSubmit() {
-    const errs = validate(form, useStartEnd)
+    const errs = validate(form, useStartEnd, useWindow)
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
       return
@@ -180,6 +220,8 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
   }
 
   function enableStartEnd() {
+    setIsAllDay(false)
+    setUseWindow(false)
     setUseStartEnd(true)
     if (!form.endAt && form.startAt) {
       setForm((f) => ({ ...f, endAt: addOneHour(f.startAt) }))
@@ -190,6 +232,31 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
     setUseStartEnd(false)
     setForm((f) => ({ ...f, endAt: '' }))
     setErrors((e) => ({ ...e, endAt: undefined }))
+  }
+
+  function toggleAllDay() {
+    if (!isAllDay) {
+      const dateOnly = form.startAt ? form.startAt.substring(0, 10) : ''
+      setForm((f) => ({ ...f, startAt: dateOnly ? dateOnly + 'T00:00' : '', endAt: '' }))
+      setUseStartEnd(false)
+      setUseWindow(false)
+      setErrors((e) => ({ ...e, endAt: undefined }))
+    }
+    setIsAllDay((v) => !v)
+  }
+
+  function enableWindow() {
+    setUseWindow(true)
+    setUseStartEnd(false)
+    setIsAllDay(false)
+    setForm((f) => ({ ...f, endAt: '' }))
+    setErrors({})
+  }
+
+  function disableWindow() {
+    setUseWindow(false)
+    setForm((f) => ({ ...f, windowStart: '', windowEnd: '', windowDurationHours: '', windowDurationMins: '' }))
+    setErrors({})
   }
 
   function selectBaseEvent(be: BaseEventSummary) {
@@ -253,22 +320,104 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
         autoFocus
       />
 
-      {!useStartEnd ? (
+      {useWindow ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-foreground">Flexible window</span>
+            <button type="button" onClick={disableWindow} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Use due date</button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field
+              label="Window start"
+              type="datetime-local"
+              value={form.windowStart}
+              onChange={(e) => setForm((f) => ({ ...f, windowStart: e.target.value }))}
+              autoFocus={focusStartAt}
+            />
+            <Field
+              label="Window end"
+              type="datetime-local"
+              value={form.windowEnd}
+              onChange={(e) => setForm((f) => ({ ...f, windowEnd: e.target.value }))}
+              error={errors.windowEnd}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-foreground">Duration</label>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="0"
+                  value={form.windowDurationHours}
+                  onChange={(e) => setForm((f) => ({ ...f, windowDurationHours: e.target.value }))}
+                  className="h-9 w-16 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <span className="text-sm text-muted-foreground">h</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  placeholder="0"
+                  value={form.windowDurationMins}
+                  onChange={(e) => setForm((f) => ({ ...f, windowDurationMins: e.target.value }))}
+                  className="h-9 w-16 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <span className="text-sm text-muted-foreground">min</span>
+              </div>
+            </div>
+            {errors.windowDuration && <p className="text-xs text-destructive">{errors.windowDuration}</p>}
+          </div>
+        </div>
+      ) : !useStartEnd ? (
         <div className="flex flex-col gap-1.5">
-          <Field
-            label="Due date"
-            type="datetime-local"
-            value={form.startAt}
-            onChange={(e) => setForm((f) => ({ ...f, startAt: e.target.value }))}
+          <div className="flex items-center justify-between">
+            <label htmlFor="due-date" className="text-sm font-medium text-foreground">Due date</label>
+            <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={isAllDay}
+                onChange={toggleAllDay}
+                className="h-3.5 w-3.5 rounded border-border accent-primary"
+              />
+              All day
+            </label>
+          </div>
+          <input
+            id="due-date"
+            type={isAllDay ? 'date' : 'datetime-local'}
+            value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
+            onChange={(e) => {
+              if (isAllDay) {
+                setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
+              } else {
+                setForm((f) => ({ ...f, startAt: e.target.value }))
+              }
+            }}
             autoFocus={focusStartAt}
+            className="h-9 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
-          <button
-            type="button"
-            onClick={enableStartEnd}
-            className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            + Set start and end time
-          </button>
+          {!isAllDay && (
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={enableStartEnd}
+                className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                + Set start and end time
+              </button>
+              <button
+                type="button"
+                onClick={enableWindow}
+                className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                + Set flexible window
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-1.5">
@@ -288,13 +437,22 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
               error={errors.endAt}
             />
           </div>
-          <button
-            type="button"
-            onClick={disableStartEnd}
-            className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Use due date only
-          </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={disableStartEnd}
+              className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Use due date only
+            </button>
+            <button
+              type="button"
+              onClick={enableWindow}
+              className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              + Set flexible window
+            </button>
+          </div>
         </div>
       )}
 

@@ -10,6 +10,10 @@ public class Event
     public DateTimeOffset? StartAt { get; set; }
     public DateTimeOffset? EndAt { get; set; }
     public EventStatus Status { get; set; } = EventStatus.pending;
+    public bool IsAllDay { get; set; } = false;
+    public DateTimeOffset? WindowStart { get; set; }
+    public DateTimeOffset? WindowEnd { get; set; }
+    public int? WindowDurationMinutes { get; set; }
     public Guid? RepeatRuleId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
