@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Plus, X, Check } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -140,6 +141,10 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
     defaultBaseEvent && !event ? defaultBaseEvent : null,
   )
   const searchRef = useRef<HTMLDivElement>(null)
+  const [showGoalPicker, setShowGoalPicker] = useState(false)
+  const [goalSearch, setGoalSearch] = useState('')
+  const [showCatPicker, setShowCatPicker] = useState(false)
+  const [catSearch, setCatSearch] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -147,6 +152,10 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
       setShowBaseEventResults(false)
       setShowLinkSearch(false)
       setErrors({})
+      setShowGoalPicker(false)
+      setGoalSearch('')
+      setShowCatPicker(false)
+      setCatSearch('')
     }
   }, [open])
 
@@ -191,18 +200,6 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
         : eventsApi.create(payload)
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
-      onClose()
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: () => eventsApi.delete(event!.id),
-    onSuccess: () => {
-      qc.setQueriesData<Event[]>({ queryKey: ['events'] }, (old) =>
-        old ? old.filter((e) => e.id !== event!.id) : old,
-      )
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
@@ -304,13 +301,6 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
         : 'text-muted-foreground hover:text-foreground'
     }`
 
-  const pillClass = (selected: boolean) =>
-    `px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-      selected
-        ? 'bg-primary/10 border-primary text-primary'
-        : 'bg-transparent border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
-    }`
-
   return (
     <Modal
       open={open}
@@ -318,19 +308,10 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
       title={isEdit ? 'Edit Event' : 'New Event'}
       footer={
         <>
-          {isEdit && (
-            <Button
-              variant="destructive"
-              onClick={() => deleteMutation.mutate()}
-              loading={deleteMutation.isPending}
-              disabled={mutation.isPending}
-              className="mr-auto"
-            >
-              Delete
-            </Button>
+          {!isEdit && (
+            <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>Cancel</Button>
           )}
-          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending || deleteMutation.isPending}>Cancel</Button>
-          <Button onClick={handleSubmit} loading={mutation.isPending} disabled={deleteMutation.isPending}>
+          <Button onClick={handleSubmit} loading={mutation.isPending}>
             {isEdit ? 'Save Changes' : 'Create Event'}
           </Button>
         </>
@@ -395,7 +376,7 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
 
         {/* Scheduled (start + end) fields */}
         {scheduleMode === 'scheduled' && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field
               label="Start"
               type="datetime-local"
@@ -416,7 +397,7 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
         {/* Window fields */}
         {scheduleMode === 'window' && (
           <div className="flex flex-col gap-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field
                 label="Window start"
                 type="datetime-local"
@@ -469,18 +450,57 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
       {activeGoals.length > 0 && (
         <div className="flex flex-col gap-2">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Goals</span>
-          <div className="flex flex-wrap gap-2">
-            {activeGoals.map((g) => (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => toggleGoal(g.id)}
-                className={pillClass(form.goalIds.includes(g.id))}
-              >
+          <div className="flex flex-wrap items-center gap-2">
+            {activeGoals.filter((g) => form.goalIds.includes(g.id)).map((g) => (
+              <span key={g.id} className="flex items-center gap-1 rounded-lg border border-primary bg-primary/10 px-2.5 py-1.5 text-sm font-medium text-primary">
                 {g.title}
-              </button>
+                <button type="button" onClick={() => toggleGoal(g.id)} aria-label={`Remove ${g.title}`} className="ml-0.5 text-primary/60 transition-colors hover:text-primary">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
             ))}
+            {activeGoals.some((g) => !form.goalIds.includes(g.id)) && (
+              <button
+                type="button"
+                onClick={() => { setShowGoalPicker((v) => !v); setGoalSearch('') }}
+                aria-label="Add goal"
+                className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${showGoalPicker ? 'border-primary/50 bg-primary/10 text-primary' : 'border-dashed border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}`}
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            )}
           </div>
+          {showGoalPicker && (
+            <div className="overflow-hidden rounded-lg border border-border">
+              <div className="border-b border-border px-3 py-2">
+                <input
+                  type="text"
+                  placeholder="Search goals..."
+                  value={goalSearch}
+                  onChange={(e) => setGoalSearch(e.target.value)}
+                  autoFocus
+                  className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                />
+              </div>
+              <div className="max-h-40 overflow-y-auto">
+                {activeGoals
+                  .filter((g) => !form.goalIds.includes(g.id) && g.title.toLowerCase().includes(goalSearch.toLowerCase()))
+                  .map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => toggleGoal(g.id)}
+                      className="w-full px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      {g.title}
+                    </button>
+                  ))}
+                {activeGoals.filter((g) => !form.goalIds.includes(g.id) && g.title.toLowerCase().includes(goalSearch.toLowerCase())).length === 0 && (
+                  <p className="px-3 py-2.5 text-sm text-muted-foreground">No goals found.</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -488,38 +508,68 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
       {categories.length > 0 && (
         <div className="flex flex-col gap-2">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Category</span>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {(() => {
+              const cat = categories.find((c) => c.id === form.categoryId)
+              if (!cat) return null
+              return (
+                <span className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium" style={{ borderColor: cat.color, backgroundColor: cat.color + '22', color: cat.color }}>
+                  <CategoryIcon icon={cat.icon} color={cat.color} size={13} strokeWidth={2} />
+                  {cat.name}
+                  <button
+                    type="button"
+                    onClick={() => { setForm((f) => ({ ...f, categoryId: null })); setShowCatPicker(false) }}
+                    aria-label="Remove category"
+                    className="ml-0.5 opacity-60 transition-opacity hover:opacity-100"
+                    style={{ color: cat.color }}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              )
+            })()}
             <button
               type="button"
-              onClick={() => setForm((f) => ({ ...f, categoryId: null }))}
-              className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                form.categoryId === null
-                  ? 'bg-muted border-foreground/30 text-foreground'
-                  : 'bg-transparent border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-              }`}
+              onClick={() => { setShowCatPicker((v) => !v); setCatSearch('') }}
+              aria-label={form.categoryId ? 'Change category' : 'Add category'}
+              className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${showCatPicker ? 'border-primary/50 bg-primary/10 text-primary' : 'border-dashed border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground'}`}
             >
-              None
+              <Plus className="h-4 w-4" />
             </button>
-            {categories.map((cat) => {
-              const selected = form.categoryId === cat.id
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setForm((f) => ({ ...f, categoryId: cat.id }))}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                    selected
-                      ? 'border-transparent text-foreground'
-                      : 'bg-transparent border-border text-muted-foreground hover:text-foreground'
-                  }`}
-                  style={selected ? { backgroundColor: cat.color + '22', borderColor: cat.color } : undefined}
-                >
-                  <CategoryIcon icon={cat.icon} color={selected ? cat.color : 'currentColor'} size={13} strokeWidth={2} />
-                  {cat.name}
-                </button>
-              )
-            })}
           </div>
+          {showCatPicker && (
+            <div className="overflow-hidden rounded-lg border border-border">
+              <div className="border-b border-border px-3 py-2">
+                <input
+                  type="text"
+                  placeholder="Search categories..."
+                  value={catSearch}
+                  onChange={(e) => setCatSearch(e.target.value)}
+                  autoFocus
+                  className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+                />
+              </div>
+              <div className="max-h-40 overflow-y-auto">
+                {categories
+                  .filter((c) => c.name.toLowerCase().includes(catSearch.toLowerCase()))
+                  .map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => { setForm((f) => ({ ...f, categoryId: cat.id })); setShowCatPicker(false); setCatSearch('') }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <CategoryIcon icon={cat.icon} color={cat.color} size={14} strokeWidth={2} />
+                      {cat.name}
+                      {form.categoryId === cat.id && <Check className="ml-auto h-3.5 w-3.5 text-primary" />}
+                    </button>
+                  ))}
+                {categories.filter((c) => c.name.toLowerCase().includes(catSearch.toLowerCase())).length === 0 && (
+                  <p className="px-3 py-2.5 text-sm text-muted-foreground">No categories found.</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
