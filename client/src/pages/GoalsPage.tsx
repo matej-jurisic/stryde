@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, Check, MoreHorizontal, Layers } from 'lucide-react'
+import { Plus, Pencil, Trash2, Check, MoreHorizontal, Layers, ChevronRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { goalsApi, checkpointsApi, baseEventsApi, ApiError } from '@/lib/api'
 import type { Goal, GoalStatus, Checkpoint, CheckpointSize, BaseEventSummary } from '@/lib/types'
@@ -121,14 +121,18 @@ function CheckpointRow({ checkpoint, goalId, isLast, onEdit }: CheckpointRowProp
   )
 }
 
-function StatusDropdown({
+function GoalMenu({
   transitions,
   isPending,
-  onSelect,
+  onEdit,
+  onDelete,
+  onStatusSelect,
 }: {
   transitions: { label: string; value: GoalStatus }[]
   isPending: boolean
-  onSelect: (value: GoalStatus) => void
+  onEdit: () => void
+  onDelete: () => void
+  onStatusSelect: (value: GoalStatus) => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -148,28 +152,43 @@ function StatusDropdown({
         onClick={() => setOpen((o) => !o)}
         disabled={isPending}
         className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
-        title="Change status"
       >
         <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 z-50 mb-1 min-w-[148px] rounded-lg border border-border bg-card py-1 shadow-pop">
+        <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+          <button
+            onClick={() => { onEdit(); setOpen(false) }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+          >
+            <Pencil className="h-3 w-3" strokeWidth={2} />
+            Edit goal
+          </button>
+          {transitions.length > 0 && <div className="my-1 border-t border-border" />}
           {transitions.map((t) => (
             <button
               key={t.value}
-              onClick={() => { onSelect(t.value); setOpen(false) }}
+              onClick={() => { onStatusSelect(t.value); setOpen(false) }}
               className="w-full px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
             >
               {t.label}
             </button>
           ))}
+          <div className="my-1 border-t border-border" />
+          <button
+            onClick={() => { onDelete(); setOpen(false) }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
+          >
+            <Trash2 className="h-3 w-3" strokeWidth={2} />
+            Delete goal
+          </button>
         </div>
       )}
     </div>
   )
 }
 
-// ── Templates section ──────────────────────────────────────────────────────
+// ── Templates sections ─────────────────────────────────────────────────────
 
 interface TemplateRowProps {
   template: BaseEventSummary
@@ -331,6 +350,99 @@ function TemplatesSection({ goalId }: { goalId: string }) {
   )
 }
 
+function GoallessTemplatesSection() {
+  const qc = useQueryClient()
+  const [adding, setAdding] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+
+  const { data: templates = [] } = useQuery({
+    queryKey: ['base-events', null],
+    queryFn: () => baseEventsApi.listGoalless(),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: () => baseEventsApi.createGoalless({ title: newTitle.trim() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['base-events', null] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+      setNewTitle('')
+      setAdding(false)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => baseEventsApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['base-events', null] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+    },
+  })
+
+  return (
+    <section className="mt-10">
+      <div className="mb-4 flex items-center gap-2">
+        <Layers className="h-4 w-4 text-muted-foreground" strokeWidth={1.5} />
+        <h2 className="text-sm font-semibold text-foreground">Other Templates</h2>
+        {templates.length > 0 && (
+          <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
+            {templates.length}
+          </span>
+        )}
+      </div>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Reusable event templates not tied to a specific goal - useful for recurring activities like "Work" or "Exercise".
+      </p>
+      <div className="flex flex-col gap-1">
+        <ul className="flex flex-col">
+          {templates.map((t) => (
+            <TemplateRow
+              key={t.id}
+              template={t}
+              onDelete={() => deleteMutation.mutate(t.id)}
+            />
+          ))}
+        </ul>
+        {adding ? (
+          <div className="flex items-center gap-2 mt-1">
+            <input
+              autoFocus
+              placeholder="Template title..."
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newTitle.trim()) createMutation.mutate()
+                if (e.key === 'Escape') { setNewTitle(''); setAdding(false) }
+              }}
+              className="h-7 min-w-0 flex-1 rounded border border-input bg-background px-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <button
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending || !newTitle.trim()}
+              className="rounded px-2 py-1 text-xs font-medium text-primary hover:bg-muted disabled:opacity-50"
+            >
+              Add
+            </button>
+            <button
+              onClick={() => { setNewTitle(''); setAdding(false) }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors mt-0.5"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+            Add template
+          </button>
+        )}
+      </div>
+    </section>
+  )
+}
+
 interface GoalCardProps {
   goal: Goal
   onEdit: (g: Goal) => void
@@ -341,11 +453,13 @@ interface GoalCardProps {
 function GoalCard({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalCardProps) {
   const qc = useQueryClient()
   const [statusError, setStatusError] = useState('')
+  const [expanded, setExpanded] = useState(false)
   const tier = (goal.status === 'closed' ? 'bench' : goal.status) as Tier
   const believed = believedProgress(goal.checkpoints)
   const transitions = STATUS_TRANSITIONS[goal.status]
+  const reached = goal.checkpoints.filter((c) => c.status === 'reached').length
+  const hasDetails = goal.checkpoints.length > 0 || goal.status !== 'closed'
 
-  // Goal changes ripple into event badges and recommendation tiers
   const deleteMutation = useMutation({
     mutationFn: () => goalsApi.delete(goal.id),
     onSuccess: () => {
@@ -373,31 +487,27 @@ function GoalCard({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalCardP
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="font-semibold text-foreground truncate">{goal.title}</h3>
+          <h3 className="font-semibold text-foreground">{goal.title}</h3>
           {goal.description && (
-            <p className="mt-0.5 text-sm text-muted-foreground">{goal.description}</p>
+            <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{goal.description}</p>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {goal.status !== 'closed' && (
+          {goal.status !== 'closed' ? (
             <Badge tone={TIER_META[tier].badge}>
               <span className={`h-1.5 w-1.5 rounded-full ${TIER_META[tier].dot}`} />
               {TIER_META[tier].label}
             </Badge>
+          ) : (
+            <Badge tone="neutral">Closed</Badge>
           )}
-          {goal.status === 'closed' && <Badge tone="neutral">Closed</Badge>}
-          <button
-            onClick={() => onEdit(goal)}
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
-          </button>
-          <button
-            onClick={() => deleteMutation.mutate()}
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
-          >
-            <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-          </button>
+          <GoalMenu
+            transitions={transitions}
+            isPending={statusMutation.isPending}
+            onEdit={() => onEdit(goal)}
+            onDelete={() => deleteMutation.mutate()}
+            onStatusSelect={(status) => statusMutation.mutate(status)}
+          />
         </div>
       </div>
 
@@ -412,50 +522,52 @@ function GoalCard({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalCardP
         </div>
       )}
 
-      {/* Checkpoints */}
-      {goal.checkpoints.length > 0 && (
-        <div className="mt-5">
-          <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Checkpoints · {goal.checkpoints.filter((c) => c.status === 'reached').length}/{goal.checkpoints.length}
-          </p>
-          <ul className="flex flex-col">
-            {goal.checkpoints.map((cp, i) => (
-              <CheckpointRow
-                key={cp.id}
-                checkpoint={cp}
-                goalId={goal.id}
-                isLast={i === goal.checkpoints.length - 1}
-                onEdit={(cp) => onEditCheckpoint(goal.id, cp)}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Templates (active goals only) */}
-      {goal.status !== 'closed' && (
-        <div className="mt-5">
-          <TemplatesSection goalId={goal.id} />
-        </div>
-      )}
-
-      {/* Footer: add checkpoint + status transitions */}
-      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+      {/* Expand toggle */}
+      {hasDetails && (
         <button
-          onClick={() => onAddCheckpoint(goal.id)}
-          className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-4 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
-          <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-          Add checkpoint
-        </button>
-        <div className="ml-auto">
-          <StatusDropdown
-            transitions={transitions}
-            isPending={statusMutation.isPending}
-            onSelect={(status) => statusMutation.mutate(status)}
+          <ChevronRight
+            className={`h-3 w-3 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
+            strokeWidth={2.5}
           />
+          {goal.checkpoints.length > 0
+            ? `${reached}/${goal.checkpoints.length} checkpoints`
+            : 'Checkpoints & templates'}
+        </button>
+      )}
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div className="mt-3 border-t border-border pt-4 flex flex-col gap-4">
+          {goal.checkpoints.length > 0 && (
+            <ul className="flex flex-col">
+              {goal.checkpoints.map((cp, i) => (
+                <CheckpointRow
+                  key={cp.id}
+                  checkpoint={cp}
+                  goalId={goal.id}
+                  isLast={i === goal.checkpoints.length - 1}
+                  onEdit={(cp) => onEditCheckpoint(goal.id, cp)}
+                />
+              ))}
+            </ul>
+          )}
+          <button
+            onClick={() => onAddCheckpoint(goal.id)}
+            className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+            Add checkpoint
+          </button>
+          {goal.status !== 'closed' && (
+            <div className="border-t border-border pt-3">
+              <TemplatesSection goalId={goal.id} />
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {statusError && <p className="mt-2 text-xs text-destructive">{statusError}</p>}
     </article>
@@ -498,18 +610,21 @@ export function GoalsPage() {
             <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : goals.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-16 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" />
-                <path d="M12 3v2M12 19v2M3 12h2M19 12h2" />
-              </svg>
+          <div className="flex flex-col gap-10">
+            <div className="flex flex-col items-center gap-3 py-16 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" />
+                  <path d="M12 3v2M12 19v2M3 12h2M19 12h2" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">No goals yet</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Create your first goal to start tracking progress.</p>
+              </div>
+              <Button size="sm" onClick={() => setGoalModal({ open: true })}>New Goal</Button>
             </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">No goals yet</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">Create your first goal to start tracking progress.</p>
-            </div>
-            <Button size="sm" onClick={() => setGoalModal({ open: true })}>New Goal</Button>
+            <GoallessTemplatesSection />
           </div>
         ) : (
           <div className="flex flex-col gap-10">
@@ -542,6 +657,7 @@ export function GoalsPage() {
                 </section>
               )
             })}
+            <GoallessTemplatesSection />
           </div>
         )}
       </div>

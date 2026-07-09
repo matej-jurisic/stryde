@@ -127,12 +127,12 @@ public sealed record CreateCategoryRequest(string Name, string Color, string? Ic
 public sealed record UpdateCategoryRequest(string Name, string Color, string? Icon);
 
 // Base Events
-public sealed record BaseEventSummaryDto(Guid Id, Guid GoalId, string Title, CategorySummaryDto? Category, GoalSummaryDto Goal)
+public sealed record BaseEventSummaryDto(Guid Id, Guid? GoalId, string Title, CategorySummaryDto? Category, GoalSummaryDto? Goal)
 {
     public static BaseEventSummaryDto FromEntity(BaseEvent b) => new(
         b.Id, b.GoalId, b.Title,
         b.Category is not null ? CategorySummaryDto.FromEntity(b.Category) : null,
-        GoalSummaryDto.FromEntity(b.Goal));
+        b.Goal is not null ? GoalSummaryDto.FromEntity(b.Goal) : null);
 }
 
 public sealed record CreateBaseEventRequest(string Title, Guid? CategoryId);

@@ -29,6 +29,23 @@ public static class BaseEventEndpoints
 
         var group = app.MapGroup("/api/base-events").RequireAuthorization();
 
+        group.MapGet("/goalless", async (ClaimsPrincipal principal, BaseEventService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            return Results.Ok(await svc.ListGoallessAsync(userId.Value));
+        });
+
+        group.MapPost("/", async (CreateBaseEventRequest req, ClaimsPrincipal principal, BaseEventService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var result = await svc.CreateAsync(null, userId.Value, req);
+            return result.IsSuccess
+                ? Results.Created($"/api/base-events/{result.Value!.Id}", result.Value)
+                : result.Error!.ToProblem();
+        });
+
         group.MapPut("/{id:guid}", async (Guid id, UpdateBaseEventRequest req, ClaimsPrincipal principal, BaseEventService svc) =>
         {
             var userId = principal.GetUserId();

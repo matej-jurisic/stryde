@@ -1,10 +1,9 @@
-import { useState, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, Menu, Plus } from 'lucide-react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { ChevronLeft, ChevronRight, Menu, Plus, MoreHorizontal } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { eventsApi, goalsApi, settingsApi } from '@/lib/api'
 import type { BaseEventSummary, Checkpoint, CheckpointSize, Event, EventStatus, Goal } from '@/lib/types'
 import { EventModal } from '@/components/events/EventModal'
-import { EventDetailModal } from '@/components/events/EventDetailModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 import { Badge } from '@/components/ui/Badge'
 
@@ -105,10 +104,12 @@ const GOAL_TONE: Record<string, 'focus' | 'active' | 'bench' | 'neutral'> = {
 
 interface AgendaRowProps {
   event: Event
-  onOpen: () => void
+  onEdit: () => void
 }
 
-function AgendaRow({ event, onOpen }: AgendaRowProps) {
+function AgendaRow({ event, onEdit }: AgendaRowProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
   const qc = useQueryClient()
   const isPending = event.status === 'pending'
   const isDone = event.status === 'done'
@@ -122,8 +123,26 @@ function AgendaRow({ event, onOpen }: AgendaRowProps) {
     },
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: () => eventsApi.delete(event.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+    },
+  })
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function close(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [menuOpen])
+
   const timeRange = formatTimeRange(event)
-  const busy = statusMutation.isPending
+  const busy = statusMutation.isPending || deleteMutation.isPending
+  const cat = event.category
 
   return (
     <li className="group flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/40">
@@ -161,7 +180,7 @@ function AgendaRow({ event, onOpen }: AgendaRowProps) {
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
           <button
-            onClick={onOpen}
+            onClick={onEdit}
             className={[
               'text-left text-sm leading-snug',
               isPending ? 'text-foreground' : 'text-muted-foreground line-through',
@@ -173,8 +192,14 @@ function AgendaRow({ event, onOpen }: AgendaRowProps) {
             <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{timeRange}</span>
           )}
         </div>
-        {event.goals.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
+        {(cat || event.goals.length > 0) && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {cat && (
+              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: cat.color }} />
+                {cat.name}
+              </span>
+            )}
             {event.goals.map((g) => (
               <Badge key={g.id} tone={GOAL_TONE[g.status] ?? 'neutral'}>{g.title}</Badge>
             ))}
@@ -182,21 +207,40 @@ function AgendaRow({ event, onOpen }: AgendaRowProps) {
         )}
       </div>
 
-      {/* Skip button (hover) — always rendered to keep layout stable */}
-      <button
-        disabled={busy || !isPending}
-        onClick={() => { if (isPending) statusMutation.mutate('skipped') }}
-        title="Skip"
-        className={[
-          'mt-0.5 shrink-0 text-muted-foreground hover:text-foreground',
-          isPending ? '' : 'invisible pointer-events-none',
-        ].join(' ')}
-      >
-        <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-          <line x1="3" y1="3" x2="13" y2="13" />
-          <line x1="13" y1="3" x2="3" y2="13" />
-        </svg>
-      </button>
+      {/* Options button + dropdown */}
+      <div ref={menuRef} className="relative mt-0.5 shrink-0">
+        <button
+          disabled={busy}
+          onClick={() => setMenuOpen((o) => !o)}
+          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+        >
+          <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
+        </button>
+        {menuOpen && (
+          <div className="absolute right-0 top-full z-20 mt-1 min-w-[120px] rounded-lg border border-border bg-card py-1 shadow-pop">
+            {isPending && (
+              <button
+                onClick={() => { statusMutation.mutate('skipped'); setMenuOpen(false) }}
+                className="w-full px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted"
+              >
+                Skip
+              </button>
+            )}
+            <button
+              onClick={() => { onEdit(); setMenuOpen(false) }}
+              className="w-full px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted"
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => { deleteMutation.mutate(); setMenuOpen(false) }}
+              className="w-full px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted"
+            >
+              Delete
+            </button>
+          </div>
+        )}
+      </div>
     </li>
   )
 }
@@ -210,8 +254,6 @@ export function PlanPage() {
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
   const [defaultBaseEvent, setDefaultBaseEvent] = useState<BaseEventSummary | undefined>()
   const [focusStartAt, setFocusStartAt] = useState(false)
-  const [detailOpen, setDetailOpen] = useState(false)
-  const [detailEvent, setDetailEvent] = useState<Event | null>(null)
 
   const { data: settings } = useQuery({
     queryKey: ['settings'],
@@ -257,11 +299,6 @@ export function PlanPage() {
   function prev() { setCurrent((d) => addDays(d, -1)) }
   function next() { setCurrent((d) => addDays(d, 1)) }
   function goToday() { setCurrent(effectiveToday) }
-
-  function openDetail(event: Event) {
-    setDetailEvent(event)
-    setDetailOpen(true)
-  }
 
   function openEdit(event: Event) {
     setDefaultBaseEvent(undefined)
@@ -407,20 +444,13 @@ export function PlanPage() {
             ) : (
               <ul className="flex flex-col gap-0.5">
                 {agendaEvents.map((event) => (
-                  <AgendaRow key={event.id} event={event} onOpen={() => openDetail(event)} />
+                  <AgendaRow key={event.id} event={event} onEdit={() => openEdit(event)} />
                 ))}
               </ul>
             )}
           </section>
         </div>
       </div>
-
-      <EventDetailModal
-        open={detailOpen}
-        onClose={() => { setDetailOpen(false); setDetailEvent(null) }}
-        event={detailEvent}
-        onEdit={(event) => { setDetailOpen(false); openEdit(event) }}
-      />
 
       <EventModal
         open={modalOpen}

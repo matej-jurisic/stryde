@@ -137,8 +137,16 @@ export const baseEventsApi = {
   listByGoal: (goalId: string) =>
     request<BaseEventSummary[]>(`/api/goals/${goalId}/base-events`),
 
+  listGoalless: () => request<BaseEventSummary[]>(`/api/base-events/goalless`),
+
   create: (goalId: string, body: { title: string; categoryId?: string | null }) =>
     request<BaseEventSummary>(`/api/goals/${goalId}/base-events`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  createGoalless: (body: { title: string; categoryId?: string | null }) =>
+    request<BaseEventSummary>(`/api/base-events/`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

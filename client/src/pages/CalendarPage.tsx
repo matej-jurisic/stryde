@@ -163,25 +163,7 @@ function layoutDay(events: Event[], day: Date): LayoutEvent[] {
 
 type EventColors = { bgClass: string; bgHex?: string; leftColor: string; textClass: string }
 
-function eventColors(event: Event, overdue: boolean): EventColors {
-  if (overdue) {
-    return {
-      bgClass: 'bg-destructive/10',
-      leftColor: 'var(--color-destructive)',
-      textClass: 'text-destructive',
-    }
-  }
-  const g = event.goals[0]
-  if (g) {
-    switch (g.status) {
-      case 'focus':
-        return { bgClass: 'bg-goal-focus/10', leftColor: 'var(--color-goal-focus)', textClass: 'text-goal-focus' }
-      case 'active':
-        return { bgClass: 'bg-goal-active/10', leftColor: 'var(--color-goal-active)', textClass: 'text-goal-active' }
-      default:
-        return { bgClass: 'bg-goal-bench/10', leftColor: 'var(--color-goal-bench)', textClass: 'text-muted-foreground' }
-    }
-  }
+function eventColors(event: Event): EventColors {
   if (event.category) {
     return {
       bgClass: '',
@@ -193,17 +175,11 @@ function eventColors(event: Event, overdue: boolean): EventColors {
   return { bgClass: 'bg-muted', leftColor: 'var(--color-border)', textClass: 'text-foreground' }
 }
 
-function eventAllDayColors(event: Event): string {
-  if (event.isOverdue) return 'bg-destructive/10 text-destructive'
-  const g = event.goals[0]
-  if (g) {
-    switch (g.status) {
-      case 'focus': return 'bg-goal-focus/15 text-goal-focus'
-      case 'active': return 'bg-goal-active/15 text-goal-active'
-      default: return 'bg-goal-bench/15 text-goal-bench'
-    }
+function eventAllDayColors(event: Event): { className: string; style?: React.CSSProperties } {
+  if (event.category) {
+    return { className: 'text-foreground', style: { backgroundColor: event.category.color + '26' } }
   }
-  return 'bg-primary/10 text-primary'
+  return { className: 'bg-primary/10 text-primary' }
 }
 
 // ── Windowed event helpers ──────────────────────────────────────────────────
@@ -245,15 +221,7 @@ function WindowedEventBlock({
 }) {
   const { event, topPx, heightPx } = segment
   const isDone = event.status !== 'pending'
-  const g = event.goals[0]
-  let accentColor = 'var(--color-border)'
-  if (g) {
-    if (g.status === 'focus') accentColor = 'var(--color-goal-focus)'
-    else if (g.status === 'active') accentColor = 'var(--color-goal-active)'
-    else accentColor = 'var(--color-goal-bench)'
-  } else if (event.category) {
-    accentColor = event.category.color
-  }
+  const accentColor = event.category ? event.category.color : 'var(--color-border)'
 
   const durationLabel = event.windowDurationMinutes
     ? event.windowDurationMinutes >= 60
@@ -306,7 +274,7 @@ function EventBlock({
   isResizing?: boolean
 }) {
   const { event, col, totalCols, topPx, heightPx } = layout
-  const { bgClass, bgHex, leftColor, textClass } = eventColors(event, event.isOverdue)
+  const { bgClass, bgHex, leftColor, textClass } = eventColors(event)
   const isDone = event.status !== 'pending'
 
   const GAP = 2
@@ -1343,7 +1311,7 @@ export function CalendarPage() {
                     return (
                       <div key={day.toISOString()} className={`flex flex-1 flex-col gap-0.5 px-0.5 py-0.5 ${idx === 0 ? 'border-l border-border' : 'border-l border-border'}`}>
                         {dayAll.map((e) => (
-                          <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e)}`}>
+                          <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e).className}`} style={eventAllDayColors(e).style}>
                             {e.title}
                           </button>
                         ))}

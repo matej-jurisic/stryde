@@ -95,7 +95,7 @@ function buildInitialForm(
       title: defaultBaseEvent.title,
       startAt: defaultStartAt ?? '',
       endAt: defaultEndAt ?? '',
-      goalIds: [defaultBaseEvent.goalId],
+      goalIds: defaultBaseEvent.goalId ? [defaultBaseEvent.goalId] : [],
       categoryId: defaultBaseEvent.category?.id ?? null,
       baseEventId: defaultBaseEvent.id,
       windowStart: '',

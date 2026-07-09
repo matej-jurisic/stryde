@@ -78,11 +78,13 @@ function BaseEventRecItem({ baseEvent, onCreate }: { baseEvent: BaseEventSummary
     <li className="group flex items-start gap-2 rounded-lg border border-transparent px-2 py-2.5 transition-colors hover:border-border hover:bg-muted/40">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-foreground">{baseEvent.title}</p>
-        <div className="mt-1.5">
-          <Badge tone={goalTone(baseEvent.goal.status)} className="max-w-[160px] truncate block">
-            {baseEvent.goal.title}
-          </Badge>
-        </div>
+        {baseEvent.goal && (
+          <div className="mt-1.5">
+            <Badge tone={goalTone(baseEvent.goal.status)} className="max-w-[160px] truncate block">
+              {baseEvent.goal.title}
+            </Badge>
+          </div>
+        )}
       </div>
       <button
         onClick={onCreate}

@@ -19,13 +19,27 @@ public class BaseEventService(StrydeDbContext db)
         return results.Select(BaseEventSummaryDto.FromEntity).ToList();
     }
 
-    public async Task<Result<BaseEventSummaryDto>> CreateAsync(Guid goalId, Guid userId, CreateBaseEventRequest req)
+    public async Task<List<BaseEventSummaryDto>> ListGoallessAsync(Guid userId)
+    {
+        var results = await db.BaseEvents
+            .Include(b => b.Category)
+            .Where(b => b.GoalId == null && b.UserId == userId)
+            .OrderBy(b => b.Title)
+            .ToListAsync();
+        return results.Select(BaseEventSummaryDto.FromEntity).ToList();
+    }
+
+    public async Task<Result<BaseEventSummaryDto>> CreateAsync(Guid? goalId, Guid userId, CreateBaseEventRequest req)
     {
         var err = Validators.ValidateTitle(req.Title, "Title");
         if (err is not null) return Result<BaseEventSummaryDto>.Fail(err);
 
-        var goal = await db.Goals.FirstOrDefaultAsync(g => g.Id == goalId && g.UserId == userId);
-        if (goal is null) return Result<BaseEventSummaryDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
+        Goal? goal = null;
+        if (goalId.HasValue)
+        {
+            goal = await db.Goals.FirstOrDefaultAsync(g => g.Id == goalId.Value && g.UserId == userId);
+            if (goal is null) return Result<BaseEventSummaryDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
+        }
 
         var be = new BaseEvent { UserId = userId, GoalId = goalId, Title = req.Title.Trim(), Goal = goal };
 
