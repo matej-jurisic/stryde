@@ -294,7 +294,7 @@ function EventBlock({
 }: {
   layout: LayoutEvent
   onClick: (e: Event) => void
-  onMoveStart?: (e: React.MouseEvent, topPx: number) => void
+  onMoveStart?: (e: React.PointerEvent, topPx: number) => void
   suppressClickRef?: { current: boolean }
   dimmed?: boolean
 }) {
@@ -319,8 +319,8 @@ function EventBlock({
         left: `calc(${leftPct}% + ${GAP}px)`,
         width: `calc(${widthPct}% - ${GAP * 2}px)`,
       }}
-      onMouseDown={(e) => {
-        if (e.button !== 0) return
+      onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return
         onMoveStart?.(e, topPx)
       }}
       onClick={(e) => {
@@ -384,7 +384,7 @@ interface DayColumnProps {
   moveOverlay: { topPx: number; heightPx: number } | null
   isToday: boolean
   borderLeft: boolean
-  onEventMoveStart: (e: React.MouseEvent, event: Event, topPx: number) => void
+  onEventMoveStart: (e: React.PointerEvent, event: Event, topPx: number) => void
   suppressClickRef: { current: boolean }
   movingEventId: string | null
 }
@@ -634,65 +634,131 @@ export function CalendarPage() {
 
   // ── Event move drag ──────────────────────────────────────────────────────
 
-  function handleEventMoveStart(e: React.MouseEvent, event: Event, topPx: number) {
-    if (e.button !== 0 || !event.startAt) return
+  function handleEventMoveStart(e: React.PointerEvent, event: Event, topPx: number) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    if (!event.startAt) return
     e.stopPropagation()
 
     const durationMs = event.endAt
       ? new Date(event.endAt).getTime() - new Date(event.startAt).getTime()
       : 15 * 60 * 1000
-    const gridY = getYInGrid(e.clientY)
-    const offsetPx = gridY - topPx
+    const isTouch = e.pointerType === 'touch'
+    const pointerId = e.pointerId
     const startClientX = e.clientX
     const startClientY = e.clientY
+    const gridY = getYInGrid(startClientY)
+    const offsetPx = gridY - topPx
 
-    eventMoveRef.current = { event, durationMs, offsetPx, isDragging: false }
+    function startDragging() {
+      eventMoveRef.current = { event, durationMs, offsetPx, isDragging: false }
+      // Dim the event immediately on touch to confirm long-press registered
+      if (isTouch) setMovingEventId(event.id)
+      if (!isTouch) document.body.style.cursor = 'grabbing'
 
-    function onMouseMove(mv: MouseEvent) {
-      if (!eventMoveRef.current) return
-      const dx = mv.clientX - startClientX
-      const dy = mv.clientY - startClientY
-      if (!eventMoveRef.current.isDragging && Math.abs(dx) + Math.abs(dy) < 8) return
-      if (!eventMoveRef.current.isDragging) {
-        eventMoveRef.current.isDragging = true
-        setMovingEventId(event.id)
-        document.body.style.cursor = 'grabbing'
+      function onPointerMove(mv: PointerEvent) {
+        if (isTouch && mv.pointerId !== pointerId) return
+        if (!eventMoveRef.current) return
+        if (!eventMoveRef.current.isDragging) {
+          if (!isTouch) {
+            // Mouse needs a small movement threshold to distinguish click from drag
+            const dx = mv.clientX - startClientX
+            const dy = mv.clientY - startClientY
+            if (Math.abs(dx) + Math.abs(dy) < 8) return
+            document.body.style.cursor = 'grabbing'
+          }
+          eventMoveRef.current.isDragging = true
+          setMovingEventId(event.id)
+        }
+        const curY = getYInGrid(mv.clientY)
+        const anchorY = Math.max(0, curY - eventMoveRef.current.offsetPx)
+        const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
+        const startSnapped = snapToGrid(days[curDayIdx], anchorY)
+        const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
+        const durationMin = eventMoveRef.current.durationMs / 60000
+        setMoveOverlay({
+          dayIdx: curDayIdx,
+          topPx: (startMin / 60) * HOUR_PX,
+          heightPx: Math.max((durationMin / 60) * HOUR_PX, 20),
+        })
       }
-      const curY = getYInGrid(mv.clientY)
-      const anchorY = Math.max(0, curY - eventMoveRef.current.offsetPx)
-      const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
-      const startSnapped = snapToGrid(days[curDayIdx], anchorY)
-      const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
-      const durationMin = eventMoveRef.current.durationMs / 60000
-      setMoveOverlay({
-        dayIdx: curDayIdx,
-        topPx: (startMin / 60) * HOUR_PX,
-        heightPx: Math.max((durationMin / 60) * HOUR_PX, 20),
-      })
+
+      function cleanup() {
+        window.removeEventListener('pointermove', onPointerMove)
+        window.removeEventListener('pointerup', onPointerUp)
+        window.removeEventListener('pointercancel', onPointerCancel)
+        document.body.style.cursor = ''
+      }
+
+      function onPointerUp(mu: PointerEvent) {
+        if (isTouch && mu.pointerId !== pointerId) return
+        cleanup()
+        if (!eventMoveRef.current) return
+        const { event: ev, durationMs: dur, offsetPx: off, isDragging } = eventMoveRef.current
+        eventMoveRef.current = null
+        setMoveOverlay(null)
+        setMovingEventId(null)
+        if (!isDragging) return
+        suppressClickRef.current = true
+        setTimeout(() => { suppressClickRef.current = false }, 0)
+        const curY = getYInGrid(mu.clientY)
+        const anchorY = Math.max(0, curY - off)
+        const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
+        const newStart = snapToGrid(days[curDayIdx], anchorY)
+        const newEnd = new Date(newStart.getTime() + dur)
+        rescheduleEvent(ev, newStart, newEnd)
+      }
+
+      function onPointerCancel(pc: PointerEvent) {
+        if (isTouch && pc.pointerId !== pointerId) return
+        cleanup()
+        eventMoveRef.current = null
+        setMoveOverlay(null)
+        setMovingEventId(null)
+      }
+
+      window.addEventListener('pointermove', onPointerMove)
+      window.addEventListener('pointerup', onPointerUp)
+      window.addEventListener('pointercancel', onPointerCancel)
     }
 
-    function onMouseUp(mu: MouseEvent) {
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-      document.body.style.cursor = ''
-      if (!eventMoveRef.current) return
-      const { event: ev, durationMs: dur, offsetPx: off, isDragging } = eventMoveRef.current
-      eventMoveRef.current = null
-      setMoveOverlay(null)
-      setMovingEventId(null)
-      if (!isDragging) return
-      suppressClickRef.current = true
-      setTimeout(() => { suppressClickRef.current = false }, 0)
-      const curY = getYInGrid(mu.clientY)
-      const anchorY = Math.max(0, curY - off)
-      const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
-      const newStart = snapToGrid(days[curDayIdx], anchorY)
-      const newEnd = new Date(newStart.getTime() + dur)
-      rescheduleEvent(ev, newStart, newEnd)
-    }
+    if (isTouch) {
+      // Long-press (500ms) before drag activates, so normal taps/scrolls still work
+      let cancelled = false
+      let timer: ReturnType<typeof setTimeout>
 
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
+      function onEarlyMove(mv: PointerEvent) {
+        if (mv.pointerId !== pointerId) return
+        const dx = mv.clientX - startClientX
+        const dy = mv.clientY - startClientY
+        if (Math.sqrt(dx * dx + dy * dy) > 15) {
+          cancelled = true
+          clearTimeout(timer)
+          window.removeEventListener('pointermove', onEarlyMove)
+          window.removeEventListener('pointerup', onEarlyUp)
+        }
+      }
+
+      function onEarlyUp(up: PointerEvent) {
+        if (up.pointerId !== pointerId) return
+        cancelled = true
+        clearTimeout(timer)
+        window.removeEventListener('pointermove', onEarlyMove)
+        window.removeEventListener('pointerup', onEarlyUp)
+      }
+
+      window.addEventListener('pointermove', onEarlyMove)
+      window.addEventListener('pointerup', onEarlyUp)
+
+      timer = setTimeout(() => {
+        if (cancelled) return
+        window.removeEventListener('pointermove', onEarlyMove)
+        window.removeEventListener('pointerup', onEarlyUp)
+        if (navigator.vibrate) navigator.vibrate(30)
+        startDragging()
+      }, 500)
+    } else {
+      startDragging()
+    }
   }
 
   function rescheduleEvent(ev: Event, newStart: Date, newEnd: Date) {
@@ -835,7 +901,7 @@ export function CalendarPage() {
   // touch handlers as passive, so this has to be a native listener.
   useEffect(() => {
     function onTouchMove(e: TouchEvent) {
-      if (dragRef.current?.isDrag) e.preventDefault()
+      if (dragRef.current?.isDrag || eventMoveRef.current?.isDragging) e.preventDefault()
     }
     document.addEventListener('touchmove', onTouchMove, { passive: false })
     return () => document.removeEventListener('touchmove', onTouchMove)

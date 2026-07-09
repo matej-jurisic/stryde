@@ -191,7 +191,7 @@ Progress has two tracks:
 
 The Daily Plan is the primary execution view: a distinct page (`/plan`, the app's index route) focused on *executing* today, as opposed to the Calendar which is for *placing events in time*.
 
-> **Status: specced, not yet built.** The route currently shows a placeholder. Until it ships, the Calendar day view (with the recommendations panel) covers the same ground.
+> **Status: shipped in Phase 10.**
 
 ### Contents
 
@@ -230,7 +230,7 @@ Only these views are in scope for v1:
 
 | View | Purpose |
 |---|---|
-| Daily Plan | Execution view for a single day: agenda, recommendations, goal health. Index route. (Specced, not yet built.) |
+| Daily Plan | Execution view for a single day: agenda, recommendations, goal health. Index route. |
 | Inbox | Triage list of all events grouped by state (Overdue, Today, Unscheduled, Upcoming, Completed). Entry point for unscheduled work. |
 | Calendar | Day/week view of scheduled events. Primary scheduling surface. |
 | Goals | Goal list with progress insight per goal. Checkpoint management. |

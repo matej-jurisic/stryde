@@ -216,17 +216,17 @@ Unplanned addition after Phase 9. Adds a third event scheduling state between fl
 
 ---
 
-## Phase 10 — Daily Plan Page
+## Phase 10 — Daily Plan Page ✅
 
 **Goal:** `/plan` becomes a real execution view instead of a placeholder. See spec.md (Daily Plan) for the full definition.
 
-- Today's agenda: the day's scheduled events as an ordered list with one-click done/skip
-- Recommendations in the middle column (reuse `RecommendationPanel`)
-- Goal health strip: Focus goals with believed vs actual progress
-- Day navigation (prev/next/today), same day-boundary semantics as the calendar
-- Mobile: single column, agenda first
+- Today's agenda: the day's scheduled events as an ordered list with one-click done/skip (checkbox = done; hover skip button = skipped; clicking title opens EventDetailModal for edit/delete)
+- Recommendations in the middle column (`RecommendationPanel` reused; clicking a floating event rec opens EventDetailModal, base event rec opens EventModal pre-filled)
+- Goal health strip: Focus goals with believed progress bar and percentage (actual progress deferred to Phase 12)
+- Day navigation (prev/next/today + date picker), same day-boundary semantics as the calendar
+- Mobile: single column, agenda first; recommendations behind drawer toggle
 
-**Done when:** Logging in lands on a Daily Plan that answers "what should I do right now" without opening the calendar.
+**Done when:** Logging in lands on a Daily Plan that answers "what should I do right now" without opening the calendar. ✔
 
 ---
 

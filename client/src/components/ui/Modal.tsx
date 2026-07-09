@@ -56,12 +56,12 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
         className="relative z-10 flex w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-background"
         style={{ boxShadow: 'var(--shadow-pop-value)', maxHeight: `calc(100vh - 2rem - ${kbOffset}px)` }}
       >
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h2 id="modal-title" className="text-base font-semibold text-foreground">{title}</h2>
+        <div className="flex items-start justify-between border-b border-border px-5 py-4">
+          <h2 id="modal-title" className="min-w-0 mr-3 text-base font-semibold text-foreground break-words">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex shrink-0 h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>
@@ -70,7 +70,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
           {children}
         </div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
             {footer}
           </div>
         )}
