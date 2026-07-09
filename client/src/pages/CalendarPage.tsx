@@ -588,6 +588,18 @@ export function CalendarPage() {
   // pointercancel fires when the browser takes over the gesture for scrolling,
   // giving us a reliable signal to abort without false-firing during normal scrolls.
 
+  // Once the long-press arms a drag, native scrolling must be suppressed by
+  // preventDefault-ing touchmove from a non-passive listener. Pointer capture and
+  // overflow toggles don't stop the browser's pan gesture, and React registers its
+  // touch handlers as passive, so this has to be a native listener.
+  useEffect(() => {
+    function onTouchMove(e: TouchEvent) {
+      if (dragRef.current?.isDrag) e.preventDefault()
+    }
+    document.addEventListener('touchmove', onTouchMove, { passive: false })
+    return () => document.removeEventListener('touchmove', onTouchMove)
+  }, [])
+
   function stopAutoScroll() {
     if (autoScrollRef.current) {
       cancelAnimationFrame(autoScrollRef.current.rafId)
