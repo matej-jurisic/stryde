@@ -3,12 +3,14 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Zap } from 'lucide-react'
 import { authApi, ApiError } from '@/lib/api'
 import { useAuthStore } from '@/store/auth'
+import { isNative, getServerUrl, setServerUrl } from '@/lib/server-config'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 
 export function RegisterPage() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
+  const [serverUrl, setServerUrlState] = useState(getServerUrl)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -42,6 +44,17 @@ export function RegisterPage() {
         <h1 className="mb-1 text-xl font-semibold text-foreground">Create account</h1>
         <p className="mb-6 text-sm text-muted-foreground">Get started with Stryde. It only takes a moment.</p>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {isNative() && (
+            <Field
+              label="Server URL"
+              type="url"
+              placeholder="http://192.168.1.100:8080"
+              value={serverUrl}
+              onChange={(e) => setServerUrlState(e.target.value)}
+              onBlur={() => setServerUrl(serverUrl)}
+              autoComplete="off"
+            />
+          )}
           <Field
             label="Username"
             type="text"

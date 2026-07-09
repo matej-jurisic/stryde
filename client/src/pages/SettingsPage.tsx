@@ -7,6 +7,7 @@ import { Field } from '@/components/ui/Field'
 import { settingsApi, authApi, ApiError } from '@/lib/api'
 import { useAuthStore } from '@/store/auth'
 import { getThemePref, setThemePref, type ThemePref } from '@/lib/theme'
+import { isNative, getServerUrl, setServerUrl } from '@/lib/server-config'
 
 function timezoneOptions(current: string): string[] {
   const supported =
@@ -35,6 +36,8 @@ export function SettingsPage() {
   const qc = useQueryClient()
   const { user, clear } = useAuthStore()
   const [theme, setTheme] = useState<ThemePref>(getThemePref)
+  const [serverUrl, setServerUrlState] = useState(getServerUrl)
+  const [serverUrlSaved, setServerUrlSaved] = useState(false)
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ['settings'],
@@ -185,6 +188,42 @@ export function SettingsPage() {
                   ))}
                 </div>
               </Section>
+
+              {isNative() && (
+                <Section title="Connection">
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <Field
+                        label="Server URL"
+                        type="url"
+                        placeholder="http://192.168.1.100:8080"
+                        value={serverUrl}
+                        onChange={(e) => {
+                          setServerUrlSaved(false)
+                          setServerUrlState(e.target.value)
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Address of your Stryde backend server.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setServerUrl(serverUrl)
+                          setServerUrlSaved(true)
+                        }}
+                      >
+                        Save
+                      </Button>
+                      {serverUrlSaved && (
+                        <span className="text-xs text-muted-foreground">Saved.</span>
+                      )}
+                    </div>
+                  </div>
+                </Section>
+              )}
 
               <Section title="Account">
                 <div className="flex items-center justify-between gap-3">

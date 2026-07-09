@@ -278,6 +278,26 @@ Unplanned addition after Phase 9. Adds a third event scheduling state between fl
 
 ---
 
+## Android APK (July 2026) ✅
+
+**Goal:** Ship Stryde as a signed Android APK using Capacitor, distributable via Obtainium or sideload.
+
+- Capacitor wraps the Vite/React SPA in a native Android WebView (`appId: dev.stryde.app`)
+- `@capacitor/core` + `@capacitor/android` added to `client/package.json`; `androidScheme: https` so the WebView origin is `https://localhost`
+- `client/capacitor.config.ts` — Capacitor config; `webDir: dist`
+- Android project generated at `client/android/` via `npx cap add android`
+- `client/android/app/build.gradle` patched with release signing via env vars (`STRYDE_KEYSTORE`, `STRYDE_KEYSTORE_PASSWORD`, `STRYDE_KEY_ALIAS`, `STRYDE_KEY_PASSWORD`)
+- `client/android/.gitignore` excludes auto-generated assets, cordova plugins, `local.properties`, build output
+- **Server URL config** (`client/src/lib/server-config.ts`): since the APK can't use relative `/api` paths, a server URL is stored in `localStorage` and prepended to every `fetch` in `api.ts`. When `getServerUrl()` returns `''` (web mode), all URLs stay relative and the existing Vite proxy + Docker serving work unchanged
+- Login and register pages show a "Server URL" field when `isNative()` (Capacitor-detected); Settings page adds a "Connection" section for the same
+- Backend `Cors:Origins` gains `https://localhost` (Capacitor WebView origin)
+- `stryde-build.ps1` — local one-command release script (gitignored): bumps `versionCode`/`versionName`, builds SPA, `cap sync android`, signs with keystore via env vars, stages APK to `release/`
+- npm scripts added: `android:sync`, `android:open`, `android:apk`
+
+**Build flow:** `.\stryde-build.ps1` from repo root. First run creates the keystore at `D:\Projects\stryde-release.jks`. Set `$remoteHost` in the script to SCP the APK to a homelab server for Obtainium distribution.
+
+---
+
 ## Phase 11 — Repeat Rules
 
 **Goal:** Events can repeat. The calendar renders all future occurrences virtually; lists show only the next upcoming instance.

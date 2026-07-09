@@ -1,4 +1,5 @@
 import { useAuthStore } from '@/store/auth'
+import { getServerUrl } from './server-config'
 import type { AuthResponse, User, Goal, GoalStatus, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Event, BaseEventSummary } from './types'
 
 export class ApiError extends Error {
@@ -16,7 +17,7 @@ export async function tryRefresh(): Promise<boolean> {
   if (refreshPromise) return refreshPromise
   refreshPromise = (async () => {
     try {
-      const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+      const res = await fetch(getServerUrl() + '/api/auth/refresh', { method: 'POST', credentials: 'include' })
       if (!res.ok) return false
       const data = (await res.json()) as AuthResponse
       useAuthStore.getState().setAuth(data.accessToken, data.user)
@@ -36,7 +37,7 @@ export async function request<T>(path: string, init: RequestInit = {}, retry = t
   if (token) headers.set('Authorization', `Bearer ${token}`)
   if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json')
 
-  const res = await fetch(path, { ...init, headers, credentials: 'include' })
+  const res = await fetch(getServerUrl() + path, { ...init, headers, credentials: 'include' })
 
   if (res.status === 401 && retry) {
     const ok = await tryRefresh()

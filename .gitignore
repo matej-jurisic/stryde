@@ -19,3 +19,11 @@ appsettings.Development.json
 .vscode/
 .idea/
 *.suo
+
+# Android / Capacitor build artifacts
+/stryde-build.ps1
+*.jks
+*.keystore
+/release/
+*.apk
+*.aab
