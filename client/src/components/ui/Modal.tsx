@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
@@ -11,6 +11,8 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+  const [kbOffset, setKbOffset] = useState(0)
+
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -18,11 +20,29 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
     return () => document.removeEventListener('keydown', handler)
   }, [open, onClose])
 
+  // When the virtual keyboard opens the visual viewport shrinks; shift the modal
+  // up by the keyboard height so it stays fully visible above the keyboard.
+  useEffect(() => {
+    if (!open) return
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setKbOffset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
+    update()
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => {
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+      setKbOffset(0)
+    }
+  }, [open])
+
   if (!open) return null
 
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ paddingBottom: `max(1rem, ${kbOffset}px)` }}
       aria-modal="true"
       role="dialog"
       aria-labelledby="modal-title"
@@ -34,7 +54,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
       />
       <div
         className="relative z-10 flex w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-background"
-        style={{ boxShadow: 'var(--shadow-pop-value)' }}
+        style={{ boxShadow: 'var(--shadow-pop-value)', maxHeight: `calc(100vh - 2rem - ${kbOffset}px)` }}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h2 id="modal-title" className="text-base font-semibold text-foreground">{title}</h2>

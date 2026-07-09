@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
-import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock } from 'lucide-react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock, Menu, Inbox } from 'lucide-react'
 import { eventsApi, categoriesApi } from '@/lib/api'
-import type { Event, EventStatus } from '@/lib/types'
+import type { Category, Event, EventStatus } from '@/lib/types'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { EventModal } from '@/components/events/EventModal'
+import { CategoryModal } from '@/components/categories/CategoryModal'
 import { PageHeader } from '@/components/layout/PageHeader'
 
 // --- date helpers ---
@@ -183,10 +184,16 @@ function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
 export function InboxPage() {
   const [searchParams] = useSearchParams()
   const categoryId = searchParams.get('category')
+  const navigate = useNavigate()
+  const qc = useQueryClient()
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
   const [scheduleMode, setScheduleMode] = useState(false)
+
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [catModalOpen, setCatModalOpen] = useState(false)
+  const [editingCategory, setEditingCategory] = useState<Category | undefined>()
 
   const { data: events = [], isLoading } = useQuery({
     queryKey: ['events', 'all'],
@@ -197,6 +204,35 @@ export function InboxPage() {
     queryKey: ['categories'],
     queryFn: categoriesApi.list,
   })
+
+  const deleteCatMutation = useMutation({
+    mutationFn: (id: string) => categoriesApi.delete(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['categories'] })
+      qc.invalidateQueries({ queryKey: ['events'] })
+      if (categoryId === id) navigate('/inbox', { replace: true })
+    },
+  })
+
+  async function handleCatSave(name: string, color: string, icon: string | null) {
+    if (editingCategory) {
+      await categoriesApi.update(editingCategory.id, { name, color, icon })
+    } else {
+      await categoriesApi.create({ name, color, icon })
+    }
+    qc.invalidateQueries({ queryKey: ['categories'] })
+    qc.invalidateQueries({ queryKey: ['events'] })
+  }
+
+  function openAddCat() {
+    setEditingCategory(undefined)
+    setCatModalOpen(true)
+  }
+
+  function openEditCat(cat: Category) {
+    setEditingCategory(cat)
+    setCatModalOpen(true)
+  }
 
   const activeCategory = categoryId ? categories.find((c) => c.id === categoryId) : null
   const visibleEvents = categoryId
@@ -246,7 +282,21 @@ export function InboxPage() {
               <CategoryIcon icon={activeCategory.icon} color={activeCategory.color} size={15} strokeWidth={2} />
               {activeCategory.name}
             </span>
-          ) : 'Inbox'
+          ) : (
+            <span className="flex items-center gap-2">
+              <Inbox className="h-[15px] w-[15px] text-muted-foreground" strokeWidth={2} />
+              Inbox
+            </span>
+          )
+        }
+        leading={
+          <button
+            onClick={() => setDrawerOpen(true)}
+            className="md:hidden flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            aria-label="Open categories"
+          >
+            <Menu className="h-4 w-4" strokeWidth={2} />
+          </button>
         }
         action={
           <Button size="sm" onClick={openCreate}>
@@ -305,11 +355,109 @@ export function InboxPage() {
       </div>
 
       <EventModal
+        key={editingEvent?.id ?? 'new'}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         event={editingEvent}
         focusStartAt={scheduleMode}
       />
+
+      <CategoryModal
+        open={catModalOpen}
+        onClose={() => setCatModalOpen(false)}
+        category={editingCategory}
+        onSave={handleCatSave}
+      />
+
+      {/* Mobile category drawer */}
+      {drawerOpen && (
+        <div className="md:hidden fixed inset-0 z-40 flex">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setDrawerOpen(false)}
+          />
+          {/* Panel */}
+          <div className="relative z-10 flex w-64 flex-col bg-background border-r border-border">
+            <div className="flex items-center justify-between px-4 py-4 border-b border-border">
+              <span className="text-sm font-semibold text-foreground">Categories</span>
+              <button
+                onClick={() => setDrawerOpen(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-4 w-4" strokeWidth={2} />
+              </button>
+            </div>
+
+            <nav className="flex-1 overflow-y-auto px-3 py-2">
+              {/* Inbox item */}
+              <Link
+                to="/inbox"
+                onClick={() => setDrawerOpen(false)}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                  !categoryId
+                    ? 'bg-muted font-semibold text-foreground'
+                    : 'font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                }`}
+              >
+                <span className="h-[18px] w-[18px] shrink-0 flex items-center justify-center">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-[18px] w-[18px]">
+                    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+                    <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
+                  </svg>
+                </span>
+                Inbox
+              </Link>
+
+              {categories.length > 0 && <div className="my-2 border-t border-border" />}
+
+              {/* Category items */}
+              {categories.map((cat) => {
+                const active = categoryId === cat.id
+                return (
+                  <div key={cat.id} className="flex items-center gap-1">
+                    <Link
+                      to={`/inbox?category=${cat.id}`}
+                      onClick={() => setDrawerOpen(false)}
+                      className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-2 pr-2 text-sm transition-colors ${
+                        active
+                          ? 'bg-muted font-semibold text-foreground'
+                          : 'font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                      }`}
+                    >
+                      <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center">
+                        <CategoryIcon icon={cat.icon} color={active ? cat.color : 'currentColor'} size={15} strokeWidth={2} />
+                      </span>
+                      <span className="truncate">{cat.name}</span>
+                    </Link>
+                    <button
+                      onClick={() => { openEditCat(cat); setDrawerOpen(false) }}
+                      className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
+                    </button>
+                    <button
+                      onClick={() => deleteCatMutation.mutate(cat.id)}
+                      className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                    </button>
+                  </div>
+                )
+              })}
+
+              {/* Add category */}
+              <button
+                onClick={() => { openAddCat(); setDrawerOpen(false) }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              >
+                <Plus className="h-[18px] w-[18px] shrink-0" strokeWidth={2} />
+                Add category
+              </button>
+            </nav>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -4,7 +4,7 @@ import { useInboxCount } from './useInboxCount'
 
 const navItems = [
   { to: '/plan',     label: 'Plan',     Icon: CalendarRange, badge: false },
-  { to: '/inbox',    label: 'Inbox',    Icon: Inbox,         badge: true  },
+  { to: '/inbox',    label: 'Events',   Icon: Inbox,         badge: true  },
   { to: '/calendar', label: 'Calendar', Icon: CalendarDays,  badge: false },
   { to: '/goals',    label: 'Goals',    Icon: Target,        badge: false },
   { to: '/settings', label: 'Settings', Icon: Settings,      badge: false },

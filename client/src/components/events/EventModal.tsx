@@ -33,7 +33,9 @@ function validate(form: FormState, useStartEnd: boolean): Errors {
 
 function toInputValue(iso: string | null | undefined): string {
   if (!iso) return ''
-  return iso.slice(0, 16)
+  const d = new Date(iso)
+  const z = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`
 }
 
 function toIso(local: string): string | null {
@@ -59,57 +61,60 @@ interface EventModalProps {
   defaultBaseEvent?: BaseEventSummary  // pre-fills from a recommendation pattern suggestion
 }
 
+function buildInitialForm(
+  event: Event | undefined,
+  defaultBaseEvent: BaseEventSummary | undefined,
+  defaultStartAt: string | undefined,
+  defaultEndAt: string | undefined,
+): FormState {
+  if (defaultBaseEvent && !event) {
+    return {
+      title: defaultBaseEvent.title,
+      startAt: defaultStartAt ?? '',
+      endAt: defaultEndAt ?? '',
+      goalIds: defaultBaseEvent.goals.map((g) => g.id),
+      categoryId: defaultBaseEvent.category?.id ?? null,
+      baseEventId: defaultBaseEvent.id,
+    }
+  }
+  return {
+    title: event?.title ?? '',
+    startAt: event ? toInputValue(event.startAt) : (defaultStartAt ?? ''),
+    endAt: event ? toInputValue(event.endAt) : (defaultEndAt ?? ''),
+    goalIds: event?.goals.map((g) => g.id) ?? [],
+    categoryId: event?.category?.id ?? null,
+    baseEventId: null,
+  }
+}
+
 export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt, defaultEndAt, defaultBaseEvent }: EventModalProps) {
   const qc = useQueryClient()
   const isEdit = Boolean(event)
 
-  const [form, setForm] = useState<FormState>({
-    title: '',
-    startAt: '',
-    endAt: '',
-    goalIds: [],
-    categoryId: null,
-    baseEventId: null,
-  })
+  const [form, setForm] = useState<FormState>(() =>
+    buildInitialForm(event, defaultBaseEvent, defaultStartAt, defaultEndAt),
+  )
   const [errors, setErrors] = useState<Errors>({})
-  const [useStartEnd, setUseStartEnd] = useState(false)
+  const [useStartEnd, setUseStartEnd] = useState(() =>
+    event ? Boolean(event.endAt) : Boolean(defaultEndAt),
+  )
   const [baseEventSearch, setBaseEventSearch] = useState('')
   const [showBaseEventResults, setShowBaseEventResults] = useState(false)
   const [showLinkSearch, setShowLinkSearch] = useState(false)
-  const [linkedBaseEvent, setLinkedBaseEvent] = useState<BaseEventSummary | null>(null)
+  const [linkedBaseEvent, setLinkedBaseEvent] = useState<BaseEventSummary | null>(() =>
+    defaultBaseEvent && !event ? defaultBaseEvent : null,
+  )
   const searchRef = useRef<HTMLDivElement>(null)
 
+  // Reset auxiliary UI state when the modal re-opens for the same event
   useEffect(() => {
     if (open) {
-      const hasEnd = event ? Boolean(event.endAt) : Boolean(defaultEndAt)
-      setUseStartEnd(hasEnd)
-      if (defaultBaseEvent && !event) {
-        setForm({
-          title: defaultBaseEvent.title,
-          startAt: defaultStartAt ?? '',
-          endAt: defaultEndAt ?? '',
-          goalIds: defaultBaseEvent.goals.map((g) => g.id),
-          categoryId: defaultBaseEvent.category?.id ?? null,
-          baseEventId: defaultBaseEvent.id,
-        })
-        setLinkedBaseEvent(defaultBaseEvent)
-      } else {
-        setForm({
-          title: event?.title ?? '',
-          startAt: event ? toInputValue(event.startAt) : (defaultStartAt ?? ''),
-          endAt: event ? toInputValue(event.endAt) : (defaultEndAt ?? ''),
-          goalIds: event?.goals.map((g) => g.id) ?? [],
-          categoryId: event?.category?.id ?? null,
-          baseEventId: null,
-        })
-        setLinkedBaseEvent(null)
-      }
       setBaseEventSearch('')
       setShowBaseEventResults(false)
       setShowLinkSearch(false)
       setErrors({})
     }
-  }, [open, event, defaultStartAt, defaultEndAt, defaultBaseEvent])
+  }, [open])
 
   const { data: goals = [] } = useQuery({
     queryKey: ['goals'],
@@ -145,6 +150,20 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
         : eventsApi.create(payload)
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+      onClose()
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => eventsApi.delete(event!.id),
+    onSuccess: () => {
+      // Remove the event from every cached events list synchronously so the
+      // calendar doesn't flash the deletion through the translucent backdrop.
+      qc.setQueriesData<Event[]>({ queryKey: ['events'] }, (old) =>
+        old ? old.filter((e) => e.id !== event!.id) : old,
+      )
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
@@ -207,63 +226,24 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
       title={isEdit ? 'Edit Event' : 'New Event'}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>Cancel</Button>
-          <Button onClick={handleSubmit} loading={mutation.isPending}>
+          {isEdit && (
+            <Button
+              variant="destructive"
+              onClick={() => deleteMutation.mutate()}
+              loading={deleteMutation.isPending}
+              disabled={mutation.isPending}
+              className="mr-auto"
+            >
+              Delete
+            </Button>
+          )}
+          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending || deleteMutation.isPending}>Cancel</Button>
+          <Button onClick={handleSubmit} loading={mutation.isPending} disabled={deleteMutation.isPending}>
             {isEdit ? 'Save Changes' : 'Create Event'}
           </Button>
         </>
       }
     >
-      {!isEdit && (
-        <div className="flex flex-col gap-1.5" ref={searchRef}>
-          {linkedBaseEvent ? (
-            <div className="flex items-center justify-between rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-              <span className="text-foreground">Linked: <span className="font-medium">{linkedBaseEvent.title}</span></span>
-              <button type="button" onClick={clearBaseEvent} className="text-xs text-muted-foreground hover:text-foreground">Remove</button>
-            </div>
-          ) : showLinkSearch ? (
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Search events..."
-                value={baseEventSearch}
-                onChange={(e) => { setBaseEventSearch(e.target.value); setShowBaseEventResults(true) }}
-                onFocus={() => setShowBaseEventResults(true)}
-                onBlur={() => setTimeout(() => { setShowBaseEventResults(false); setShowLinkSearch(false) }, 150)}
-                autoFocus
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-              />
-              {showBaseEventResults && baseEventResults.length > 0 && (
-                <ul className="absolute z-10 mt-1 w-full rounded-md border border-border bg-card shadow-pop">
-                  {baseEventResults.map((be) => (
-                    <li key={be.id}>
-                      <button
-                        type="button"
-                        onMouseDown={() => selectBaseEvent(be)}
-                        className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-muted/60"
-                      >
-                        {be.title}
-                        {be.goals.length > 0 && (
-                          <span className="ml-2 text-xs text-muted-foreground">{be.goals[0].title}</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowLinkSearch(true)}
-              className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              + Link to existing event
-            </button>
-          )}
-        </div>
-      )}
-
       <Field
         label="Title"
         value={form.title}
@@ -292,7 +272,7 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
         </div>
       ) : (
         <div className="flex flex-col gap-1.5">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field
               label="Start"
               type="datetime-local"
@@ -378,6 +358,56 @@ export function EventModal({ open, onClose, event, focusStartAt, defaultStartAt,
               )
             })}
           </div>
+        </div>
+      )}
+
+      {!isEdit && (
+        <div className="flex flex-col gap-1.5" ref={searchRef}>
+          {linkedBaseEvent ? (
+            <div className="flex items-center justify-between rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+              <span className="text-foreground">Linked: <span className="font-medium">{linkedBaseEvent.title}</span></span>
+              <button type="button" onClick={clearBaseEvent} className="text-xs text-muted-foreground hover:text-foreground">Remove</button>
+            </div>
+          ) : showLinkSearch ? (
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search events..."
+                value={baseEventSearch}
+                onChange={(e) => { setBaseEventSearch(e.target.value); setShowBaseEventResults(true) }}
+                onFocus={() => setShowBaseEventResults(true)}
+                onBlur={() => setTimeout(() => { setShowBaseEventResults(false); setShowLinkSearch(false) }, 150)}
+                autoFocus
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+              />
+              {showBaseEventResults && baseEventResults.length > 0 && (
+                <ul className="absolute z-10 mt-1 w-full rounded-md border border-border bg-card shadow-pop">
+                  {baseEventResults.map((be) => (
+                    <li key={be.id}>
+                      <button
+                        type="button"
+                        onMouseDown={() => selectBaseEvent(be)}
+                        className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-muted/60"
+                      >
+                        {be.title}
+                        {be.goals.length > 0 && (
+                          <span className="ml-2 text-xs text-muted-foreground">{be.goals[0].title}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowLinkSearch(true)}
+              className="self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              + Link to existing event
+            </button>
+          )}
         </div>
       )}
 

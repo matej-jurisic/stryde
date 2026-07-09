@@ -1,16 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(cd D:\\Projects\\stryde; dotnet build *)",
-      "PowerShell(cd D:\\Projects\\stryde; dotnet test *)",
-      "PowerShell(cd D:\\Projects\\stryde\\client; npm run build *)",
-      "PowerShell(dotnet build *)",
-      "PowerShell(dotnet test *)",
+      "PowerShell(dotnet *)",
+      "PowerShell(npm *)",
       "PowerShell(Get-Process *)",
-      "Bash(dotnet build *)",
-      "Bash(dotnet test *)",
-      "Bash(cd /d/Projects/stryde/client && npm run build *)",
-      "Bash(npm run build *)"
+      "Bash(dotnet *)",
+      "Bash(npm *)"
     ]
   }
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, Menu } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { eventsApi, settingsApi } from '@/lib/api'
 import type { BaseEventSummary, Event } from '@/lib/types'
@@ -81,6 +81,18 @@ function pageTitle(view: 'day' | 'week', days: Date[]): string {
     return `${f.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${l.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${l.getFullYear()}`
   }
   return `${f.toLocaleDateString('en-US', { month: 'long' })} ${f.getDate()} – ${l.getDate()}, ${l.getFullYear()}`
+}
+
+function compactTitle(view: 'day' | 'week', days: Date[]): string {
+  if (view === 'day') {
+    return days[0].toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  }
+  const f = days[0]
+  const l = days[6]
+  if (f.getMonth() === l.getMonth() && f.getFullYear() === l.getFullYear()) {
+    return `${f.toLocaleDateString('en-US', { month: 'short' })} ${f.getDate()}-${l.getDate()}`
+  }
+  return `${f.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${l.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
 }
 
 function dayHeader(d: Date): string {
@@ -218,16 +230,18 @@ function EventBlock({
       />
       <div className="relative flex h-full">
         <div style={{ width: 3, minWidth: 3, background: leftColor }} className="shrink-0" />
-        <div className="min-w-0 flex-1 px-1.5 py-0.5">
-          <p
-            className={`truncate text-[11px] font-medium leading-tight ${
-              isDone ? 'line-through text-muted-foreground' : textClass
-            }`}
-          >
-            {event.title}
-          </p>
+        <div className="@container min-w-0 flex-1 px-1.5 py-0.5">
+          {heightPx >= 20 && (
+            <p
+              className={`@max-[10px]:hidden break-all overflow-hidden text-[11px] font-medium leading-tight ${
+                isDone ? 'line-through text-muted-foreground' : textClass
+              }`}
+            >
+              {event.title}
+            </p>
+          )}
           {heightPx >= 44 && timeText && (
-            <p className={`truncate text-[10px] leading-tight opacity-70 ${isDone ? 'text-muted-foreground' : textClass}`}>
+            <p className={`@max-[10px]:hidden overflow-hidden whitespace-nowrap text-[10px] leading-tight opacity-70 ${isDone ? 'text-muted-foreground' : textClass}`}>
               {timeText}
             </p>
           )}
@@ -301,7 +315,7 @@ function DayColumn({ day, allEvents, onEventClick, overlay, isToday, borderLeft 
       {Array.from({ length: 24 }, (_, h) => (
         <div
           key={`hh${h}`}
-          className="absolute inset-x-0 border-t border-border/25"
+          className="absolute inset-x-0 border-t border-border/40"
           style={{ top: h * HOUR_PX + HOUR_PX / 2 }}
         />
       ))}
@@ -335,6 +349,7 @@ function DayColumn({ day, allEvents, onEventClick, overlay, isToday, borderLeft 
 type ViewMode = 'day' | 'week'
 
 export function CalendarPage() {
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [view, setView] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('stryde-calendar-view')
     return saved === 'week' ? 'week' : 'day'
@@ -357,10 +372,15 @@ export function CalendarPage() {
     startY: number
     isDrag: boolean
   } | null>(null)
-  const justDraggedRef = useRef(false)
-  const touchStartRef = useRef<{ clientX: number; clientY: number } | null>(null)
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const daysRef = useRef<Date[]>([])
+  const pendingTouchRef = useRef<{
+    pointerId: number
+    startClientX: number
+    startClientY: number
+    startDayIdx: number
+    startY: number
+    timer: ReturnType<typeof setTimeout>
+  } | null>(null)
+  const autoScrollRef = useRef<{ rafId: number; clientX: number; clientY: number } | null>(null)
   const [dragOverlays, setDragOverlays] = useState<Map<number, { topPx: number; heightPx: number }>>(
     () => new Map(),
   )
@@ -418,68 +438,6 @@ export function CalendarPage() {
     return () => document.removeEventListener('mousedown', close)
   }, [viewDropOpen])
 
-  daysRef.current = days
-
-  // Non-passive touchmove so we can preventDefault during drag (blocks scroll)
-  useEffect(() => {
-    const el = gridRef.current
-    if (!el) return
-    function onTouchMove(e: TouchEvent) {
-      const touch = e.touches[0]
-      // During the hold window: prevent scroll; cancel if finger moves too far
-      if (holdTimerRef.current !== null) {
-        if (!touchStartRef.current) return
-        const dx = touch.clientX - touchStartRef.current.clientX
-        const dy = touch.clientY - touchStartRef.current.clientY
-        if (Math.sqrt(dx * dx + dy * dy) > 20) {
-          clearTimeout(holdTimerRef.current)
-          holdTimerRef.current = null
-          touchStartRef.current = null
-          return
-        }
-        e.preventDefault()
-        return
-      }
-      if (!dragRef.current?.isDrag) return
-      e.preventDefault()
-      const currentDays = daysRef.current
-      if (!gridRef.current) return
-      const rect = gridRef.current.getBoundingClientRect()
-      const colWidth = rect.width / currentDays.length
-      const endDayIdx = Math.max(0, Math.min(Math.floor((touch.clientX - rect.left) / colWidth), currentDays.length - 1))
-      const endY = Math.max(0, Math.min(touch.clientY - rect.top, HOUR_PX * 24 - 1))
-      const { startDayIdx, startY } = dragRef.current
-      const minIdx = Math.min(startDayIdx, endDayIdx)
-      const maxIdx = Math.max(startDayIdx, endDayIdx)
-      const result = new Map<number, { topPx: number; heightPx: number }>()
-      for (let i = minIdx; i <= maxIdx; i++) {
-        if (startDayIdx === endDayIdx) {
-          const topY = Math.min(startY, endY)
-          const botY = Math.max(startY, endY)
-          const s = snapToGrid(currentDays[i], topY)
-          const en = snapToGrid(currentDays[i], botY)
-          const topPx = ((s.getHours() * 60 + s.getMinutes()) / 60) * HOUR_PX
-          const endPx = ((en.getHours() * 60 + en.getMinutes()) / 60) * HOUR_PX
-          result.set(i, { topPx, heightPx: Math.max(endPx - topPx, HOUR_PX / 4) })
-        } else if (i === minIdx) {
-          const anchorY = startDayIdx < endDayIdx ? startY : endY
-          const s = snapToGrid(currentDays[i], anchorY)
-          const topPx = ((s.getHours() * 60 + s.getMinutes()) / 60) * HOUR_PX
-          result.set(i, { topPx, heightPx: HOUR_PX * 24 - topPx })
-        } else if (i === maxIdx) {
-          const anchorY = startDayIdx > endDayIdx ? startY : endY
-          const en = snapToGrid(currentDays[i], anchorY)
-          const endPx = ((en.getHours() * 60 + en.getMinutes()) / 60) * HOUR_PX
-          result.set(i, { topPx: 0, heightPx: Math.max(endPx, HOUR_PX / 4) })
-        } else {
-          result.set(i, { topPx: 0, heightPx: HOUR_PX * 24 })
-        }
-      }
-      setDragOverlays(result)
-    }
-    el.addEventListener('touchmove', onTouchMove, { passive: false })
-    return () => el.removeEventListener('touchmove', onTouchMove)
-  }, [])
 
   function prev() {
     setCurrent((d) => addDays(d, view === 'day' ? -1 : -7))
@@ -518,64 +476,6 @@ export function CalendarPage() {
     setDefaultEndAt(undefined)
     setFocusStartAt(!event.startAt)
     setModalOpen(true)
-  }
-
-  // ── Touch hold-to-drag (mobile) ──────────────────────────────────────────
-
-  function handleGridTouchStart(e: React.TouchEvent<HTMLDivElement>) {
-    if ((e.target as Element).closest('button')) return
-    const touch = e.touches[0]
-    touchStartRef.current = { clientX: touch.clientX, clientY: touch.clientY }
-    const dayIdx = getDayIdxFromX(touch.clientX)
-    const y = getYInGrid(touch.clientY)
-    holdTimerRef.current = setTimeout(() => {
-      holdTimerRef.current = null
-      if (!touchStartRef.current) return
-      dragRef.current = { startDayIdx: dayIdx, startClientX: touch.clientX, startClientY: touch.clientY, startY: y, isDrag: true }
-      setDragOverlays(computeOverlays(dayIdx, y, dayIdx, y))
-      if (navigator.vibrate) navigator.vibrate(30)
-    }, 300)
-  }
-
-  function handleGridTouchEnd(e: React.TouchEvent<HTMLDivElement>) {
-    touchStartRef.current = null
-    if (holdTimerRef.current !== null) {
-      clearTimeout(holdTimerRef.current)
-      holdTimerRef.current = null
-      return
-    }
-    if (!dragRef.current) return
-    const { startDayIdx, startY } = dragRef.current
-    dragRef.current = null
-    setDragOverlays(new Map())
-    const touch = e.changedTouches[0]
-    const endDayIdx = getDayIdxFromX(touch.clientX)
-    const endY = getYInGrid(touch.clientY)
-    let startDate: Date
-    let endDate: Date
-    if (startDayIdx < endDayIdx) {
-      startDate = snapToGrid(days[startDayIdx], startY)
-      endDate = snapToGrid(days[endDayIdx], endY)
-    } else if (startDayIdx > endDayIdx) {
-      startDate = snapToGrid(days[endDayIdx], endY)
-      endDate = snapToGrid(days[startDayIdx], startY)
-    } else {
-      startDate = snapToGrid(days[startDayIdx], Math.min(startY, endY))
-      endDate = snapToGrid(days[startDayIdx], Math.max(startY, endY))
-    }
-    if (endDate <= startDate) endDate.setMinutes(endDate.getMinutes() + 15)
-    justDraggedRef.current = true
-    openCreate(formatDatetimeLocal(startDate), formatDatetimeLocal(endDate))
-  }
-
-  function handleGridTouchCancel() {
-    touchStartRef.current = null
-    if (holdTimerRef.current !== null) {
-      clearTimeout(holdTimerRef.current)
-      holdTimerRef.current = null
-    }
-    dragRef.current = null
-    setDragOverlays(new Map())
   }
 
   // ── Grid drag helpers ────────────────────────────────────────────────────
@@ -661,7 +561,6 @@ export function CalendarPage() {
       setDragOverlays(new Map())
       if (!isDrag) return
 
-      justDraggedRef.current = true
       const endDayIdx = getDayIdxFromX(mu.clientX)
       const endY = getYInGrid(mu.clientY)
 
@@ -685,15 +584,135 @@ export function CalendarPage() {
     window.addEventListener('mouseup', onMouseUp)
   }
 
-  function handleGridClick(e: React.MouseEvent<HTMLDivElement>) {
-    if ((e.target as Element).closest('button')) return
-    if (justDraggedRef.current) {
-      justDraggedRef.current = false
+  // ── Touch drag via pointer capture ───────────────────────────────────────
+  // pointercancel fires when the browser takes over the gesture for scrolling,
+  // giving us a reliable signal to abort without false-firing during normal scrolls.
+
+  function stopAutoScroll() {
+    if (autoScrollRef.current) {
+      cancelAnimationFrame(autoScrollRef.current.rafId)
+      autoScrollRef.current = null
+    }
+  }
+
+  function startAutoScroll(clientX: number, clientY: number) {
+    if (autoScrollRef.current) {
+      autoScrollRef.current.clientX = clientX
+      autoScrollRef.current.clientY = clientY
       return
     }
-    const dayIdx = getDayIdxFromX(e.clientX)
-    const y = getYInGrid(e.clientY)
-    openCreate(formatDatetimeLocal(snapToGrid(days[dayIdx], y)))
+    const state = { rafId: 0, clientX, clientY }
+    autoScrollRef.current = state
+    const ZONE = 80
+    const MAX_SPEED = 12
+    function tick() {
+      if (!autoScrollRef.current || autoScrollRef.current !== state) return
+      if (!dragRef.current?.isDrag || !scrollRef.current) { autoScrollRef.current = null; return }
+      const rect = scrollRef.current.getBoundingClientRect()
+      const distTop = state.clientY - rect.top
+      const distBot = rect.bottom - state.clientY
+      let speed = 0
+      if (distTop < ZONE && distTop >= 0) speed = -MAX_SPEED * (1 - distTop / ZONE)
+      else if (distBot < ZONE && distBot >= 0) speed = MAX_SPEED * (1 - distBot / ZONE)
+      if (speed !== 0) {
+        scrollRef.current.scrollTop += speed
+        const endDayIdx = getDayIdxFromX(state.clientX)
+        const endY = getYInGrid(state.clientY)
+        setDragOverlays(computeOverlays(dragRef.current.startDayIdx, dragRef.current.startY, endDayIdx, endY))
+      }
+      state.rafId = requestAnimationFrame(tick)
+    }
+    state.rafId = requestAnimationFrame(tick)
+  }
+
+  function handleGridPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.pointerType !== 'touch') return
+    if ((e.target as Element).closest('button')) return
+    const startClientX = e.clientX
+    const startClientY = e.clientY
+    const startDayIdx = getDayIdxFromX(startClientX)
+    const startY = getYInGrid(startClientY)
+    const pointerId = e.pointerId
+    const timer = setTimeout(() => {
+      if (!pendingTouchRef.current) return
+      pendingTouchRef.current = null
+      try {
+        gridRef.current?.setPointerCapture(pointerId)
+      } catch {
+        return
+      }
+      if (scrollRef.current) scrollRef.current.style.overflowY = 'hidden'
+      dragRef.current = { startDayIdx, startClientX, startClientY, startY, isDrag: true }
+      setDragOverlays(computeOverlays(startDayIdx, startY, startDayIdx, startY))
+      startAutoScroll(startClientX, startClientY)
+      if (navigator.vibrate) navigator.vibrate(30)
+    }, 500)
+    pendingTouchRef.current = { pointerId, startClientX, startClientY, startDayIdx, startY, timer }
+  }
+
+  function handleGridPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.pointerType !== 'touch') return
+    if (pendingTouchRef.current && !dragRef.current) {
+      const dx = e.clientX - pendingTouchRef.current.startClientX
+      const dy = e.clientY - pendingTouchRef.current.startClientY
+      if (Math.sqrt(dx * dx + dy * dy) > 15) {
+        clearTimeout(pendingTouchRef.current.timer)
+        pendingTouchRef.current = null
+      }
+      return
+    }
+    if (!dragRef.current?.isDrag) return
+    const endDayIdx = getDayIdxFromX(e.clientX)
+    const endY = getYInGrid(e.clientY)
+    setDragOverlays(computeOverlays(dragRef.current.startDayIdx, dragRef.current.startY, endDayIdx, endY))
+    startAutoScroll(e.clientX, e.clientY)
+  }
+
+  function commitTouchDrag(clientX: number, clientY: number) {
+    stopAutoScroll()
+    if (!dragRef.current) return
+    const { startDayIdx, startY } = dragRef.current
+    dragRef.current = null
+    setDragOverlays(new Map())
+    if (scrollRef.current) scrollRef.current.style.overflowY = ''
+    const endDayIdx = getDayIdxFromX(clientX)
+    const endY = getYInGrid(clientY)
+    let startDate: Date
+    let endDate: Date
+    if (startDayIdx < endDayIdx) {
+      startDate = snapToGrid(days[startDayIdx], startY)
+      endDate = snapToGrid(days[endDayIdx], endY)
+    } else if (startDayIdx > endDayIdx) {
+      startDate = snapToGrid(days[endDayIdx], endY)
+      endDate = snapToGrid(days[startDayIdx], startY)
+    } else {
+      startDate = snapToGrid(days[startDayIdx], Math.min(startY, endY))
+      endDate = snapToGrid(days[startDayIdx], Math.max(startY, endY))
+    }
+    if (endDate <= startDate) endDate.setMinutes(endDate.getMinutes() + 15)
+    openCreate(formatDatetimeLocal(startDate), formatDatetimeLocal(endDate))
+  }
+
+  function handleGridPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.pointerType !== 'touch') return
+    if (pendingTouchRef.current) {
+      clearTimeout(pendingTouchRef.current.timer)
+      pendingTouchRef.current = null
+      return
+    }
+    commitTouchDrag(e.clientX, e.clientY)
+  }
+
+  function handleGridPointerCancel(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.pointerType !== 'touch') return
+    stopAutoScroll()
+    if (pendingTouchRef.current) {
+      clearTimeout(pendingTouchRef.current.timer)
+      pendingTouchRef.current = null
+    }
+    dragRef.current = null
+    setDragOverlays(new Map())
+    if (scrollRef.current) scrollRef.current.style.overflowY = ''
   }
 
   return (
@@ -702,11 +721,21 @@ export function CalendarPage() {
         date={formatDateInput(effectiveToday)}
         onEventClick={openEdit}
         onBaseEventClick={openFromBaseEvent}
+        mobileOpen={drawerOpen}
+        onMobileClose={() => setDrawerOpen(false)}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
       {/* Header */}
       <header className="flex h-[57px] shrink-0 items-center gap-2 border-b border-border px-4 md:gap-3 md:px-6">
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="md:hidden flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          aria-label="Open suggestions"
+        >
+          <Menu className="h-4 w-4" strokeWidth={2} />
+        </button>
+
         <div className="flex items-center gap-0.5">
           <button
             onClick={prev}
@@ -723,7 +752,8 @@ export function CalendarPage() {
         </div>
 
         <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
-          {pageTitle(view, days)}
+          <span className="sm:hidden">{compactTitle(view, days)}</span>
+          <span className="hidden sm:inline">{pageTitle(view, days)}</span>
         </h1>
 
         <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
@@ -815,10 +845,10 @@ export function CalendarPage() {
               ref={gridRef}
               className="flex flex-1 min-w-0 cursor-crosshair select-none"
               onMouseDown={handleGridMouseDown}
-              onClick={handleGridClick}
-              onTouchStart={handleGridTouchStart}
-              onTouchEnd={handleGridTouchEnd}
-              onTouchCancel={handleGridTouchCancel}
+              onPointerDown={handleGridPointerDown}
+              onPointerMove={handleGridPointerMove}
+              onPointerUp={handleGridPointerUp}
+              onPointerCancel={handleGridPointerCancel}
             >
               {days.map((day, idx) => (
                 <DayColumn
@@ -839,6 +869,7 @@ export function CalendarPage() {
       </div>
 
       <EventModal
+        key={editingEvent?.id ?? defaultStartAt ?? defaultBaseEvent?.id ?? 'new'}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         event={editingEvent}
