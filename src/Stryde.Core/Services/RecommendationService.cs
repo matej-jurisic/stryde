@@ -17,11 +17,17 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         var ctx = await settings.GetDayContextAsync(userId);
         var today = date ?? DayMath.Today(ctx, now);
 
-        var pendingEvents = await db.Events
+        // Single query for all user events — filter pending vs. completed in memory
+        var allEvents = await db.Events
             .Include(e => e.Goals)
             .Include(e => e.Category)
-            .Where(e => e.UserId == userId && e.Status == EventStatus.pending)
+            .Where(e => e.UserId == userId)
             .ToListAsync();
+
+        var pendingEvents = allEvents.Where(e => e.Status == EventStatus.pending).ToList();
+        var recentCompleted = allEvents
+            .Where(e => e.Status == EventStatus.done && e.BaseEventId.HasValue && e.StartAt != null)
+            .ToList();
 
         bool IsFloating(Event e) => e.StartAt == null;
 
@@ -52,13 +58,6 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
 
         // Tier 3: BaseEvents with a day-of-week pattern (≥2 completions on today's weekday in past 6 weeks)
         var todayDow = today.DayOfWeek;
-
-        var recentCompleted = await db.Events
-            .Where(e => e.UserId == userId
-                && e.Status == EventStatus.done
-                && e.BaseEventId.HasValue
-                && e.StartAt != null)
-            .ToListAsync();
 
         var patternedBaseEventIds = recentCompleted
             .Where(e => e.StartAt!.Value >= now.AddDays(-42))
