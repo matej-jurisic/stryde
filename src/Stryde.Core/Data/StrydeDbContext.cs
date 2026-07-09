@@ -9,13 +9,13 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
-    public DbSet<Event> Events => Set<Event>();
+    public DbSet<Occurrence> Occurrences => Set<Occurrence>();
+    public DbSet<Activity> Activities => Set<Activity>();
     public DbSet<Goal> Goals => Set<Goal>();
     public DbSet<Checkpoint> Checkpoints => Set<Checkpoint>();
     public DbSet<RepeatRule> RepeatRules => Set<RepeatRule>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
     public DbSet<Category> Categories => Set<Category>();
-    public DbSet<BaseEvent> BaseEvents => Set<BaseEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -24,9 +24,27 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
         modelBuilder.Entity<RefreshToken>()
             .Ignore(rt => rt.IsActive);
 
-        modelBuilder.Entity<Event>()
-            .Property(e => e.Status)
+        modelBuilder.Entity<Occurrence>()
+            .Property(o => o.Status)
             .HasConversion<string>();
+
+        modelBuilder.Entity<Occurrence>()
+            .HasOne(o => o.Activity)
+            .WithMany()
+            .HasForeignKey(o => o.ActivityId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Activity>()
+            .HasOne(a => a.Category)
+            .WithMany()
+            .HasForeignKey(a => a.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Activity>()
+            .HasOne(a => a.Goal)
+            .WithMany()
+            .HasForeignKey(a => a.GoalId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<Goal>()
             .Property(g => g.Status)
@@ -39,35 +57,6 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
         modelBuilder.Entity<Checkpoint>()
             .Property(c => c.Size)
             .HasConversion<string>();
-
-        modelBuilder.Entity<Event>()
-            .HasMany(e => e.Goals)
-            .WithMany(g => g.Events)
-            .UsingEntity(j => j.ToTable("EventGoals"));
-
-        modelBuilder.Entity<Event>()
-            .HasOne(e => e.Category)
-            .WithMany()
-            .HasForeignKey(e => e.CategoryId)
-            .OnDelete(DeleteBehavior.SetNull);
-
-        modelBuilder.Entity<Event>()
-            .HasOne(e => e.BaseEvent)
-            .WithMany()
-            .HasForeignKey(e => e.BaseEventId)
-            .OnDelete(DeleteBehavior.SetNull);
-
-        modelBuilder.Entity<BaseEvent>()
-            .HasOne(b => b.Category)
-            .WithMany()
-            .HasForeignKey(b => b.CategoryId)
-            .OnDelete(DeleteBehavior.SetNull);
-
-        modelBuilder.Entity<BaseEvent>()
-            .HasOne(b => b.Goal)
-            .WithMany()
-            .HasForeignKey(b => b.GoalId)
-            .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<UserSettings>()
             .HasKey(us => us.UserId);

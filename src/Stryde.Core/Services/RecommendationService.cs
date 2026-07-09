@@ -17,102 +17,102 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         var ctx = await settings.GetDayContextAsync(userId);
         var today = date ?? DayMath.Today(ctx, now);
 
-        // Single query for all user events — filter pending vs. completed in memory
-        var allEvents = await db.Events
-            .Include(e => e.Goals)
-            .Include(e => e.Category)
-            .Where(e => e.UserId == userId)
+        var allOccurrences = await db.Occurrences
+            .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .Include(o => o.Activity).ThenInclude(a => a.Category)
+            .Where(o => o.UserId == userId)
             .ToListAsync();
 
-        var pendingEvents = allEvents.Where(e => e.Status == EventStatus.pending).ToList();
-        var recentCompleted = allEvents
-            .Where(e => e.Status == EventStatus.done && e.BaseEventId.HasValue && e.StartAt != null)
+        var pendingOccurrences = allOccurrences.Where(o => o.Status == EventStatus.pending).ToList();
+        var recentCompleted = allOccurrences
+            .Where(o => o.Status == EventStatus.done && o.StartAt != null)
             .ToList();
 
-        bool IsFloating(Event e) => e.StartAt == null;
+        bool IsFloating(Occurrence o) => o.StartAt == null && o.WindowStart == null;
 
-        // BaseEventIds already on today's schedule — excluded from pattern suggestions
-        var todayBaseEventIds = pendingEvents
-            .Where(e => !IsFloating(e) && DayMath.EventDay(e, ctx) == today && e.BaseEventId.HasValue)
-            .Select(e => e.BaseEventId!.Value)
+        // ActivityIds already on today's schedule — excluded from pattern suggestions
+        var todayActivityIds = pendingOccurrences
+            .Where(o => !IsFloating(o) && DayMath.OccurrenceDay(o, ctx) == today)
+            .Select(o => o.ActivityId)
             .ToHashSet();
 
-        var eventRecs = new List<(int tier, Event e)>();
-        var seenEventIds = new HashSet<Guid>();
+        var occurrenceRecs = new List<(int tier, Occurrence o)>();
+        var seenIds = new HashSet<Guid>();
 
-        void AddEvent(int tier, Event e)
+        void AddOccurrence(int tier, Occurrence o)
         {
-            if (seenEventIds.Add(e.Id))
-                eventRecs.Add((tier, e));
+            if (seenIds.Add(o.Id))
+                occurrenceRecs.Add((tier, o));
         }
 
-        // Tier 1: floating events linked to Focus goals
-        foreach (var e in pendingEvents.Where(IsFloating))
-            if (e.Goals.Any(g => g.Status == GoalStatus.focus))
-                AddEvent(1, e);
+        // Tier 1: floating occurrences linked to Focus goals
+        foreach (var o in pendingOccurrences.Where(IsFloating))
+            if (o.Activity.Goal?.Status == GoalStatus.focus)
+                AddOccurrence(1, o);
 
-        // Tier 2: floating events linked to Active goals
-        foreach (var e in pendingEvents.Where(IsFloating))
-            if (e.Goals.Any(g => g.Status == GoalStatus.active))
-                AddEvent(2, e);
+        // Tier 2: floating occurrences linked to Active goals
+        foreach (var o in pendingOccurrences.Where(IsFloating))
+            if (o.Activity.Goal?.Status == GoalStatus.active)
+                AddOccurrence(2, o);
 
-        // Tier 3: BaseEvents with a day-of-week pattern (≥2 completions on today's weekday in past 6 weeks)
+        // Tier 3: Activities with a day-of-week pattern (>=2 completions on today's weekday in past 6 weeks)
         var todayDow = today.DayOfWeek;
 
-        var patternedBaseEventIds = recentCompleted
-            .Where(e => e.StartAt!.Value >= now.AddDays(-42))
-            .GroupBy(e => e.BaseEventId!.Value)
-            .Select(g => new { BaseEventId = g.Key, Count = g.Count(e => DayMath.DayOf(e.StartAt!.Value, ctx).DayOfWeek == todayDow) })
-            .Where(x => x.Count >= 2 && !todayBaseEventIds.Contains(x.BaseEventId))
+        var patternedActivityIds = recentCompleted
+            .Where(o => o.StartAt!.Value >= now.AddDays(-42))
+            .GroupBy(o => o.ActivityId)
+            .Select(g => new
+            {
+                ActivityId = g.Key,
+                Count = g.Count(o => DayMath.DayOf(o.StartAt!.Value, ctx).DayOfWeek == todayDow)
+            })
+            .Where(x => x.Count >= 2 && !todayActivityIds.Contains(x.ActivityId))
             .OrderByDescending(x => x.Count)
             .ToList();
 
-        List<BaseEventSummaryDto> baseEventRecs = [];
-        if (patternedBaseEventIds.Count > 0)
+        List<ActivityDto> activityRecs = [];
+        if (patternedActivityIds.Count > 0)
         {
-            var ids = patternedBaseEventIds.Select(x => x.BaseEventId).ToList();
-            var baseEvents = await db.BaseEvents
-                .Include(b => b.Category)
-                .Include(b => b.Goal)
-                .Where(b => ids.Contains(b.Id))
+            var ids = patternedActivityIds.Select(x => x.ActivityId).ToList();
+            var activities = await db.Activities
+                .Include(a => a.Category)
+                .Include(a => a.Goal)
+                .Where(a => ids.Contains(a.Id))
                 .ToListAsync();
 
-            baseEventRecs = patternedBaseEventIds
-                .Select(p => baseEvents.FirstOrDefault(b => b.Id == p.BaseEventId))
-                .Where(b => b is not null)
-                .Select(b => BaseEventSummaryDto.FromEntity(b!))
+            activityRecs = patternedActivityIds
+                .Select(p => activities.FirstOrDefault(a => a.Id == p.ActivityId))
+                .Where(a => a is not null)
+                .Select(a => ActivityDto.FromEntity(a!))
                 .ToList();
         }
 
-        // Tier 4: floating events linked to Bench goals — only when tiers 1-3 are all empty
-        if (eventRecs.Count == 0 && baseEventRecs.Count == 0)
+        // Tier 4: floating occurrences linked to Bench goals — only when tiers 1-3 are all empty
+        if (occurrenceRecs.Count == 0 && activityRecs.Count == 0)
         {
-            foreach (var e in pendingEvents.Where(IsFloating))
-                if (e.Goals.Any(g => g.Status == GoalStatus.bench))
-                    AddEvent(4, e);
+            foreach (var o in pendingOccurrences.Where(IsFloating))
+                if (o.Activity.Goal?.Status == GoalStatus.bench)
+                    AddOccurrence(4, o);
         }
 
-        static DateTimeOffset SortDate(Event e) => e.EndAt ?? e.StartAt ?? DateTimeOffset.MaxValue;
-        static double Duration(Event e) =>
-            e.StartAt.HasValue && e.EndAt.HasValue
-                ? (e.EndAt.Value - e.StartAt.Value).TotalMinutes
+        static DateTimeOffset SortDate(Occurrence o) => o.EndAt ?? o.StartAt ?? DateTimeOffset.MaxValue;
+        static double Duration(Occurrence o) =>
+            o.StartAt.HasValue && o.EndAt.HasValue
+                ? (o.EndAt.Value - o.StartAt.Value).TotalMinutes
                 : double.MaxValue;
 
         var result = new List<RecommendationDto>();
 
-        // Tiers 1 and 2 (event type), sorted by date then duration within each tier
-        foreach (var (tier, e) in eventRecs.Where(x => x.tier < 3)
-                     .OrderBy(x => x.tier).ThenBy(x => SortDate(x.e)).ThenBy(x => Duration(x.e)))
-            result.Add(new RecommendationDto(tier, "event", EventDto.FromEntity(e, ctx, now), null));
+        foreach (var (tier, o) in occurrenceRecs.Where(x => x.tier < 3)
+                     .OrderBy(x => x.tier).ThenBy(x => SortDate(x.o)).ThenBy(x => Duration(x.o)))
+            result.Add(new RecommendationDto(tier, "occurrence", OccurrenceDto.FromEntity(o, ctx, now), null));
 
-        // Tier 3 (base_event pattern), already in frequency-desc order
-        foreach (var be in baseEventRecs)
-            result.Add(new RecommendationDto(3, "base_event", null, be));
+        foreach (var a in activityRecs)
+            result.Add(new RecommendationDto(3, "activity", null, a));
 
-        // Tier 4 (bench fallback), sorted by date then duration
-        foreach (var (tier, e) in eventRecs.Where(x => x.tier == 4)
-                     .OrderBy(x => SortDate(x.e)).ThenBy(x => Duration(x.e)))
-            result.Add(new RecommendationDto(tier, "event", EventDto.FromEntity(e, ctx, now), null));
+        foreach (var (tier, o) in occurrenceRecs.Where(x => x.tier == 4)
+                     .OrderBy(x => SortDate(x.o)).ThenBy(x => Duration(x.o)))
+            result.Add(new RecommendationDto(tier, "occurrence", OccurrenceDto.FromEntity(o, ctx, now), null));
 
         return result;
     }

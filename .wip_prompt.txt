@@ -1,0 +1,588 @@
+▐▛███▜▌   Claude Code v2.1.205
+▝▜█████▛▘  Sonnet 4.6 · Claude Pro
+  ▘▘ ▝▝    D:\Projects\stryde
+
+ ⚠ 3 MCP servers need authentication · run /mcp
+
+ ▎ Extended: Fable 5 is included in your weekly limit
+ ▎ Through July 12, you can use up to 50% of your weekly usage limit on Fable 5. If you hit your limit, you can continue on Fable 5 with usage credits. Fable 5 draws down usage faster than Opus 4.8. Run /model and select Fable to use it. Learn more
+
+❯ /clear
+
+❯ I have thought about it and realized that the "templates" and the "base events" we have been trying to add are all just bad attempts at separating an event from when and how many times its scheduled. So im thinking of getting rid of all that and having a new tab/page which is management of "Events" which have name, category, goal and then each new occurance of events has to be linked to an existing event but can have its own name and has the scheduling stuff that does not live across different occurances of the same event.
+
+Let me read the current data model before responding.
+
+  Searched for 1 pattern, read 3 files
+
+Your proposed model maps cleanly onto what's already partially there — BaseEvent becomes the canonical Event definition (name, category, goal), and the current Event becomes an Occurrence that is required to link to one. The key structural changes:
+
+Entity rename/reshape:
+- BaseEvent → Event: name, category, goal (single goal, like current BaseEvent.GoalId, or keep many-to-many?)
+- Event → Occurrence: required EventId FK, optional title override, all scheduling fields (StartAt, EndAt, Status, Window*, RepeatRule)
+
+Goals move up to the definition. Currently Event has a many-to-many Goals join table; under the new model occurrences inherit goal from their parent definition. This simplifies the scheduling side but means you can't attach a one-off occurrence to a different goal than its definition — which sounds intentional.
+
+What this replaces: the current optional BaseEventId on Event becomes a required EventId on Occurrence. No more orphaned occurrences.
+
+Before I think about the migration scope, one question:
+
+- The current BaseEvent has a single GoalId. Should the new Event definition keep that (one goal per activity type), or should it be many-to-many like the current occurrence model?
+
+The rest of the change — migrations, services, DTOs, endpoints, frontend pages — is clear once we settle the goal cardinality.
+
+✻ Worked for 52s
+
+❯ single goal on the definition
+
+Clear. Here's the full
+Entities
+- BaseEvent → Event: UserId, Title, CategoryId, GoalId? (already matches, just renamed)
+- Event → Occurrence: required EventId FK, optional Title override, all scheduling fields — drop CategoryId (lives on definition now), drop the many-to-many Goals join table
+- Drop EventGoal join table entirely
+
+Backend
+- Rename BaseEventService → EventService, current EventService → OccurrenceService
+- All goal-linked queries (recommendations tier 1/2, goal progress) go through Occurrence.Event.GoalId instead of Event.Goals
+- Tier-3 pattern detection: same logic, operates on Event definition ID instead of BaseEventId
+- Endpoints: /api/base-events → /api/events, /api/events → /api/occurrences
+- New migration with data migration: existing BaseEvents → Events, Events with BaseEventId → Occurrences, Events without one need a definition created for each
+
+Frontend
+- New Events management page (/events or tab on Goals — your call)
+- Occurrence creation requires picking an existing Event definition (can create inline)
+- Inbox, Calendar, Plan pages show Occurrences; title falls back to definition title if no override
+
+One thing to decide before I start: do you want a standalone Events page, or manage definitions from within the Goals page (goal-linked ones on the goal card, goal-less ones in a separate section)?
+
+● Explore(Survey Stryde codebase for migration scope)
+Done (39 tool uses · 116.0k tokens · 3m 0s)
+
+
+Now I have the full picture. Let me read the remaining files I need before writing any code.
+
+  Read 8 files
+
+Let me read the large frontend files I'll need to modify.
+
+  Searched for 2 patterns, read 5 files
+
+Let me read the remaining files I need before writing code.
+
+  Read 3 files
+
+I now have everything I need. This is a comprehensive refactor — let me work through it systematically. Starting with the backend entities, DbContext, DTOs, services, and endpoints in parallel batches.
+
+● Write(src\Stryde.Core\Entities\Activity.cs)
+Wrote 15 lines to src\Stryde.Core\Entities\Activity.cs
+namespace Stryde.Core.Entities;
+
+public class Activity
+{
+    public Guid
+Wrote 23 lines to src\Stryde.Core\Entities\Occurrence.cs
+using Stryde.Core.Enums;
+
+namespace Stryde.Core.Entities;
+
+public class Occurrence
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public Guid ActivityId { get; set; }
+    public string? Title { get; set; }
+… +13 lines
+
+● Update(src\Stryde.Core\Entities\Goal.cs)
+File must be read first
+
+  Read 1 file
+
+● Write(src\Stryde.Core\Entities\Goal.cs)
+Removed 1 line
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public List<Checkpoint> Checkpoints { get; set; } = [];
+    public List<Event> Events { get; set; } = [];
+}
+
+Now update DayMath and DbContext in parallel:
+
+● Write(src\Stryde.Core\Common\DayMath.cs)
+Added 14 lines, removed 14 lines
+        return
+    public static bool IsOverdue(Event e, DayContext ctx, DateTimeOffset nowUtc)
+    public static bool IsOverdue(Occurrence o, DayContext ctx, DateTimeOffset nowUtc)
+    {
+        if (e.Status != EventStatus.pending) return false;
+        if (e.StartAt is null) return false;
+        if (e.EndAt.HasValue) return e.EndAt.Value < nowUtc;
+        if (e.IsAllDay)
+        if (o.Status != EventStatus.pending) return false;
+        if (o.StartAt is null) return false;
+        if (o.EndAt.HasValue) return o.EndAt.Value < nowUtc;
+        if (o.IsAllDay)
+        {
+            var eventDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(e.StartAt.Value, ctx.TimeZone).DateTime);
+            return eventDate < Today(ctx, nowUtc);
+            var occDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(o.StartAt.Value, ctx.TimeZone).DateTime);
+            return occDate < Today(ctx, nowUtc);
+        }
+        return EndOfDay(DayOf(e.StartAt.Value, ctx), ctx) <= nowUtc;
+        return
+    public DbSet<User> Users => Set<User>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<Event> Events => Set<Event>();
+    public DbSet<Occurrence> Occurrences => Set<Occurrence>();
+    public DbSet<Activity> Activities => Set<Activity>();
+    public DbSet<Goal> Goals => Set<Goal>();
+    public DbSet<Checkpoint> Checkpoints => Set<Checkpoint>();
+    public DbSet<RepeatRule> RepeatRules => Set<RepeatRule>();
+    public DbSet<UserSettings> UserSettings => Set<UserSettings>();
+    public DbSet<Category> Categories => Set<Category>();
+    public DbSet<BaseEvent> BaseEvents => Set<BaseEvent>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+
+        modelBuilder.Entity<RefreshToken>()
+            .Ignore(rt => rt.IsActive);
+
+        modelBu
+            .HasOne(a => a.Category)
+            .WithMany()
+            .HasForeignKey(a => a.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Activity>()
+            .HasOne(a => a.Goal)
+            .WithMany()
+            .HasForeignKey(a => a.GoalId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Goal>()
+            .Property(g => g.Status)
+            .HasConversion<string>();
+
+            .Property(c => c.Size)
+            .HasConversion<string>();
+
+        modelBuilder.Entity<Event>()
+            .HasMany(e => e.Goals)
+            .WithMany(g => g.Events)
+            .UsingEntity(j => j.ToTable("EventGoals"));
+
+        modelBuilder.Entity<Event>()
+            .HasOne(e => e.Category)
+            .WithMany()
+            .HasForeignKey(e => e.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Event>()
+            .HasOne(e => e.BaseEvent)
+            .Wit
+            .HasForeignKey(e => e.BaseEventId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<BaseEvent>()
+            .HasOne(b => b.Category)
+            .WithMany()
+            .HasForeignKey(b => b.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<BaseEvent>()
+            .HasOne(b => b.Goal)
+            .WithMany()
+            .HasForeignKey(b => b.GoalId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<UserSettings>()
+            .HasKey(us => us.UserId);
+
+
+Now rewrite the DTOs:
+
+Error writing file
+
+  Read 1 file
+
+● Write(src\Stryde.Core\Dtos\Dtos.cs)
+Added 55 lines, removed 49 lines
+public sealed record RegisterRequest(string Username, string Password, string Timezone);
+public sealed record LoginRequest(string Username, string Password);
+
+// Events
+public sealed record EventDto(
+// Shared summaries
+public sealed record CategorySummaryDto(Guid Id, string Name, string Color, string? Icon)
+{
+    public static CategorySummaryDto FromEntity(Entities.Category c) => new(c.Id, c.Name, c.Color, c.Icon);
+}
+
+public sealed record GoalSummaryDto(Guid Id, string Title, string Status)
+{
+    public static GoalSummaryDto FromEntity(Goal g) => new(g.Id, g.Title, g.Status.ToString());
+}
+
+// Activities
+public sealed record ActivityDto(
+    Guid Id,
+    Guid UserId,
+    string Title
+    Guid? CategoryId,
+    Guid? GoalId,
+    DateTimeOffset CreatedAt,
+    CategorySummaryDto? Category,
+    GoalSummaryDto? Goal)
+{
+    public static ActivityDto FromEntity(Activity a) => new(
+        a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.CreatedAt,
+        a.Category is not null ? CategorySummaryDto.FromEntity(a.Category) : null,
+        a.Goal is not null ? GoalSummaryDto.FromEntity(a.Goal) : null);
+}
+
+public sealed record CreateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
+public sealed record UpdateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
+
+// Occurrences
+public sealed record OccurrenceDto(
+    Guid Id,
+    Guid UserId,
+    Guid ActivityId,
+    string? Title,
+    string EffectiveTitle,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? EndAt,
+    string Status,
+
+    DateTimeOffs
+    List<GoalSummaryDto> Goals,
+    CategorySummaryDto? Category)
+    ActivityDto Activity)
+{
+    public static EventDto FromEntity(Event e, Common.DayContext ctx, DateTimeOffset nowUtc) => new(
+        e.Id, e.UserId, e.Title, e.StartAt, e.EndAt,
+        e.Status.ToString(), e.RepeatRuleId, e.CreatedAt,
+        Common.DayMath.IsOverdue(e, ctx, nowUtc),
+        e.IsAllDay,
+        e.WindowStart, e.WindowEnd, e.WindowDurationMinutes,
+        e.Goals.Select(GoalSummaryDto.FromEntity).ToList(),
+        e.Category is not null ? CategorySummaryDto.FromEntity(e.Category) : null);
+    public static OccurrenceDto FromEntity(Occurrence o, DayContext ctx, DateTimeOffset nowUtc) => new(
+        o.Id, o.UserId, o.ActivityId, o.Title,
+        o.Title ?? o.Activity.Title,
+        o.StartAt, o.EndAt,
+        o.Status.ToString(), o.RepeatRuleId, o.CreatedAt,
+        DayMath.IsOverdue(o, ctx, nowUtc),
+        o.IsAllDay,
+        o.WindowStart, o.WindowEnd, o.WindowDurationMinutes,
+        ActivityDto.FromEntity(o.Activity));
+}
+
+public sealed record CategorySummaryDto(Guid Id, string Name, string Color, string? Icon)
+{
+    public static CategorySummaryDto FromEntity(Entities.Category c) => new(c.Id, c.Name, c.Color, c.Icon);
+}
+
+public sealed record GoalSummaryDto(Guid Id, string Title, string Status)
+{
+    public static GoalSummaryDto FromEntity(Goal g) => new(g.Id, g.Title, g.Status.ToString());
+}
+
+public sealed record CreateEventRequest(
+    string Title,
+public sealed record CreateOccurrenceRequest(
+    Guid ActivityId,
+    string? Title,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? EndAt,
+    bool IsAllDay,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes,
+    List<Guid>? GoalIds,
+    Guid? CategoryId,
+    Guid? BaseEventId);
+    int? WindowDurationMinutes);
+
+public sealed record UpdateEventRequest(
+    string Title,
+public sealed record UpdateOccurrenceRequest(
+    string? Title,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? EndAt,
+    bool IsAllDay,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes,
+    List<Guid>? GoalIds,
+    Guid? CategoryId);
+    int? WindowDurationMinutes);
+
+public sealed record SetEventStatusRequest(EventStatus Status);
+public sealed record SetOccurrenceStatusRequest(EventStatus Status);
+
+// Goals
+public sealed record GoalDto(
+
+public sealed record CreateCategoryRequest(string Name, string Color, string? Icon);
+public sealed record UpdateCategoryRequest(string Name, string Color, string? Icon);
+
+// Base Events
+public sealed record BaseEventSummaryDto(Guid Id, Guid? GoalId, string Title, CategorySummaryDto? Category, GoalSummaryDto? Goal)
+{
+    public static BaseEventSummaryDto FromEntity(BaseEvent b) => new(
+        b.Id, b.GoalId, b.Title,
+        b.Category is not null ? CategorySummaryDto.FromEntity(b.Category) : null,
+        b.Goal is not null ? GoalSummaryDto.FromEntity(b.Goal) : null);
+}
+// Recommendations — "occurrence" for tiers 1/2/4, "activity" for tier 3 habit suggestions
+public sealed record RecommendationDto(int Tier, string Type, OccurrenceDto? Occurrence, ActivityDto? Activity);
+
+public sealed record CreateBaseEventRequest(string Title, Guid? CategoryId);
+public sealed record UpdateBaseEventRequest(string Title, Guid? CategoryId);
+
+// Recommendations
+// Type is "event" (tiers 1, 2, 4) or "base_event" (tier 3 pattern suggestions)
+public sealed record RecommendationDto(int Tier, string Type, EventDto? Event, BaseEventSummaryDto? BaseEvent);
+
+// UserSettings
+public sealed record UserSettingsDto(Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone)
+{
+
+Now write the two new services in parallel:
+
+● Write(src\Stryde.Core\Services\ActivityService.cs)
+Wrote 104 lines to src\Stryde.Core\Services\ActivityService.cs
+using Microsoft.EntityFrameworkCore;
+using Stryde.Core.Common;
+using Stryde.Core.Data;
+using Stryde.Core.Dtos;
+using Stryde.Core.Entities;
+
+namespace Stryde.Core.Services;
+
+public class ActivityService(StrydeDbContext db)
+{
+… +94 lines
+
+● Write(src\Stryde.Core\Services\OccurrenceService.cs)
+Wrote 170 lines to src\Stryde.Core\Services\OccurrenceService.cs
+using Microsoft.EntityFrameworkCore;
+using Stryde.Core.Common;
+using Stryde.Core.Data;
+using Stryde.Core.Dtos;
+using Stryde.Core.Entities;
+using Stryde.Core.Enums;
+
+namespace Stryde.Core.Services;
+
+public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
+… +160 lines
+
+Let me check the Validators before continuing:
+
+  Read 1 file
+
+ValidateTitle always requires a non-empty value. Since occurrence title is optional, I'll fix the service:
+
+● Update(src\Stryde.Core\Services\OccurrenceService.cs)
+Added 1 line, removed 1 line
+{
+    public async Task<Result<OccurrenceDto>> CreateAsync(Guid userId, CreateOccurrenceRequest req)
+    {
+        var err = Validators.ValidateTitle(req.Title, "Title", required: false)
+        var err = ValidateOptionalTitle(req.Title)
+            ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
+            ?? ValidateWindow(req.StartAt, req.WindowStart, req.WindowEnd, req.WindowDurationMinutes);
+        if (err is not null) return Result<OccurrenceDto>.Fail(err);
+
+● Update(src\Stryde.Core\Services\OccurrenceService.cs)
+Added 1 line, removed 1 line
+
+    public async Task<Result<OccurrenceDto>> UpdateAsync(Guid id, Guid userId, UpdateOccurrenceRequest req)
+    {
+        var err = Validators.ValidateTitle(req.Title, "Title", required: false)
+        var err = ValidateOptionalTitle(req.Title)
+            ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
+            ?? Va
+
+● Update(src\Stryde.Core\Services\OccurrenceService.cs)
+Added 5 lines
+        return OccurrenceDto.FromEntity(o, ctx, DateTimeOffset.UtcNow);
+    }
+
+    private static Error? ValidateOptionalTitle(string? title) =>
+        !string.IsNullOrWhiteSpace(title) && title.Length > 255
+            ? new Error(ErrorType.Validation, "Title cannot exceed 255 characters.")
+            : null;
+
+    private static Error? ValidateWindow(
+        DateTimeOffset? startAt,
+        DateTimeOffset? windowStart,
+
+Now rewrite RecommendationService and create the new endpoints:
+
+● Write(src\Stryde.Core\Services\RecommendationService.cs)
+Error writing file
+
+  Read 1 file
+
+● Write(src\Stryde.Core\Services\RecommendationService.cs)
+Added 63 lines, removed 63 lines
+        var ctx =
+            .Include(e => e.Category)
+            .Where(e => e.UserId == userId)
+        var allOccurrences = await db.Occurrences
+            .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .Include(o => o.Activity).ThenInclude(a => a.Category)
+            .Where(o => o.UserId == userId)
+            .ToListAsync();
+
+        var pendingEvents = allEvents.Where(e => e.Status == EventStatus.pending).ToList();
+        var recentCompleted = allEvents
+            .Where(e => e.Status == EventStatus.done && e.BaseEventId.HasValue && e.StartAt != null)
+        var pendingOccurrences = allOccurrences.Where(o => o.Status == EventStatus.pending).ToList();
+        var recentCompleted = allOccurrences
+            .Where(o => o.Status == EventStatus.done && o.StartAt != null)
+            .ToList();
+
+        bool IsFloating(Event e) => e.StartAt == null;
+        bool IsFloating(Occurrence o) => o.StartAt == null && o.WindowStart == null;
+
+        // BaseEventIds already on today's schedule — excluded from pattern suggestions
+        var todayBaseEventIds = pendingEvents
+            .Where(e => !IsFloating(e) && DayMath.EventDay(e, ctx) == today && e.BaseEventId.HasValue)
+            .Select(e => e.BaseEventId!.Value)
+        // ActivityIds already on today's schedule — excluded from pattern suggestions
+        var todayActivityIds = pendingOccurrences
+            .Where(o => !IsFloating(o) && DayMath.OccurrenceDay(o, ctx) == today)
+            .Select(o => o.ActivityId)
+            .ToHashSet();
+
+        var eventRecs = new List<(int tier, Event e)>();
+        var seenEventIds = new HashSet<Guid>();
+        var occurrenceRecs = new List<(int tier, Occurrence o)>();
+        var seenIds = new HashSet<Guid>();
+
+        void AddEvent(int tier, Event e)
+        void AddOccurrence(int tier, Occurrence o)
+        {
+            if (seenEventIds.Add(e.Id))
+                eventRecs.Add((tier, e));
+            if (seenIds.Add(o.Id))
+                occurrenceRecs.Add((tier, o));
+        }
+
+        // Tier 1: floating events linked to Focus goals
+        foreach (var e in pendingEvents.Where(IsFloating))
+            if (e.Goals.Any(g => g.Status == GoalStatus.focus))
+                AddEvent(1, e);
+        // Tier 1: floating occurrences linked to Focus goals
+        foreach (var o in pendingOccurrences.Where(IsFloating))
+            if (o.Activity.Goal?.Status == GoalStatus.focus)
+                AddOccurrence(1, o);
+
+        // Tier 2: floating events linked to Active goals
+        foreach (var e in pendingEvents.Where(IsFloating))
+            if (e.Goals.Any(g => g.Status == GoalStatus.active))
+                AddEvent(2, e);
+        // Tier 2: floating occurrences linked to Active goals
+        foreach (var o in pendingOccurrences.Where(IsFloating))
+            if (o.Activity.Goal?.Status == GoalStatus.active)
+                AddOccurrence(2, o);
+
+        // Tier 3: BaseEvents with a day-of-week pattern (≥2 completions on today's weekday in past 6 weeks)
+        // Tier 3: Activities with a day-of-week pattern (>=2 completions on today's weekday in past 6 weeks)
+        var todayDow = today.DayOfWeek;
+
+                Count = g.Count(o => DayMath.DayOf(o.StartAt!.Value, ctx).DayOfWeek == todayDow)
+            })
+            .Where(x => x.Count >= 2 && !todayActivityIds.Contains(x.ActivityId))
+            .OrderByDescending(x => x.Count)
+            .ToList();
+
+        List<BaseEventSummaryDto> baseEventRecs = [];
+        if (patternedBaseEventIds.Count > 0)
+        List<ActivityDto> activityRecs = [];
+        if (patternedActivityIds.Count > 0)
+        {
+            var ids = patternedBaseEventIds.Select(x => x.BaseEventId).ToList();
+            var baseEvents = await db.BaseEvents
+                .Include(b => b.Category)
+                .Include(b => b.Goal)
+                .Where(b => ids.Contains(b.Id))
+            var ids = patternedActivityIds.Select(x => x.ActivityId).ToList();
+            var activities = await db.Activities
+                .Include(a => a.Category)
+                .Include(a => a.Goal)
+                .Where(a => ids.Contains(a.Id))
+                .ToListAsync();
+
+            baseEventRecs = patternedBaseEventIds
+                .Select(p => baseEvents.FirstOrDefault(b => b.Id == p.BaseEventId))
+                .Where(b => b is not null)
+                .Select(b => BaseEventSummaryDto.FromEntity(b!))
+            activityRecs = patternedActivityIds
+                .Select(p => activities.FirstOrDefault(a => a.Id == p.ActivityId))
+                .Where(a => a is not null)
+                .Select(a => ActivityDto.FromEntity(a!))
+                .ToList();
+        }
+
+        // Tier 4: floating events linked to Bench goals — only when tiers 1-3 are all empty
+        if (eventRecs.Count == 0 && baseEventRecs.Count == 0)
+        // Tier 4: floating occurrences linked to Bench goals — only when tiers 1-3 are all empty
+        if (occurrenceRecs.Count == 0 && activityRecs.Count == 0)
+        {
+            foreach (var e in pendingEvents.Where(IsFloating))
+                if (e.Goals.Any(g => g.Status == GoalStatus.bench))
+                    AddEvent(4, e);
+            foreach (var o in pendingOccurrences.Where(IsFloating))
+                if (o.Activity.Goal?.Status == GoalStatus.bench)
+                    AddOccurrence(4, o);
+        }
+
+        static DateTimeOffset SortDate(Event e) => e.EndAt ?? e.StartAt ?? DateTimeOffset.MaxValue;
+        static double Duration(Event e) =>
+            e.StartAt.HasValue && e.EndAt.HasValue
+                ? (e.EndAt.Value - e.StartAt.Value).TotalMinutes
+        static DateTimeOffset SortDate(Occurrence o) => o.EndAt ?? o.StartAt ?? DateTimeOffset.MaxValue;
+        static double Duration(Occurrence o) =>
+            o.StartAt.HasValue && o.EndAt.HasValue
+                ? (o.EndAt.Value - o.StartAt.Value).TotalMinutes
+                : double.MaxValue;
+
+        var result = new List<RecommendationDto>();
+
+        // Tiers 1 and 2 (event type), sorted by date then duration within each tier
+        foreach (var (tier, e) in eventRecs.Where(x => x.tier < 3)
+                     .OrderBy(x => x.tier).ThenBy(x => SortDate(x.e)).ThenBy(x => Duration(x.e)))
+            result.Add(new RecommendationDto(tier, "event", EventDto.FromEntity(e, ctx, now), null));
+        foreach (var (tier, o) in occurrenceRecs.Where(x => x.tier < 3)
+                     .OrderBy(x => x.tier).ThenBy(x => SortDate(x.o)).ThenBy(x => Duration(x.o)))
+            result.Add(new RecommendationDto(tier, "occurrence", OccurrenceDto.FromEntity(o, ctx, now), null));
+
+        // Tier 3 (base_event pattern), already in frequency-desc order
+        foreach (var be in baseEventRecs)
+            result.Add(new RecommendationDto(3, "base_event", null, be));
+        foreach (var a in activityRecs)
+            result.Add(new RecommendationDto(3, "activity", null, a));
+
+        // Tier 4 (bench fallback), sorted by date then duration
+        foreach (var (tier, e) in eventRecs.Where(x => x.tier == 4)
+                     .OrderBy(x => SortDate(x.e)).ThenBy(x => Duration(x.e)))
+            result.Add(new RecommendationDto(tier, "event", EventDto.FromEntity(e, ctx, now), null));
+        foreach (var (tier, o) in occurrenceRecs.Where(x => x.tier == 4)
+                     .OrderBy(x => SortDate(x.o)).ThenBy(x => Duration(x.o)))
+            result.Add(new RecommendationDto(tier, "occurrence", OccurrenceDto.FromEntity(o, ctx, now), null));
+
+        return result;
+    }
+You've hit your session limit · resets 2:50am (Europe/Zagreb)
+/upgrade to increase your usage limit.
+
+✻ Cooked for 10m 50s
+
+● How is Claude doing this session? (optional)
+  1: Bad    2: Fine   3: Good   0: Dismiss

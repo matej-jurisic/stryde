@@ -15,34 +15,7 @@ public sealed record AuthResult(string AccessToken, UserDto User, string Refresh
 public sealed record RegisterRequest(string Username, string Password, string Timezone);
 public sealed record LoginRequest(string Username, string Password);
 
-// Events
-public sealed record EventDto(
-    Guid Id,
-    Guid UserId,
-    string Title,
-    DateTimeOffset? StartAt,
-    DateTimeOffset? EndAt,
-    string Status,
-    Guid? RepeatRuleId,
-    DateTimeOffset CreatedAt,
-    bool IsOverdue,
-    bool IsAllDay,
-    DateTimeOffset? WindowStart,
-    DateTimeOffset? WindowEnd,
-    int? WindowDurationMinutes,
-    List<GoalSummaryDto> Goals,
-    CategorySummaryDto? Category)
-{
-    public static EventDto FromEntity(Event e, Common.DayContext ctx, DateTimeOffset nowUtc) => new(
-        e.Id, e.UserId, e.Title, e.StartAt, e.EndAt,
-        e.Status.ToString(), e.RepeatRuleId, e.CreatedAt,
-        Common.DayMath.IsOverdue(e, ctx, nowUtc),
-        e.IsAllDay,
-        e.WindowStart, e.WindowEnd, e.WindowDurationMinutes,
-        e.Goals.Select(GoalSummaryDto.FromEntity).ToList(),
-        e.Category is not null ? CategorySummaryDto.FromEntity(e.Category) : null);
-}
-
+// Shared summaries
 public sealed record CategorySummaryDto(Guid Id, string Name, string Color, string? Icon)
 {
     public static CategorySummaryDto FromEntity(Entities.Category c) => new(c.Id, c.Name, c.Color, c.Icon);
@@ -53,30 +26,76 @@ public sealed record GoalSummaryDto(Guid Id, string Title, string Status)
     public static GoalSummaryDto FromEntity(Goal g) => new(g.Id, g.Title, g.Status.ToString());
 }
 
-public sealed record CreateEventRequest(
+// Activities
+public sealed record ActivityDto(
+    Guid Id,
+    Guid UserId,
     string Title,
-    DateTimeOffset? StartAt,
-    DateTimeOffset? EndAt,
-    bool IsAllDay,
-    DateTimeOffset? WindowStart,
-    DateTimeOffset? WindowEnd,
-    int? WindowDurationMinutes,
-    List<Guid>? GoalIds,
     Guid? CategoryId,
-    Guid? BaseEventId);
+    Guid? GoalId,
+    DateTimeOffset CreatedAt,
+    CategorySummaryDto? Category,
+    GoalSummaryDto? Goal)
+{
+    public static ActivityDto FromEntity(Activity a) => new(
+        a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.CreatedAt,
+        a.Category is not null ? CategorySummaryDto.FromEntity(a.Category) : null,
+        a.Goal is not null ? GoalSummaryDto.FromEntity(a.Goal) : null);
+}
 
-public sealed record UpdateEventRequest(
-    string Title,
+public sealed record CreateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
+public sealed record UpdateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
+
+// Occurrences
+public sealed record OccurrenceDto(
+    Guid Id,
+    Guid UserId,
+    Guid ActivityId,
+    string? Title,
+    string EffectiveTitle,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? EndAt,
+    string Status,
+    Guid? RepeatRuleId,
+    DateTimeOffset CreatedAt,
+    bool IsOverdue,
+    bool IsAllDay,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes,
+    ActivityDto Activity)
+{
+    public static OccurrenceDto FromEntity(Occurrence o, DayContext ctx, DateTimeOffset nowUtc) => new(
+        o.Id, o.UserId, o.ActivityId, o.Title,
+        o.Title ?? o.Activity.Title,
+        o.StartAt, o.EndAt,
+        o.Status.ToString(), o.RepeatRuleId, o.CreatedAt,
+        DayMath.IsOverdue(o, ctx, nowUtc),
+        o.IsAllDay,
+        o.WindowStart, o.WindowEnd, o.WindowDurationMinutes,
+        ActivityDto.FromEntity(o.Activity));
+}
+
+public sealed record CreateOccurrenceRequest(
+    Guid ActivityId,
+    string? Title,
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
     bool IsAllDay,
     DateTimeOffset? WindowStart,
     DateTimeOffset? WindowEnd,
-    int? WindowDurationMinutes,
-    List<Guid>? GoalIds,
-    Guid? CategoryId);
+    int? WindowDurationMinutes);
 
-public sealed record SetEventStatusRequest(EventStatus Status);
+public sealed record UpdateOccurrenceRequest(
+    string? Title,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? EndAt,
+    bool IsAllDay,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes);
+
+public sealed record SetOccurrenceStatusRequest(EventStatus Status);
 
 // Goals
 public sealed record GoalDto(
@@ -126,21 +145,8 @@ public sealed record CategoryDto(Guid Id, Guid UserId, string Name, string Color
 public sealed record CreateCategoryRequest(string Name, string Color, string? Icon);
 public sealed record UpdateCategoryRequest(string Name, string Color, string? Icon);
 
-// Base Events
-public sealed record BaseEventSummaryDto(Guid Id, Guid? GoalId, string Title, CategorySummaryDto? Category, GoalSummaryDto? Goal)
-{
-    public static BaseEventSummaryDto FromEntity(BaseEvent b) => new(
-        b.Id, b.GoalId, b.Title,
-        b.Category is not null ? CategorySummaryDto.FromEntity(b.Category) : null,
-        b.Goal is not null ? GoalSummaryDto.FromEntity(b.Goal) : null);
-}
-
-public sealed record CreateBaseEventRequest(string Title, Guid? CategoryId);
-public sealed record UpdateBaseEventRequest(string Title, Guid? CategoryId);
-
-// Recommendations
-// Type is "event" (tiers 1, 2, 4) or "base_event" (tier 3 pattern suggestions)
-public sealed record RecommendationDto(int Tier, string Type, EventDto? Event, BaseEventSummaryDto? BaseEvent);
+// Recommendations — "occurrence" for tiers 1/2/4, "activity" for tier 3 habit suggestions
+public sealed record RecommendationDto(int Tier, string Type, OccurrenceDto? Occurrence, ActivityDto? Activity);
 
 // UserSettings
 public sealed record UserSettingsDto(Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone)

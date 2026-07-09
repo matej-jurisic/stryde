@@ -47,25 +47,25 @@ public static class DayMath
         return new DateTimeOffset(nextLocal, ctx.TimeZone.GetUtcOffset(nextLocal));
     }
 
-    /// <summary>An event's day is the day it starts on. Floating events have no day.</summary>
-    public static DateOnly? EventDay(Event e, DayContext ctx) =>
-        e.StartAt.HasValue ? DayOf(e.StartAt.Value, ctx) : null;
+    /// <summary>An occurrence's day is the day it starts on. Floating occurrences have no day.</summary>
+    public static DateOnly? OccurrenceDay(Occurrence o, DayContext ctx) =>
+        o.StartAt.HasValue ? DayOf(o.StartAt.Value, ctx) : null;
 
     /// <summary>
-    /// Overdue: pending, and either the end datetime has passed, or (start-only) the event's day has ended.
-    /// All-day events are overdue when the calendar date has passed (ignoring day boundary).
-    /// Floating events are never overdue.
+    /// Overdue: pending, and either the end datetime has passed, or (start-only) the occurrence's day has ended.
+    /// All-day occurrences are overdue when the calendar date has passed (ignoring day boundary).
+    /// Floating occurrences are never overdue.
     /// </summary>
-    public static bool IsOverdue(Event e, DayContext ctx, DateTimeOffset nowUtc)
+    public static bool IsOverdue(Occurrence o, DayContext ctx, DateTimeOffset nowUtc)
     {
-        if (e.Status != EventStatus.pending) return false;
-        if (e.StartAt is null) return false;
-        if (e.EndAt.HasValue) return e.EndAt.Value < nowUtc;
-        if (e.IsAllDay)
+        if (o.Status != EventStatus.pending) return false;
+        if (o.StartAt is null) return false;
+        if (o.EndAt.HasValue) return o.EndAt.Value < nowUtc;
+        if (o.IsAllDay)
         {
-            var eventDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(e.StartAt.Value, ctx.TimeZone).DateTime);
-            return eventDate < Today(ctx, nowUtc);
+            var occDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(o.StartAt.Value, ctx.TimeZone).DateTime);
+            return occDate < Today(ctx, nowUtc);
         }
-        return EndOfDay(DayOf(e.StartAt.Value, ctx), ctx) <= nowUtc;
+        return EndOfDay(DayOf(o.StartAt.Value, ctx), ctx) <= nowUtc;
     }
 }
