@@ -41,31 +41,33 @@ function getDayLabel(iso: string): string {
 }
 
 function formatOccurrenceDate(o: Occurrence): string {
-  if (o.isAllDay && o.startAt) return `${getDayLabel(o.startAt)}, All day`
-  if (o.windowStart) {
-    const dayLabel = getDayLabel(o.windowStart)
-    const range = o.windowEnd
-      ? `${formatTime(o.windowStart)} - ${formatTime(o.windowEnd)}`
-      : formatTime(o.windowStart)
-    const dur = formatDuration(o.windowDurationMinutes)
+  const refIso = o.startAt ?? o.endAt
+  if (!refIso) return ''
+  if (o.isAllDay) {
+    const dur = formatDuration(o.durationMinutes)
+    return dur ? `${getDayLabel(refIso)}, All day · ~${dur}` : `${getDayLabel(refIso)}, All day`
+  }
+  const dayLabel = getDayLabel(refIso)
+  if (o.startAt && o.endAt) {
+    const range = `${formatTime(o.startAt)} - ${formatTime(o.endAt)}`
+    const dur = formatDuration(o.durationMinutes)
     return dur ? `${dayLabel}, ${range} ~${dur}` : `${dayLabel}, ${range}`
   }
-  if (!o.startAt) return ''
-  const dayLabel = getDayLabel(o.startAt)
-  const timeStr = formatTime(o.startAt)
-  if (o.endAt) return `${dayLabel}, ${timeStr} - ${formatTime(o.endAt)}`
-  return `${dayLabel}, ${timeStr}`
+  if (o.startAt) return `${dayLabel}, ${formatTime(o.startAt)}`
+  return `${dayLabel}, Due ${formatTime(o.endAt!)}`
 }
 
-type Group = 'overdue' | 'today' | 'unscheduled' | 'floating' | 'upcoming' | 'done'
+type Group = 'overdue' | 'today' | 'planned' | 'floating' | 'upcoming' | 'done'
 
 function classify(o: Occurrence): Group {
   if (o.status !== 'pending') return 'done'
-  if (!o.startAt && !o.windowStart) return 'floating'
-  if (!o.startAt) return 'unscheduled'
+  if (o.isPlanned) return 'planned'
+  if (!o.startAt && !o.endAt && !o.isAllDay) return 'floating'
   if (o.isOverdue) return 'overdue'
 
-  const start = new Date(o.startAt)
+  const ref = o.startAt ?? o.endAt
+  if (!ref) return 'upcoming'
+  const start = new Date(ref)
   const todayStart = startOfDay(new Date())
   const tomorrowStart = new Date(todayStart.getTime() + 86400000)
 
@@ -73,12 +75,12 @@ function classify(o: Occurrence): Group {
   return 'upcoming'
 }
 
-const GROUP_ORDER: Group[] = ['overdue', 'today', 'unscheduled', 'upcoming', 'floating', 'done']
+const GROUP_ORDER: Group[] = ['overdue', 'today', 'planned', 'upcoming', 'floating', 'done']
 
 const GROUP_LABELS: Record<Group, string> = {
   overdue: 'Overdue',
   today: 'Today',
-  unscheduled: 'Unscheduled',
+  planned: 'Planned',
   upcoming: 'Upcoming',
   floating: 'Floating',
   done: 'Completed / Skipped',
@@ -154,9 +156,9 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
             <Badge key={goal.id} tone="focus">{goal.title}</Badge>
           )}
         </div>
-        {(occurrence.startAt || occurrence.windowStart || category) && (
+        {(occurrence.startAt || occurrence.endAt || occurrence.isAllDay || category) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-            {(occurrence.startAt || occurrence.windowStart) && (
+            {(occurrence.startAt || occurrence.endAt || occurrence.isAllDay) && (
               <span className="whitespace-nowrap flex items-center gap-1 text-xs text-muted-foreground">
                 <Clock className="h-3 w-3 shrink-0" strokeWidth={2} />
                 {formatOccurrenceDate(occurrence)}
@@ -278,7 +280,7 @@ export function InboxPage() {
 
   const activeCategory = categoryId ? categories.find((c) => c.id === categoryId) : null
 
-  const isFloatingOccurrence = (o: Occurrence) => !o.startAt && !o.windowStart && !o.isAllDay
+  const isFloatingOccurrence = (o: Occurrence) => !o.isPlanned && !o.startAt && !o.endAt && !o.isAllDay
 
   const visibleOccurrences = categoryId
     ? occurrences.filter((o) => o.activity.category?.id === categoryId)
@@ -345,10 +347,9 @@ export function InboxPage() {
         action={
           <button
             onClick={openCreate}
-            className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
           >
             <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-            New
           </button>
         }
       />

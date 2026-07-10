@@ -88,10 +88,10 @@ export const occurrencesApi = {
 
   get: (id: string) => request<Occurrence>(`/api/occurrences/${id}`),
 
-  create: (body: { activityId: string; title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null }) =>
+  create: (body: { activityId: string; title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
     request<Occurrence>('/api/occurrences', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null }) =>
+  update: (id: string, body: { title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
     request<Occurrence>(`/api/occurrences/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (id: string) => request<void>(`/api/occurrences/${id}`, { method: 'DELETE' }),
@@ -99,10 +99,10 @@ export const occurrencesApi = {
   setStatus: (id: string, status: import('./types').EventStatus) =>
     request<Occurrence>(`/api/occurrences/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
 
-  createEvent: (body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null }) =>
+  createEvent: (body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
     request<Occurrence>('/api/occurrences/event', { method: 'POST', body: JSON.stringify(body) }),
 
-  updateEvent: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null }) =>
+  updateEvent: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
     request<Occurrence>(`/api/occurrences/${id}/event`, { method: 'PUT', body: JSON.stringify(body) }),
 }
 

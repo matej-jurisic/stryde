@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { CalendarRange, CalendarDays, Inbox, Target, Layers } from 'lucide-react'
+import { CalendarRange, CalendarDays, Inbox, Target, Layers, Settings } from 'lucide-react'
 import { useInboxCount } from './useInboxCount'
 
 const navItems = [
@@ -8,6 +8,7 @@ const navItems = [
   { to: '/calendar',   label: 'Calendar',   Icon: CalendarDays,  badge: false },
   { to: '/goals',      label: 'Goals',      Icon: Target,        badge: false },
   { to: '/activities', label: 'Activities', Icon: Layers,        badge: false },
+  { to: '/settings',   label: 'Settings',   Icon: Settings,      badge: false },
 ]
 
 export function BottomNav() {

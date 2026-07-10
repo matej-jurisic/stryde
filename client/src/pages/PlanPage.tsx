@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, CalendarPlus, MoreHorizontal } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, CalendarPlus, MoreHorizontal, CalendarCheck } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, goalsApi, settingsApi } from '@/lib/api'
 import type { Activity, Checkpoint, CheckpointSize, Occurrence, EventStatus, Goal } from '@/lib/types'
@@ -62,16 +62,17 @@ function formatDuration(minutes: number | null): string {
 }
 
 function formatTimeRange(event: Occurrence): string {
-  if (event.isAllDay) return 'All day'
-  if (event.windowStart) {
-    const range = event.windowEnd
-      ? `${formatTime(event.windowStart)} - ${formatTime(event.windowEnd)}`
-      : formatTime(event.windowStart)
-    const dur = formatDuration(event.windowDurationMinutes)
+  if (event.isAllDay) {
+    const dur = formatDuration(event.durationMinutes)
+    return dur ? `All day ~${dur}` : 'All day'
+  }
+  if (!event.startAt && event.endAt) return `Due ${formatTime(event.endAt)}`
+  if (!event.startAt) return ''
+  if (event.endAt) {
+    const range = `${formatTime(event.startAt)} - ${formatTime(event.endAt)}`
+    const dur = formatDuration(event.durationMinutes)
     return dur ? `${range} ~${dur}` : range
   }
-  if (!event.startAt) return ''
-  if (event.endAt) return `${formatTime(event.startAt)} - ${formatTime(event.endAt)}`
   return formatTime(event.startAt)
 }
 
@@ -318,13 +319,13 @@ export function PlanPage() {
   const scheduledEvents = useMemo(
     () =>
       occurrences
-        .filter((o) => o.startAt !== null)
+        .filter((o) => o.startAt !== null && !o.isPlanned)
         .sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime()),
     [occurrences],
   )
 
-  const windowedEvents = useMemo(
-    () => occurrences.filter((o) => o.startAt === null && o.windowStart !== null),
+  const plannedEvents = useMemo(
+    () => occurrences.filter((o) => o.isPlanned),
     [occurrences],
   )
 
@@ -417,9 +418,9 @@ export function PlanPage() {
             {!isToday && (
               <button
                 onClick={goToday}
-                className="h-8 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
               >
-                Today
+                <CalendarCheck className="h-3.5 w-3.5" strokeWidth={2} />
               </button>
             )}
 
@@ -439,10 +440,9 @@ export function PlanPage() {
 
             <button
               onClick={openCreate}
-              className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
             >
               <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-              <span className="hidden sm:inline">New event</span>
             </button>
           </div>
         </header>
@@ -501,20 +501,20 @@ export function PlanPage() {
                   )}
                 </div>
 
-                {/* Unscheduled */}
-                {windowedEvents.length > 0 && (
+                {/* Planned */}
+                {plannedEvents.length > 0 && (
                   <div>
                     <div className="mb-2 flex items-center justify-between px-1">
                       <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Unscheduled
+                        Planned
                       </h2>
                       <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
-                        {windowedEvents.length}
+                        {plannedEvents.length}
                       </span>
                     </div>
                     <div className="rounded-lg border border-border">
                       <ul>
-                        {windowedEvents.map((event) => (
+                        {plannedEvents.map((event) => (
                           <AgendaRow
                             key={event.id}
                             event={event}

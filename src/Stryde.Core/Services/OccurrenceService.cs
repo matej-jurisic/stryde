@@ -13,7 +13,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
     {
         var err = ValidateOptionalTitle(req.Title)
             ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
-            ?? ValidateWindow(req.StartAt, req.WindowStart, req.WindowEnd, req.WindowDurationMinutes);
+            ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes);
         if (err is not null) return Result<OccurrenceDto>.Fail(err);
 
         var activity = await db.Activities
@@ -31,9 +31,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             StartAt = req.StartAt,
             EndAt = req.IsAllDay ? null : req.EndAt,
             IsAllDay = req.IsAllDay,
-            WindowStart = req.WindowStart,
-            WindowEnd = req.WindowEnd,
-            WindowDurationMinutes = req.WindowDurationMinutes,
+            IsPlanned = req.IsPlanned,
+            DurationMinutes = req.DurationMinutes,
         };
 
         db.Occurrences.Add(o);
@@ -64,7 +63,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             .Where(o => o.UserId == userId);
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
-        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.WindowStart == null);
+        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.EndAt == null && !o.IsAllDay && !o.IsPlanned);
 
         var all = await query.ToListAsync();
 
@@ -73,12 +72,15 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         {
             occurrences = occurrences.Where(o =>
             {
+                if (o.StartAt is not null && o.EndAt is not null)
+                    return (!endBefore.HasValue || o.StartAt < endBefore.Value)
+                        && (!startFrom.HasValue || o.EndAt > startFrom.Value);
                 if (o.StartAt is not null)
                     return (!startFrom.HasValue || o.StartAt >= startFrom.Value)
                         && (!endBefore.HasValue || o.StartAt < endBefore.Value);
-                if (o.WindowStart is not null && o.WindowEnd is not null)
-                    return (!endBefore.HasValue || o.WindowStart < endBefore.Value)
-                        && (!startFrom.HasValue || o.WindowEnd > startFrom.Value);
+                if (o.EndAt is not null)
+                    return (!startFrom.HasValue || o.EndAt >= startFrom.Value)
+                        && (!endBefore.HasValue || o.EndAt < endBefore.Value);
                 return false;
             });
         }
@@ -86,7 +88,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var ctx = await settings.GetDayContextAsync(userId);
         var now = DateTimeOffset.UtcNow;
         return occurrences
-            .OrderBy(o => o.StartAt ?? o.WindowStart ?? DateTimeOffset.MaxValue)
+            .OrderBy(o => o.StartAt ?? o.EndAt ?? DateTimeOffset.MaxValue)
             .ThenBy(o => o.CreatedAt)
             .Select(o => OccurrenceDto.FromEntity(o, ctx, now))
             .ToList();
@@ -96,7 +98,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
     {
         var err = ValidateOptionalTitle(req.Title)
             ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
-            ?? ValidateWindow(req.StartAt, req.WindowStart, req.WindowEnd, req.WindowDurationMinutes);
+            ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes);
         if (err is not null) return Result<OccurrenceDto>.Fail(err);
 
         var o = await db.Occurrences
@@ -109,9 +111,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         o.StartAt = req.StartAt;
         o.EndAt = req.IsAllDay ? null : req.EndAt;
         o.IsAllDay = req.IsAllDay;
-        o.WindowStart = req.WindowStart;
-        o.WindowEnd = req.WindowEnd;
-        o.WindowDurationMinutes = req.WindowDurationMinutes;
+        o.IsPlanned = req.IsPlanned;
+        o.DurationMinutes = req.DurationMinutes;
 
         await db.SaveChangesAsync();
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
@@ -138,7 +139,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
     {
         var err = Validators.ValidateTitle(req.Title, "Title")
             ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
-            ?? ValidateWindow(req.StartAt, req.WindowStart, req.WindowEnd, req.WindowDurationMinutes);
+            ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes);
         if (err is not null) return Result<OccurrenceDto>.Fail(err);
 
         var a = new Activity
@@ -174,9 +175,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             StartAt = req.StartAt,
             EndAt = req.IsAllDay ? null : req.EndAt,
             IsAllDay = req.IsAllDay,
-            WindowStart = req.WindowStart,
-            WindowEnd = req.WindowEnd,
-            WindowDurationMinutes = req.WindowDurationMinutes,
+            IsPlanned = req.IsPlanned,
+            DurationMinutes = req.DurationMinutes,
         };
         db.Occurrences.Add(o);
         await db.SaveChangesAsync();
@@ -187,7 +187,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
     {
         var err = Validators.ValidateTitle(req.Title, "Title")
             ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
-            ?? ValidateWindow(req.StartAt, req.WindowStart, req.WindowEnd, req.WindowDurationMinutes);
+            ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes);
         if (err is not null) return Result<OccurrenceDto>.Fail(err);
 
         var o = await db.Occurrences
@@ -229,9 +229,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         o.StartAt = req.StartAt;
         o.EndAt = req.IsAllDay ? null : req.EndAt;
         o.IsAllDay = req.IsAllDay;
-        o.WindowStart = req.WindowStart;
-        o.WindowEnd = req.WindowEnd;
-        o.WindowDurationMinutes = req.WindowDurationMinutes;
+        o.IsPlanned = req.IsPlanned;
+        o.DurationMinutes = req.DurationMinutes;
 
         await db.SaveChangesAsync();
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
@@ -260,27 +259,20 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             ? new Error(ErrorType.Validation, "Title cannot exceed 255 characters.")
             : null;
 
-    private static Error? ValidateWindow(
+    private static Error? ValidateDuration(
+        bool isPlanned,
         DateTimeOffset? startAt,
-        DateTimeOffset? windowStart,
-        DateTimeOffset? windowEnd,
+        DateTimeOffset? endAt,
         int? durationMinutes)
     {
-        var hasWindow = windowStart.HasValue || windowEnd.HasValue || durationMinutes.HasValue;
-        if (!hasWindow) return null;
-
-        if (startAt.HasValue)
-            return new Error(ErrorType.Validation, "A windowed occurrence cannot also have a start time.");
-        if (!windowStart.HasValue || !windowEnd.HasValue || !durationMinutes.HasValue)
-            return new Error(ErrorType.Validation, "Window start, window end, and duration must all be provided together.");
-        if (windowEnd.Value <= windowStart.Value)
-            return new Error(ErrorType.Validation, "Window end must be after window start.");
-        if (durationMinutes.Value <= 0)
+        if (durationMinutes.HasValue && durationMinutes.Value <= 0)
             return new Error(ErrorType.Validation, "Duration must be greater than zero.");
-        var windowMinutes = (int)(windowEnd.Value - windowStart.Value).TotalMinutes;
-        if (durationMinutes.Value > windowMinutes)
-            return new Error(ErrorType.Validation, "Duration cannot exceed the length of the window.");
-
+        if (isPlanned && startAt.HasValue && endAt.HasValue && durationMinutes.HasValue)
+        {
+            var windowMinutes = (int)(endAt.Value - startAt.Value).TotalMinutes;
+            if (durationMinutes.Value > windowMinutes)
+                return new Error(ErrorType.Validation, "Duration cannot exceed the length of the window.");
+        }
         return null;
     }
 }

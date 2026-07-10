@@ -79,9 +79,8 @@ export interface Occurrence {
   endAt: string | null
   status: EventStatus
   isAllDay: boolean
-  windowStart: string | null
-  windowEnd: string | null
-  windowDurationMinutes: number | null
+  isPlanned: boolean
+  durationMinutes: number | null
   repeatRuleId: string | null
   createdAt: string
   isOverdue: boolean

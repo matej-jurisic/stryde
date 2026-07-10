@@ -59,6 +59,7 @@ public static class DayMath
     public static bool IsOverdue(Occurrence o, DayContext ctx, DateTimeOffset nowUtc)
     {
         if (o.Status != EventStatus.pending) return false;
+        if (o.IsPlanned) return false;
         if (o.StartAt is null) return false;
         if (o.EndAt.HasValue) return o.EndAt.Value < nowUtc;
         if (o.IsAllDay)

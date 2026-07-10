@@ -21,7 +21,7 @@ function formatDuration(minutes: number | null): string {
 }
 
 function formatOccurrenceTime(o: Occurrence): string {
-  const refIso = o.windowStart ?? o.startAt
+  const refIso = o.startAt ?? o.endAt
   if (!refIso) return ''
 
   const d = new Date(refIso)
@@ -37,19 +37,19 @@ function formatOccurrenceTime(o: Occurrence): string {
   else if (sameDay(d, tomorrow)) dateLabel = 'Tomorrow'
   else dateLabel = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 
-  if (o.isAllDay) return `${dateLabel}, All day`
-
-  if (o.windowStart) {
-    const range = o.windowEnd
-      ? `${formatTime(o.windowStart)} - ${formatTime(o.windowEnd)}`
-      : formatTime(o.windowStart)
-    const dur = formatDuration(o.windowDurationMinutes)
-    return dur ? `${dateLabel}, ${range} · ~${dur}` : `${dateLabel}, ${range}`
+  if (o.isAllDay) {
+    const dur = formatDuration(o.durationMinutes)
+    return dur ? `${dateLabel}, All day ~${dur}` : `${dateLabel}, All day`
   }
 
-  const timeStr = formatTime(o.startAt!)
-  if (o.endAt) return `${dateLabel}, ${timeStr} - ${formatTime(o.endAt)}`
-  return `${dateLabel}, ${timeStr}`
+  if (o.startAt && o.endAt) {
+    const range = `${formatTime(o.startAt)} - ${formatTime(o.endAt)}`
+    const dur = formatDuration(o.durationMinutes)
+    return dur ? `${dateLabel}, ${range} ~${dur}` : `${dateLabel}, ${range}`
+  }
+
+  if (o.startAt) return `${dateLabel}, ${formatTime(o.startAt)}`
+  return `${dateLabel}, Due ${formatTime(o.endAt!)}`
 }
 
 const GOAL_TONE: Record<string, 'focus' | 'active' | 'bench' | 'neutral'> = {
@@ -126,7 +126,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
             <Pencil className="h-4 w-4" strokeWidth={2} />
           </button>
 
-          {isPending && occurrence.windowStart && onSchedule && (
+          {isPending && occurrence.isPlanned && onSchedule && (
             <button
               onClick={() => { onClose(); onSchedule(occurrence) }}
               disabled={busy}

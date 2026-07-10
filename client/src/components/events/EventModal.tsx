@@ -13,36 +13,32 @@ interface FormState {
   goalId: string
   startAt: string
   endAt: string
-  windowStart: string
-  windowEnd: string
-  windowDurationHours: string
-  windowDurationMins: string
+  durationHours: string
+  durationMins: string
 }
 
 interface Errors {
   activityId?: string
   title?: string
   endAt?: string
-  windowEnd?: string
-  windowDuration?: string
+  duration?: string
 }
 
-function validate(form: FormState, kind: ActivityKind, useStartEnd: boolean, useWindow: boolean): Errors {
+type TimeMode = 'due' | 'scheduled' | 'floating'
+
+function validate(form: FormState, kind: ActivityKind, timeMode: TimeMode, isPlanned: boolean): Errors {
   const errs: Errors = {}
   if (kind === 'activity' && !form.activityId) errs.activityId = 'Please select an activity.'
   if (kind === 'event' && !form.title.trim()) errs.title = 'Title is required.'
-  if (useStartEnd && form.startAt && form.endAt && form.endAt <= form.startAt) {
+  if (timeMode === 'scheduled' && form.startAt && form.endAt && form.endAt <= form.startAt) {
     errs.endAt = 'End time must be after start time.'
   }
-  if (useWindow) {
-    if (form.windowEnd && form.windowStart && form.windowEnd <= form.windowStart) {
-      errs.windowEnd = 'Window end must be after window start.'
-    }
-    const totalMins = (parseInt(form.windowDurationHours || '0') * 60) + parseInt(form.windowDurationMins || '0')
-    if (totalMins <= 0) errs.windowDuration = 'Duration must be greater than zero.'
-    if (form.windowStart && form.windowEnd) {
-      const windowMins = (new Date(form.windowEnd).getTime() - new Date(form.windowStart).getTime()) / 60000
-      if (totalMins > windowMins) errs.windowDuration = 'Duration cannot exceed the length of the window.'
+  if (form.durationHours || form.durationMins) {
+    const totalMins = (parseInt(form.durationHours || '0') * 60) + parseInt(form.durationMins || '0')
+    if (totalMins <= 0) errs.duration = 'Duration must be greater than zero.'
+    if (isPlanned && timeMode === 'scheduled' && form.startAt && form.endAt) {
+      const windowMins = (new Date(form.endAt).getTime() - new Date(form.startAt).getTime()) / 60000
+      if (totalMins > windowMins) errs.duration = 'Duration cannot exceed the length of the window.'
     }
   }
   return errs
@@ -87,63 +83,46 @@ interface OccurrenceModalProps {
   defaultStartAt?: string
   defaultEndAt?: string
   defaultActivity?: Activity
-  defaultMode?: ScheduleMode
   scheduleOnly?: boolean
 }
 
-type ScheduleMode = 'due' | 'scheduled' | 'window' | 'floating'
-
-export function EventModal({ open, onClose, occurrence, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, defaultMode, scheduleOnly }: OccurrenceModalProps) {
+export function EventModal({ open, onClose, occurrence, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, scheduleOnly }: OccurrenceModalProps) {
   const qc = useQueryClient()
   const isEdit = Boolean(occurrence)
 
-  const dur = durationToHM(occurrence?.windowDurationMinutes ?? null)
-
+  const dur = durationToHM(occurrence?.durationMinutes ?? null)
   const isEventKind = occurrence?.activity.kind === 'event'
 
-  const [kind, setKind] = useState<ActivityKind>(() =>
-    isEventKind ? 'event' : 'activity'
-  )
+  const [kind, setKind] = useState<ActivityKind>(() => isEventKind ? 'event' : 'activity')
 
   const [form, setForm] = useState<FormState>(() => ({
     activityId: occurrence?.activityId ?? defaultActivity?.id ?? '',
-    title: isEventKind
-      ? (occurrence?.activity.title ?? '')
-      : (occurrence?.title ?? ''),
+    title: isEventKind ? (occurrence?.activity.title ?? '') : (occurrence?.title ?? ''),
     categoryId: occurrence?.activity.categoryId ?? '',
     goalId: occurrence?.activity.goalId ?? '',
-    startAt: occurrence
-      ? ((scheduleOnly || defaultMode === 'scheduled') && !occurrence.startAt && occurrence.windowStart
-          ? toInputValue(occurrence.windowStart)
-          : toInputValue(occurrence.startAt))
-      : (defaultStartAt ?? todayLocal()),
-    endAt: occurrence
-      ? (scheduleOnly && occurrence.windowEnd ? toInputValue(occurrence.windowEnd) : toInputValue(occurrence.endAt))
-      : (defaultEndAt ?? ''),
-    windowStart: occurrence ? toInputValue(occurrence.windowStart) : todayLocal(),
-    windowEnd: occurrence ? toInputValue(occurrence.windowEnd) : '',
-    windowDurationHours: dur.h,
-    windowDurationMins: dur.m,
+    startAt: occurrence ? toInputValue(occurrence.startAt) : (defaultStartAt ?? todayLocal()),
+    endAt: occurrence ? toInputValue(occurrence.endAt) : (defaultEndAt ?? ''),
+    durationHours: dur.h,
+    durationMins: dur.m,
   }))
 
   const [errors, setErrors] = useState<Errors>({})
   const [isAllDay, setIsAllDay] = useState(() => occurrence?.isAllDay ?? false)
-  const [useStartEnd, setUseStartEnd] = useState(() => {
-    if (scheduleOnly) return true
-    if (defaultMode) return defaultMode === 'scheduled'
-    return occurrence ? Boolean(occurrence.endAt) : Boolean(defaultEndAt)
-  })
-  const [useWindow, setUseWindow] = useState(() => {
-    if (scheduleOnly) return false
-    if (defaultMode) return defaultMode === 'window'
-    return Boolean(occurrence?.windowStart)
-  })
-  const [isFloating, setIsFloating] = useState(() => {
-    if (scheduleOnly || defaultMode) return defaultMode === 'floating'
-    return occurrence ? (!occurrence.startAt && !occurrence.windowStart && !occurrence.isAllDay) : false
+  const [isPlanned, setIsPlanned] = useState(() => occurrence?.isPlanned ?? false)
+  const [timeMode, setTimeMode] = useState<TimeMode>(() => {
+    if (scheduleOnly) {
+      if (!occurrence.startAt && !occurrence.endAt && !occurrence.isAllDay) return 'floating'
+      if (occurrence.startAt && occurrence.endAt) return 'scheduled'
+      return 'due'
+    }
+    if (occurrence) {
+      if (!occurrence.startAt && !occurrence.endAt && !occurrence.isAllDay && !occurrence.isPlanned) return 'floating'
+      if (occurrence.startAt && occurrence.endAt) return 'scheduled'
+      return 'due'
+    }
+    return defaultEndAt ? 'scheduled' : 'due'
   })
 
-  // New activity inline creation
   const [showNewActivity, setShowNewActivity] = useState(false)
   const [newActivityTitle, setNewActivityTitle] = useState('')
   const [newActivityCategoryId, setNewActivityCategoryId] = useState('')
@@ -184,16 +163,16 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
 
   const mutation = useMutation({
     mutationFn: () => {
-      const windowDurationMinutes = useWindow
-        ? (parseInt(form.windowDurationHours || '0') * 60) + parseInt(form.windowDurationMins || '0')
+      const durationMinutes = (form.durationHours || form.durationMins)
+        ? (parseInt(form.durationHours || '0') * 60) + parseInt(form.durationMins || '0')
         : null
+
       const schedulePayload = {
-        startAt: useWindow || isFloating ? null : toIso(form.startAt),
-        endAt: useWindow || isAllDay || isFloating ? null : (useStartEnd ? toIso(form.endAt) : null),
-        isAllDay: useWindow || isFloating ? false : isAllDay,
-        windowStart: useWindow ? toIso(form.windowStart) : null,
-        windowEnd: useWindow ? toIso(form.windowEnd) : null,
-        windowDurationMinutes: useWindow ? windowDurationMinutes : null,
+        startAt: timeMode === 'floating' ? null : toIso(form.startAt),
+        endAt: timeMode !== 'scheduled' || isAllDay ? null : toIso(form.endAt),
+        isAllDay: timeMode === 'floating' ? false : isAllDay,
+        isPlanned: scheduleOnly ? false : timeMode === 'floating' ? false : isPlanned,
+        durationMinutes,
       }
 
       if (kind === 'event') {
@@ -225,7 +204,7 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
   })
 
   function handleSubmit() {
-    const errs = validate(form, kind, useStartEnd, useWindow)
+    const errs = validate(form, kind, timeMode, isPlanned)
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
       return
@@ -233,77 +212,33 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
     mutation.mutate()
   }
 
-  function enableStartEnd() {
-    setIsAllDay(false)
-    setUseWindow(false)
-    setUseStartEnd(true)
-    if (!form.endAt && form.startAt) {
-      setForm((f) => ({ ...f, endAt: addOneHour(f.startAt) }))
+  function switchMode(mode: TimeMode) {
+    setTimeMode(mode)
+    if (mode === 'floating') {
+      setIsAllDay(false)
+      setIsPlanned(false)
+      setForm((f) => ({ ...f, startAt: '', endAt: '', durationHours: '', durationMins: '' }))
+      setErrors({})
+    } else if (mode === 'scheduled') {
+      if (!form.endAt && form.startAt) {
+        setForm((f) => ({ ...f, endAt: addOneHour(f.startAt) }))
+      }
+      setErrors({})
+    } else {
+      setForm((f) => ({ ...f, endAt: '' }))
+      setErrors((e) => ({ ...e, endAt: undefined }))
     }
-  }
-
-  function disableStartEnd() {
-    setUseStartEnd(false)
-    setForm((f) => ({ ...f, endAt: '' }))
-    setErrors((e) => ({ ...e, endAt: undefined }))
   }
 
   function toggleAllDay() {
     if (!isAllDay) {
       const dateOnly = form.startAt ? form.startAt.substring(0, 10) : ''
       setForm((f) => ({ ...f, startAt: dateOnly ? dateOnly + 'T00:00' : '', endAt: '' }))
-      setUseStartEnd(false)
-      setUseWindow(false)
+      if (timeMode === 'scheduled') setTimeMode('due')
       setErrors((e) => ({ ...e, endAt: undefined }))
     }
     setIsAllDay((v) => !v)
   }
-
-  function enableWindow() {
-    setUseWindow(true)
-    setUseStartEnd(false)
-    setIsAllDay(false)
-    setForm((f) => ({
-      ...f,
-      endAt: '',
-      windowStart: f.windowStart || f.startAt,
-      windowEnd: f.windowEnd || f.endAt,
-    }))
-    setErrors({})
-  }
-
-  function disableWindow() {
-    setUseWindow(false)
-    setForm((f) => ({ ...f, windowStart: '', windowEnd: '', windowDurationHours: '', windowDurationMins: '' }))
-    setErrors({})
-  }
-
-  function enableFloating() {
-    setIsFloating(true)
-    setUseWindow(false)
-    setUseStartEnd(false)
-    setIsAllDay(false)
-    setForm((f) => ({ ...f, startAt: '', endAt: '', windowStart: '', windowEnd: '', windowDurationHours: '', windowDurationMins: '' }))
-    setErrors({})
-  }
-
-  function switchMode(mode: ScheduleMode) {
-    if (mode === 'floating') {
-      enableFloating()
-      return
-    }
-    setIsFloating(false)
-    if (mode === 'due') {
-      if (useWindow) disableWindow()
-      if (useStartEnd) disableStartEnd()
-    } else if (mode === 'scheduled') {
-      enableStartEnd()
-    } else {
-      enableWindow()
-    }
-  }
-
-  const scheduleMode: ScheduleMode = isFloating ? 'floating' : useWindow ? 'window' : useStartEnd ? 'scheduled' : 'due'
 
   const selectedActivity = activities.find((a) => a.id === form.activityId) ?? defaultActivity ?? null
 
@@ -317,6 +252,8 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
   const kindTitle = isEdit
     ? (kind === 'event' ? 'Edit Event' : 'Edit Occurrence')
     : (kind === 'event' ? 'New Event' : 'New Occurrence')
+
+  const showDuration = !scheduleOnly && isPlanned && timeMode !== 'floating'
 
   return (
     <Modal
@@ -334,7 +271,7 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
         </>
       }
     >
-      {/* Kind picker — hidden in scheduleOnly or edit mode */}
+      {/* Kind picker */}
       {!scheduleOnly && !isEdit && (
         <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
           <button
@@ -436,7 +373,6 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
               </>
             )}
 
-            {/* Inline new activity creation */}
             {showNewActivity && !isEdit && (
               <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3">
                 <input
@@ -480,7 +416,6 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
               </div>
             )}
 
-            {/* Selected activity context */}
             {selectedActivity && (selectedActivity.goal || selectedActivity.category) && (
               <div className="flex flex-wrap gap-2 px-1">
                 {selectedActivity.goal && (
@@ -511,31 +446,46 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
 
       {/* Scheduling section */}
       <div className="flex flex-col gap-3">
-        {!scheduleOnly && (
-          <div className="grid grid-cols-4 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
-            <button type="button" onClick={() => switchMode('due')} className={segmentClass(scheduleMode === 'due')}>Due</button>
-            <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(scheduleMode === 'scheduled')}>Scheduled</button>
-            <button type="button" onClick={() => switchMode('window')} className={segmentClass(scheduleMode === 'window')}>Window</button>
-            <button type="button" onClick={() => switchMode('floating')} className={segmentClass(scheduleMode === 'floating')}>Floating</button>
+        <div className="flex items-center gap-2">
+          <div className="grid flex-1 grid-cols-3 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+            <button type="button" onClick={() => switchMode('due')} className={segmentClass(timeMode === 'due')}>Due</button>
+            <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(timeMode === 'scheduled')}>Scheduled</button>
+            <button type="button" onClick={() => switchMode('floating')} className={segmentClass(timeMode === 'floating')}>Floating</button>
           </div>
-        )}
+          {!scheduleOnly && timeMode !== 'floating' && (
+            <button
+              type="button"
+              onClick={() => setIsPlanned((v) => !v)}
+              className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                isPlanned
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-transparent text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+              }`}
+            >
+              Planned
+            </button>
+          )}
+        </div>
 
-        {scheduleMode === 'due' && !scheduleOnly && (
+        {/* Due mode */}
+        {timeMode === 'due' && (
           <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
-              <button
-                type="button"
-                onClick={toggleAllDay}
-                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                  isAllDay
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border bg-transparent text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-                }`}
-              >
-                All day
-              </button>
-            </div>
+            {timeMode === 'due' && (
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
+                <button
+                  type="button"
+                  onClick={toggleAllDay}
+                  className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                    isAllDay
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border bg-transparent text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                  }`}
+                >
+                  All day
+                </button>
+              </div>
+            )}
             <input
               type={isAllDay ? 'date' : 'datetime-local'}
               value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
@@ -552,17 +502,18 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
           </div>
         )}
 
-        {(scheduleMode === 'scheduled' || scheduleOnly) && (
+        {/* Scheduled mode */}
+        {timeMode === 'scheduled' && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field
-              label="Start"
+              label={!scheduleOnly && isPlanned ? 'Window start' : 'Start'}
               type="datetime-local"
               value={form.startAt}
               onChange={(e) => setForm((f) => ({ ...f, startAt: e.target.value }))}
               autoFocus={focusStartAt}
             />
             <Field
-              label="End"
+              label={!scheduleOnly && isPlanned ? 'Window end' : 'End'}
               type="datetime-local"
               value={form.endAt}
               onChange={(e) => setForm((f) => ({ ...f, endAt: e.target.value }))}
@@ -571,53 +522,38 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
           </div>
         )}
 
-        {scheduleMode === 'window' && (
-          <div className="flex flex-col gap-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field
-                label="Window start"
-                type="datetime-local"
-                value={form.windowStart}
-                onChange={(e) => setForm((f) => ({ ...f, windowStart: e.target.value }))}
-                autoFocus={focusStartAt}
-              />
-              <Field
-                label="Window end"
-                type="datetime-local"
-                value={form.windowEnd}
-                onChange={(e) => setForm((f) => ({ ...f, windowEnd: e.target.value }))}
-                error={errors.windowEnd}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-foreground">Duration</label>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={form.windowDurationHours}
-                    onChange={(e) => setForm((f) => ({ ...f, windowDurationHours: e.target.value }))}
-                    className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
-                  />
-                  <span className="shrink-0 text-sm text-muted-foreground">h</span>
-                </div>
-                <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    placeholder="0"
-                    value={form.windowDurationMins}
-                    onChange={(e) => setForm((f) => ({ ...f, windowDurationMins: e.target.value }))}
-                    className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
-                  />
-                  <span className="shrink-0 text-sm text-muted-foreground">min</span>
-                </div>
+        {/* Duration estimate (shown when planned) */}
+        {showDuration && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">
+              Duration estimate <span className="font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="0"
+                  value={form.durationHours}
+                  onChange={(e) => setForm((f) => ({ ...f, durationHours: e.target.value }))}
+                  className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
+                />
+                <span className="shrink-0 text-sm text-muted-foreground">h</span>
               </div>
-              {errors.windowDuration && <p className="text-xs text-destructive">{errors.windowDuration}</p>}
+              <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  placeholder="0"
+                  value={form.durationMins}
+                  onChange={(e) => setForm((f) => ({ ...f, durationMins: e.target.value }))}
+                  className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
+                />
+                <span className="shrink-0 text-sm text-muted-foreground">min</span>
+              </div>
             </div>
+            {errors.duration && <p className="text-xs text-destructive">{errors.duration}</p>}
           </div>
         )}
       </div>

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, ChevronDown, Menu } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Menu, Plus, LayoutGrid, CalendarCheck } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, settingsApi } from '@/lib/api'
 import type { Activity, Occurrence } from '@/lib/types'
@@ -115,16 +115,10 @@ function layoutDay(events: Occurrence[], day: Date): LayoutEvent[] {
   const dayStartMs = sod(day).getTime()
 
   const items = events
-    .filter((e) => e.windowStart ? !!(e.windowStart && e.windowEnd) : !!e.startAt)
+    .filter((e) => !!e.startAt)
     .map((e) => {
-      let startMs: number, endMs: number
-      if (e.windowStart && e.windowEnd) {
-        startMs = new Date(e.windowStart).getTime()
-        endMs = new Date(e.windowEnd).getTime()
-      } else {
-        startMs = new Date(e.startAt!).getTime()
-        endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
-      }
+      const startMs = new Date(e.startAt!).getTime()
+      const endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
       // Clip to this day's boundaries (handles cross-midnight events)
       const clipStartMin = Math.max((startMs - dayStartMs) / 60000, 0)
       const clipEndMin = Math.min((endMs - dayStartMs) / 60000, 24 * 60)
@@ -165,6 +159,14 @@ function layoutDay(events: Occurrence[], day: Date): LayoutEvent[] {
       trueEndPx: (end / 60) * HOUR_PX,
     }
   })
+}
+
+// ── Due occurrence helper ───────────────────────────────────────────────────
+
+const DUE_PIN_HEIGHT = 18
+
+function isDueOccurrence(o: Occurrence): boolean {
+  return !!o.startAt && !o.endAt
 }
 
 // ── Event coloring ──────────────────────────────────────────────────────────
@@ -214,7 +216,8 @@ function EventBlock({
   const { event, col, totalCols, topPx, heightPx, trueEndPx } = layout
   const { bgClass, bgHex, leftColor, textClass } = eventColors(event)
   const isDone = event.status !== 'pending'
-  const isWindowed = !!(event.windowStart && event.windowEnd)
+  const isPlanned = event.isPlanned
+  const isDue = isDueOccurrence(event)
   const accentColor = event.activity.category ? event.activity.category.color : 'var(--color-primary)'
   const isHex = accentColor.startsWith('#')
   const accentFaded = isHex ? `${accentColor}18` : `color-mix(in srgb, ${accentColor} 9%, transparent)`
@@ -224,14 +227,14 @@ function EventBlock({
   const leftPct = (col / totalCols) * 100
   const widthPct = 100 / totalCols
 
-  const timeText = event.startAt
+  const timeText = event.startAt && !event.isPlanned
     ? `${timeLabel(event.startAt)}${event.endAt ? ` – ${timeLabel(event.endAt)}` : ''}`
     : ''
 
-  const durationLabel = isWindowed && event.windowDurationMinutes
-    ? event.windowDurationMinutes >= 60
-      ? `~${Math.floor(event.windowDurationMinutes / 60)}h${event.windowDurationMinutes % 60 ? `${event.windowDurationMinutes % 60}m` : ''}`
-      : `~${event.windowDurationMinutes}m`
+  const durationLabel = isPlanned && event.durationMinutes
+    ? event.durationMinutes >= 60
+      ? `~${Math.floor(event.durationMinutes / 60)}h${event.durationMinutes % 60 ? `${event.durationMinutes % 60}m` : ''}`
+      : `~${event.durationMinutes}m`
     : null
 
   // Handles show always when resizing (touch mode), or on mouse hover via CSS
@@ -261,86 +264,115 @@ function EventBlock({
       data-true-end-px={trueEndPx}
       style={{
         top: topPx + GAP,
-        height: Math.max(heightPx - GAP, 20),
+        height: isDue ? DUE_PIN_HEIGHT : Math.max(heightPx - GAP, 20),
         left: `calc(${leftPct}% + ${GAP}px)`,
         width: `calc(${widthPct}% - ${GAP * 2}px)`,
         zIndex: isResizing ? 25 : undefined,
       }}
     >
-      {/* Top resize handle */}
-      <div
-        data-resize-handle="true"
-        className={`absolute inset-x-0 top-0 z-20 h-2.5 cursor-ns-resize ${handleVisibility} items-center justify-center`}
-        style={{ touchAction: 'none' }}
-        onMouseDown={stopAll}
-        onPointerDown={(e) => { e.stopPropagation(); onResizeStart?.(e, 'top') }}
-        onClick={stopAll}
-      >
-        <div className="h-0.5 w-6 rounded-full bg-primary/70" />
-      </div>
-
-      {/* Event body */}
-      {isWindowed ? (
+      {isDue ? (
+        /* Due pin — flat deadline marker, no resize handles */
         <button
-          className={`absolute inset-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : 'opacity-70'}`}
+          className={`absolute inset-0 flex items-center overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : ''}`}
           style={{
-            background: `repeating-linear-gradient(135deg, transparent, transparent 4px, ${accentFaded} 4px, ${accentFaded} 8px)`,
-            border: `1.5px dashed ${accentMid}`,
+            border: isPlanned ? `1.5px dashed ${accentColor}` : `1px solid ${accentColor}`,
+            backgroundColor: `${accentColor}18`,
             touchAction: 'pan-y',
           }}
           onPointerDown={bodyPointerProps.onPointerDown}
           onClick={bodyPointerProps.onClick}
         >
-          <div className="px-1.5 py-0.5">
-            {heightPx >= 20 && (
-              <p className="overflow-hidden whitespace-nowrap text-[10px] font-medium leading-tight" style={{ color: accentColor }}>
-                {event.effectiveTitle}{durationLabel ? ` ${durationLabel}` : ''}
-              </p>
-            )}
+          <div style={{ width: 3, minWidth: 3, alignSelf: 'stretch', background: leftColor }} className="shrink-0" />
+          <div className="flex min-w-0 flex-1 items-center gap-1 px-1.5">
+            <p
+              className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] font-medium leading-none ${isDone ? 'line-through text-muted-foreground' : ''}`}
+              style={isDone ? undefined : { color: accentColor }}
+            >
+              {event.effectiveTitle}{durationLabel ? ` ${durationLabel}` : ''}
+            </p>
+            <span className="shrink-0 text-[9px] leading-none opacity-60" style={{ color: accentColor }}>
+              {timeLabel(event.startAt!)}
+            </span>
           </div>
         </button>
       ) : (
-        <button
-          className={`absolute inset-0 overflow-hidden rounded-[4px] border bg-card text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-50' : ''} ${isResizing ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border/50'}`}
-          {...bodyPointerProps}
-        >
+        <>
+          {/* Top resize handle */}
           <div
-            className={`absolute inset-0 ${bgClass}`}
-            style={bgHex ? { backgroundColor: bgHex + '22' } : undefined}
-          />
-          <div className="relative flex h-full">
-            <div style={{ width: 3, minWidth: 3, background: leftColor }} className="shrink-0" />
-            <div className="@container min-w-0 flex-1 px-1.5 py-0.5">
-              {heightPx >= 20 && (
-                <p
-                  className={`@max-[10px]:hidden break-all overflow-hidden text-[11px] font-medium leading-tight ${
-                    isDone ? 'line-through text-muted-foreground' : textClass
-                  }`}
-                >
-                  {event.effectiveTitle}
-                </p>
-              )}
-              {heightPx >= 44 && timeText && (
-                <p className={`@max-[10px]:hidden overflow-hidden whitespace-nowrap text-[10px] leading-tight opacity-70 ${isDone ? 'text-muted-foreground' : textClass}`}>
-                  {timeText}
-                </p>
-              )}
-            </div>
+            data-resize-handle="true"
+            className={`absolute inset-x-0 top-0 z-20 h-2.5 cursor-ns-resize ${handleVisibility} items-center justify-center`}
+            style={{ touchAction: 'none' }}
+            onMouseDown={stopAll}
+            onPointerDown={(e) => { e.stopPropagation(); onResizeStart?.(e, 'top') }}
+            onClick={stopAll}
+          >
+            <div className="h-0.5 w-6 rounded-full bg-primary/70" />
           </div>
-        </button>
-      )}
 
-      {/* Bottom resize handle */}
-      <div
-        data-resize-handle="true"
-        className={`absolute inset-x-0 bottom-0 z-20 h-2.5 cursor-ns-resize ${handleVisibility} items-center justify-center`}
-        style={{ touchAction: 'none' }}
-        onMouseDown={stopAll}
-        onPointerDown={(e) => { e.stopPropagation(); onResizeStart?.(e, 'bottom') }}
-        onClick={stopAll}
-      >
-        <div className="h-0.5 w-6 rounded-full bg-primary/70" />
-      </div>
+          {/* Event body */}
+          {isPlanned ? (
+            <button
+              className={`absolute inset-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : 'opacity-70'}`}
+              style={{
+                background: `repeating-linear-gradient(135deg, transparent, transparent 4px, ${accentFaded} 4px, ${accentFaded} 8px)`,
+                border: `1.5px dashed ${accentMid}`,
+                touchAction: 'pan-y',
+              }}
+              onPointerDown={bodyPointerProps.onPointerDown}
+              onClick={bodyPointerProps.onClick}
+            >
+              <div className="px-1.5 py-0.5">
+                {heightPx >= 20 && (
+                  <p className="overflow-hidden whitespace-nowrap text-[10px] font-medium leading-tight" style={{ color: accentColor }}>
+                    {event.effectiveTitle}{durationLabel ? ` ${durationLabel}` : ''}
+                  </p>
+                )}
+              </div>
+            </button>
+          ) : (
+            <button
+              className={`absolute inset-0 overflow-hidden rounded-[4px] border bg-card text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-50' : ''} ${isResizing ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border/50'}`}
+              {...bodyPointerProps}
+            >
+              <div
+                className={`absolute inset-0 ${bgClass}`}
+                style={bgHex ? { backgroundColor: bgHex + '22' } : undefined}
+              />
+              <div className="relative flex h-full">
+                <div style={{ width: 3, minWidth: 3, background: leftColor }} className="shrink-0" />
+                <div className="@container min-w-0 flex-1 px-1.5 py-0.5">
+                  {heightPx >= 20 && (
+                    <p
+                      className={`@max-[10px]:hidden break-all overflow-hidden text-[11px] font-medium leading-tight ${
+                        isDone ? 'line-through text-muted-foreground' : textClass
+                      }`}
+                    >
+                      {event.effectiveTitle}
+                    </p>
+                  )}
+                  {heightPx >= 44 && timeText && (
+                    <p className={`@max-[10px]:hidden overflow-hidden whitespace-nowrap text-[10px] leading-tight opacity-70 ${isDone ? 'text-muted-foreground' : textClass}`}>
+                      {timeText}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </button>
+          )}
+
+          {/* Bottom resize handle */}
+          <div
+            data-resize-handle="true"
+            className={`absolute inset-x-0 bottom-0 z-20 h-2.5 cursor-ns-resize ${handleVisibility} items-center justify-center`}
+            style={{ touchAction: 'none' }}
+            onMouseDown={stopAll}
+            onPointerDown={(e) => { e.stopPropagation(); onResizeStart?.(e, 'bottom') }}
+            onClick={stopAll}
+          >
+            <div className="h-0.5 w-6 rounded-full bg-primary/70" />
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -356,6 +388,20 @@ function snapToGrid(day: Date, yPx: number): Date {
   const d = new Date(day)
   if (snapMins >= 60) {
     d.setHours(Math.min(hrs + 1, 23), 0, 0, 0)
+  } else {
+    d.setHours(Math.min(hrs, 23), snapMins, 0, 0)
+  }
+  return d
+}
+
+function snapToGridDue(day: Date, yPx: number): Date {
+  const totalMin = (yPx / HOUR_PX) * 60
+  const hrs = Math.floor(totalMin / 60)
+  const snapMins = Math.round((totalMin % 60) / 15) * 15
+  const d = new Date(day)
+  if (snapMins >= 60) {
+    // Past 23:52.5 → snap to EOD instead of wrapping back to 23:00
+    d.setHours(hrs >= 23 ? 23 : hrs + 1, hrs >= 23 ? 59 : 0, 0, 0)
   } else {
     d.setHours(Math.min(hrs, 23), snapMins, 0, 0)
   }
@@ -387,16 +433,9 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
   const dayEvents = useMemo(
     () =>
       allEvents.filter((e) => {
-        let startMs: number, endMs: number
-        if (e.windowStart && e.windowEnd) {
-          startMs = new Date(e.windowStart).getTime()
-          endMs = new Date(e.windowEnd).getTime()
-        } else if (e.startAt) {
-          startMs = new Date(e.startAt).getTime()
-          endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
-        } else {
-          return false
-        }
+        if (!e.startAt) return false
+        const startMs = new Date(e.startAt).getTime()
+        const endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
         return startMs < dayEnd.getTime() && endMs > dayStart.getTime()
       }),
     [allEvents, dayStart.getTime(), dayEnd.getTime()],
@@ -664,8 +703,8 @@ export function CalendarPage() {
 
   function handleEventMoveStart(e: React.PointerEvent, event: Occurrence, topPx: number) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
-    const isWindowed = !!(event.windowStart && event.windowEnd)
-    if (!event.startAt && !isWindowed) return
+    if (!event.startAt) return
+    const isDue = isDueOccurrence(event)
     // Dismiss any active touch resize mode when interacting with an event body
     if (resizingEventId) {
       setResizingEventId(null)
@@ -677,10 +716,8 @@ export function CalendarPage() {
     }
     e.stopPropagation()
 
-    const startMs = isWindowed ? new Date(event.windowStart!).getTime() : new Date(event.startAt!).getTime()
-    const endMs = isWindowed
-      ? new Date(event.windowEnd!).getTime()
-      : (event.endAt ? new Date(event.endAt).getTime() : startMs + 15 * 60 * 1000)
+    const startMs = new Date(event.startAt!).getTime()
+    const endMs = event.endAt ? new Date(event.endAt).getTime() : startMs + 15 * 60 * 1000
     const durationMs = endMs - startMs
     const isTouch = e.pointerType === 'touch'
     const pointerId = e.pointerId
@@ -710,15 +747,16 @@ export function CalendarPage() {
           setMovingEventId(event.id)
         }
         const curY = getYInGrid(mv.clientY)
-        const anchorY = Math.max(0, curY - eventMoveRef.current.offsetPx)
+        // Due pins are a single point in time — snap directly to cursor, no grab-offset
+        const anchorY = isDue ? curY : Math.max(0, curY - eventMoveRef.current.offsetPx)
         const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
-        const startSnapped = snapToGrid(days[curDayIdx], anchorY)
+        const startSnapped = isDue ? snapToGridDue(days[curDayIdx], anchorY) : snapToGrid(days[curDayIdx], anchorY)
         const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
         const durationMin = eventMoveRef.current.durationMs / 60000
         setMoveOverlay({
           dayIdx: curDayIdx,
           topPx: (startMin / 60) * HOUR_PX,
-          heightPx: Math.max((durationMin / 60) * HOUR_PX, 20),
+          heightPx: isDue ? DUE_PIN_HEIGHT : Math.max((durationMin / 60) * HOUR_PX, 20),
         })
         startAutoScroll(mv.clientX, mv.clientY)
       }
@@ -751,11 +789,11 @@ export function CalendarPage() {
         suppressClickRef.current = true
         setTimeout(() => { suppressClickRef.current = false }, 0)
         const curY = getYInGrid(mu.clientY)
-        const anchorY = Math.max(0, curY - off)
+        const anchorY = isDue ? curY : Math.max(0, curY - off)
         const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
-        const newStart = snapToGrid(days[curDayIdx], anchorY)
+        const newStart = isDue ? snapToGridDue(days[curDayIdx], anchorY) : snapToGrid(days[curDayIdx], anchorY)
         const newEnd = new Date(newStart.getTime() + dur)
-        const origStartMs = ev.windowStart ? new Date(ev.windowStart).getTime() : new Date(ev.startAt!).getTime()
+        const origStartMs = new Date(ev.startAt!).getTime()
         if (newStart.getTime() === origStartMs) return
         rescheduleEvent(ev, newStart, newEnd)
       }
@@ -824,24 +862,21 @@ export function CalendarPage() {
   }
 
   function rescheduleEvent(ev: Occurrence, newStart: Date, newEnd: Date) {
-    const isWindowed = !!(ev.windowStart && ev.windowEnd)
+    const newEndAt = ev.endAt ? newEnd.toISOString() : null
     queryClient.setQueryData<Occurrence[]>(
       ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
       (old) => old?.map((o) => {
         if (o.id !== ev.id) return o
-        return isWindowed
-          ? { ...o, windowStart: newStart.toISOString(), windowEnd: newEnd.toISOString() }
-          : { ...o, startAt: newStart.toISOString(), endAt: newEnd.toISOString() }
+        return { ...o, startAt: newStart.toISOString(), endAt: newEndAt }
       }),
     )
     occurrencesApi.update(ev.id, {
       title: ev.title,
-      startAt: isWindowed ? ev.startAt : newStart.toISOString(),
-      endAt: isWindowed ? ev.endAt : newEnd.toISOString(),
+      startAt: newStart.toISOString(),
+      endAt: newEndAt,
       isAllDay: ev.isAllDay,
-      windowStart: isWindowed ? newStart.toISOString() : ev.windowStart,
-      windowEnd: isWindowed ? newEnd.toISOString() : ev.windowEnd,
-      windowDurationMinutes: ev.windowDurationMinutes,
+      isPlanned: ev.isPlanned,
+      durationMinutes: ev.durationMinutes,
     }).finally(() => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
       queryClient.invalidateQueries({ queryKey: ['recommendations'] })
@@ -851,16 +886,11 @@ export function CalendarPage() {
   // ── Event resize drag ──────────────────────────────────────────────────────
 
   function handleResizeStart(e: React.PointerEvent, event: Occurrence, side: 'top' | 'bottom') {
-    const isWindowed = !!(event.windowStart && event.windowEnd)
-    if (!event.startAt && !isWindowed) return
+    if (!event.startAt) return
     e.stopPropagation()
 
-    const origStartMs = isWindowed
-      ? new Date(event.windowStart!).getTime()
-      : new Date(event.startAt!).getTime()
-    const origEndMs = isWindowed
-      ? new Date(event.windowEnd!).getTime()
-      : (event.endAt ? new Date(event.endAt).getTime() : origStartMs + 15 * 60 * 1000)
+    const origStartMs = new Date(event.startAt).getTime()
+    const origEndMs = event.endAt ? new Date(event.endAt).getTime() : origStartMs + 15 * 60 * 1000
 
     resizeDragActiveRef.current = true
     resizeStateRef.current = { origStartMs, origEndMs, side }
@@ -1118,13 +1148,15 @@ export function CalendarPage() {
           const curY = getYInGrid(state.clientY)
           const anchorY = Math.max(0, curY - eventMoveRef.current.offsetPx)
           const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(state.clientX), days.length - 1))
-          const startSnapped = snapToGrid(days[curDayIdx], anchorY)
+          const isEvDue = isDueOccurrence(eventMoveRef.current.event)
+          const autoAnchorY = isEvDue ? curY : anchorY
+          const startSnapped = isEvDue ? snapToGridDue(days[curDayIdx], autoAnchorY) : snapToGrid(days[curDayIdx], anchorY)
           const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
           const durationMin = eventMoveRef.current.durationMs / 60000
           setMoveOverlay({
             dayIdx: curDayIdx,
             topPx: (startMin / 60) * HOUR_PX,
-            heightPx: Math.max((durationMin / 60) * HOUR_PX, 20),
+            heightPx: isEvDue ? DUE_PIN_HEIGHT : Math.max((durationMin / 60) * HOUR_PX, 20),
           })
         } else if (resizeDragActiveRef.current && resizeStateRef.current) {
           const rs = resizeStateRef.current
@@ -1286,9 +1318,9 @@ export function CalendarPage() {
         <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
           <button
             onClick={goToday}
-            className="h-8 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
           >
-            Today
+            <CalendarCheck className="h-3.5 w-3.5" strokeWidth={2} />
           </button>
 
           <input
@@ -1309,10 +1341,9 @@ export function CalendarPage() {
           <div className="relative" ref={viewDropRef}>
             <button
               onClick={() => setViewDropOpen((o) => !o)}
-              className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
             >
-              {view === 'day' ? 'Day' : view === '3day' ? '3 Days' : 'Week'}
-              <ChevronDown className="h-3 w-3 text-muted-foreground" strokeWidth={2} />
+              <LayoutGrid className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
             {viewDropOpen && (
               <div className="absolute right-0 top-full z-50 mt-1 min-w-[80px] rounded-lg border border-border bg-card py-1 shadow-pop">
@@ -1330,6 +1361,13 @@ export function CalendarPage() {
               </div>
             )}
           </div>
+
+          <button
+            onClick={() => openCreate()}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
 
         </div>
       </header>
@@ -1368,7 +1406,7 @@ export function CalendarPage() {
                       <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-border' : 'border-l border-border'}`}>
                         {dayAll.map((e) => (
                           <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e).className}`} style={eventAllDayColors(e).style}>
-                            {e.effectiveTitle}
+                            {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
                           </button>
                         ))}
                       </div>
@@ -1388,7 +1426,7 @@ export function CalendarPage() {
                   .filter((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 })
                   .map((e) => (
                     <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e).className}`} style={eventAllDayColors(e).style}>
-                      {e.effectiveTitle}
+                      {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
                     </button>
                   ))}
               </div>
@@ -1453,7 +1491,7 @@ export function CalendarPage() {
       />
 
       <EventModal
-        key={`${editingOccurrence?.id ?? defaultStartAt ?? defaultActivity?.id ?? 'new'}-${scheduleMode}-${editingOccurrence?.startAt ?? editingOccurrence?.windowStart ?? ''}`}
+        key={`${editingOccurrence?.id ?? defaultStartAt ?? defaultActivity?.id ?? 'new'}-${scheduleMode}-${editingOccurrence?.startAt ?? ''}`}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         occurrence={editingOccurrence}

@@ -65,11 +65,11 @@ The scheduling primitive is split into two layers:
 |---|---|
 | Activity | Required — which Activity this occurrence is of |
 | Title | Optional — overrides the Activity title for this instance |
-| Start datetime | Optional — absent for floating and windowed occurrences |
-| End datetime | Optional — defines duration when combined with start |
-| Window start | Optional — start of the flexible scheduling window (windowed occurrences only) |
-| Window end | Optional — end of the flexible scheduling window (windowed occurrences only) |
-| Window duration | Optional — how long the occurrence is expected to take, in minutes (windowed only) |
+| Start datetime | Optional — absent for floating occurrences; window start when `IsPlanned` |
+| End datetime | Optional — window end when `IsPlanned`; deadline/duration end otherwise |
+| Is all day | Boolean — marks an all-day occurrence |
+| Is planned | Boolean — marks a flexible/windowed occurrence (dashed calendar display, never overdue) |
+| Duration minutes | Optional — effort estimate in minutes, applicable to any occurrence type |
 | Repeat rule | Optional — see Repeats below |
 | Status | `pending`, `done`, `skipped` |
 
@@ -79,29 +79,28 @@ Occurrences exist in one of three scheduling states:
 
 ### Floating Occurrences
 
-An occurrence with no start datetime and no window is floating. It lives in the Inbox and surfaces in Daily Plan recommendations when relevant. It is not overdue and carries no urgency signal by itself.
+An occurrence with no start datetime, no end datetime, no all-day flag, and `IsPlanned = false` is floating. It lives in the Inbox and surfaces in Daily Plan recommendations when relevant. It is not overdue and carries no urgency signal by itself.
 
-### Windowed Occurrences
+### Planned Occurrences
 
-An occurrence with a known duration but no fixed start time, constrained to a time window (`WindowStart`, `WindowEnd`, `WindowDurationMinutes`). The user knows the occurrence will take a certain amount of time but hasn't decided exactly when within the window it will happen.
+An occurrence with `IsPlanned = true`. The `StartAt`/`EndAt` fields act as window bounds when both are present; `EndAt` alone is a soft due date; `IsAllDay` marks it as a flexible all-day task.
 
-- Windowed occurrences appear on the calendar spanning their full window, rendered as dashed blocks with a diagonal stripe pattern.
-- They do not appear in the Inbox — they already have calendar placement context.
-- They are not overdue. The window is a constraint, not a deadline.
-- The window and all three window fields must be provided together; they cannot be combined with a start datetime.
-- Duration must be positive and must not exceed the length of the window.
+- Planned occurrences appear on the calendar with a dashed diagonal-stripe style spanning their window.
+- They are grouped separately in list views (labeled "Planned").
+- They are never overdue — `IsPlanned` is a signal that the time is flexible, not a commitment.
+- `DurationMinutes` (if set) must be positive and, when both window bounds exist, must not exceed the window length.
 
 ### Scheduled Occurrences
 
-An occurrence with a start datetime is scheduled. It participates in scheduling, overdue detection, and goal progress.
+An occurrence with a start datetime and `IsPlanned = false` is scheduled. It participates in scheduling, overdue detection, and goal progress.
 
 ### Overdue
 
-An occurrence is overdue if it is still pending and:
+An occurrence is overdue if it is still pending and `IsPlanned = false` and:
 - It has an end datetime and that datetime has passed, **or**
 - It has a start datetime (no end) and its day has ended (the day boundary on the following date has passed, in the user's timezone — see Timezone & Day Semantics).
 
-Floating and windowed occurrences are never overdue.
+Floating and planned occurrences are never overdue.
 
 ### Scheduling
 

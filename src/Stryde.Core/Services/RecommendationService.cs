@@ -28,7 +28,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             .Where(o => o.Status == EventStatus.done && o.StartAt != null)
             .ToList();
 
-        bool IsFloating(Occurrence o) => o.StartAt == null && o.WindowStart == null;
+        bool IsFloating(Occurrence o) => !o.IsPlanned && o.StartAt == null && o.EndAt == null && !o.IsAllDay;
 
         // ActivityIds already on today's schedule — excluded from pattern suggestions
         var todayActivityIds = pendingOccurrences

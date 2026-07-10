@@ -54,9 +54,8 @@ public sealed record CreateEventRequest(
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
     bool IsAllDay,
-    DateTimeOffset? WindowStart,
-    DateTimeOffset? WindowEnd,
-    int? WindowDurationMinutes);
+    bool IsPlanned,
+    int? DurationMinutes);
 
 public sealed record UpdateEventRequest(
     string Title,
@@ -65,9 +64,8 @@ public sealed record UpdateEventRequest(
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
     bool IsAllDay,
-    DateTimeOffset? WindowStart,
-    DateTimeOffset? WindowEnd,
-    int? WindowDurationMinutes);
+    bool IsPlanned,
+    int? DurationMinutes);
 
 // Occurrences
 public sealed record OccurrenceDto(
@@ -83,9 +81,8 @@ public sealed record OccurrenceDto(
     DateTimeOffset CreatedAt,
     bool IsOverdue,
     bool IsAllDay,
-    DateTimeOffset? WindowStart,
-    DateTimeOffset? WindowEnd,
-    int? WindowDurationMinutes,
+    bool IsPlanned,
+    int? DurationMinutes,
     ActivityDto Activity)
 {
     public static OccurrenceDto FromEntity(Occurrence o, DayContext ctx, DateTimeOffset nowUtc) => new(
@@ -95,7 +92,7 @@ public sealed record OccurrenceDto(
         o.Status.ToString(), o.RepeatRuleId, o.CreatedAt,
         DayMath.IsOverdue(o, ctx, nowUtc),
         o.IsAllDay,
-        o.WindowStart, o.WindowEnd, o.WindowDurationMinutes,
+        o.IsPlanned, o.DurationMinutes,
         ActivityDto.FromEntity(o.Activity));
 }
 
@@ -105,18 +102,16 @@ public sealed record CreateOccurrenceRequest(
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
     bool IsAllDay,
-    DateTimeOffset? WindowStart,
-    DateTimeOffset? WindowEnd,
-    int? WindowDurationMinutes);
+    bool IsPlanned,
+    int? DurationMinutes);
 
 public sealed record UpdateOccurrenceRequest(
     string? Title,
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
     bool IsAllDay,
-    DateTimeOffset? WindowStart,
-    DateTimeOffset? WindowEnd,
-    int? WindowDurationMinutes);
+    bool IsPlanned,
+    int? DurationMinutes);
 
 public sealed record SetOccurrenceStatusRequest(EventStatus Status);
 
