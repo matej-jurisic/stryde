@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
-import { goalsApi, categoriesApi, ApiError } from '@/lib/api'
+import { goalsApi, ApiError } from '@/lib/api'
 import type { Goal } from '@/lib/types'
 
 interface FormState {
   title: string
   description: string
-  categoryId: string
 }
 
 interface Errors {
@@ -33,21 +32,15 @@ export function GoalModal({ open, onClose, goal }: GoalModalProps) {
   const qc = useQueryClient()
   const isEdit = Boolean(goal)
 
-  const [form, setForm] = useState<FormState>({ title: '', description: '', categoryId: '' })
+  const [form, setForm] = useState<FormState>({ title: '', description: '' })
   const [errors, setErrors] = useState<Errors>({})
   const [apiError, setApiError] = useState('')
-
-  const { data: categories = [] } = useQuery({
-    queryKey: ['categories'],
-    queryFn: () => categoriesApi.list(),
-  })
 
   useEffect(() => {
     if (open) {
       setForm({
         title: goal?.title ?? '',
         description: goal?.description ?? '',
-        categoryId: goal?.categoryId ?? '',
       })
       setErrors({})
       setApiError('')
@@ -59,7 +52,6 @@ export function GoalModal({ open, onClose, goal }: GoalModalProps) {
       const payload = {
         title: form.title.trim(),
         description: form.description.trim() || null,
-        categoryId: form.categoryId || null,
       }
       return isEdit ? goalsApi.update(goal!.id, payload) : goalsApi.create(payload)
     },
@@ -113,23 +105,6 @@ export function GoalModal({ open, onClose, goal }: GoalModalProps) {
           className="rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
         />
       </div>
-      {categories.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-foreground">
-            Category <span className="font-normal text-muted-foreground">(optional)</span>
-          </label>
-          <select
-            value={form.categoryId}
-            onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
-            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="">No category</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
       {apiError && <p className="text-sm text-destructive">{apiError}</p>}
     </Modal>
   )

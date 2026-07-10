@@ -37,6 +37,8 @@ function formatOccurrenceTime(o: Occurrence): string {
   else if (sameDay(d, tomorrow)) dateLabel = 'Tomorrow'
   else dateLabel = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 
+  if (o.isAllDay) return `${dateLabel}, All day`
+
   if (o.windowStart) {
     const range = o.windowEnd
       ? `${formatTime(o.windowStart)} - ${formatTime(o.windowEnd)}`

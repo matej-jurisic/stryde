@@ -108,6 +108,7 @@ interface LayoutEvent {
   totalCols: number
   topPx: number
   heightPx: number
+  trueEndPx: number
 }
 
 function layoutDay(events: Occurrence[], day: Date): LayoutEvent[] {
@@ -161,6 +162,7 @@ function layoutDay(events: Occurrence[], day: Date): LayoutEvent[] {
       totalCols: maxC + 1,
       topPx: (s / 60) * HOUR_PX,
       heightPx: Math.max(((end - s) / 60) * HOUR_PX, 28),
+      trueEndPx: (end / 60) * HOUR_PX,
     }
   })
 }
@@ -209,7 +211,7 @@ function EventBlock({
   dimmed?: boolean
   isResizing?: boolean
 }) {
-  const { event, col, totalCols, topPx, heightPx } = layout
+  const { event, col, totalCols, topPx, heightPx, trueEndPx } = layout
   const { bgClass, bgHex, leftColor, textClass } = eventColors(event)
   const isDone = event.status !== 'pending'
   const isWindowed = !!(event.windowStart && event.windowEnd)
@@ -256,6 +258,7 @@ function EventBlock({
     <div
       className={`absolute group/calev ${dimmed ? 'opacity-20' : ''}`}
       data-event-id={event.id}
+      data-true-end-px={trueEndPx}
       style={{
         top: topPx + GAP,
         height: Math.max(heightPx - GAP, 20),
@@ -528,6 +531,7 @@ export function CalendarPage() {
   const [resizingEventId, setResizingEventId] = useState<string | null>(null)
   const [resizeOverlay, setResizeOverlay] = useState<Map<number, { topPx: number; heightPx: number }>>(() => new Map())
   const resizeDragActiveRef = useRef(false)
+  const dateInputRef = useRef<HTMLInputElement>(null)
   const resizeStateRef = useRef<{
     origStartMs: number
     origEndMs: number
@@ -579,6 +583,14 @@ export function CalendarPage() {
       const px = ((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_PX
       scrollRef.current.scrollTop = Math.max(0, px - 200)
     }
+  }, [])
+
+  useEffect(() => {
+    const el = dateInputRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => e.preventDefault()
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
   }, [])
 
   useEffect(() => {
@@ -1132,11 +1144,18 @@ export function CalendarPage() {
 
   function handleGridPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (e.pointerType !== 'touch') return
-    if ((e.target as Element).closest('button')) return
     const startClientX = e.clientX
     const startClientY = e.clientY
     const startDayIdx = getDayIdxFromX(startClientX)
     const startY = getYInGrid(startClientY)
+    if ((e.target as Element).closest('button')) {
+      // Allow drag creation in the minimum-height overflow zone below the event's true end time.
+      // Short events get a visual minimum height (28px) that extends their button below their
+      // actual end time; without this check the next 15-min slot appears unreachable.
+      const block = (e.target as Element).closest('[data-true-end-px]') as HTMLElement | null
+      const trueEndPx = block ? parseFloat(block.dataset.trueEndPx ?? '99999') : 99999
+      if (startY < trueEndPx) return
+    }
     const pointerId = e.pointerId
     const timer = setTimeout(() => {
       if (!pendingTouchRef.current) return
@@ -1273,11 +1292,15 @@ export function CalendarPage() {
           </button>
 
           <input
+            ref={dateInputRef}
             type="date"
             value={formatDateInput(current)}
             onChange={(e) => {
               const d = new Date(e.target.value + 'T00:00:00')
               if (!isNaN(d.getTime())) setCurrent(d)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
             }}
             className="hidden sm:block h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
           />
@@ -1342,7 +1365,7 @@ export function CalendarPage() {
                     const ds = sod(day); const de = addDays(ds, 1)
                     const dayAll = allDayEvents.filter((e) => { const t = new Date(e.startAt!).getTime(); return t >= ds.getTime() && t < de.getTime() })
                     return (
-                      <div key={day.toISOString()} className={`flex flex-1 flex-col gap-0.5 px-0.5 py-0.5 ${idx === 0 ? 'border-l border-border' : 'border-l border-border'}`}>
+                      <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-border' : 'border-l border-border'}`}>
                         {dayAll.map((e) => (
                           <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e).className}`} style={eventAllDayColors(e).style}>
                             {e.effectiveTitle}
@@ -1359,9 +1382,7 @@ export function CalendarPage() {
           {/* Day view all-day row */}
           {view === 'day' && allDayEvents.some((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 }) && (
             <div className="sticky top-0 z-40 flex border-b border-border bg-background">
-              <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
-                <span className="select-none text-[9px] leading-tight text-muted-foreground">all{'\n'}day</span>
-              </div>
+              <div className="w-12 shrink-0" />
               <div className="flex flex-1 flex-col gap-0.5 border-l border-border px-0.5 py-0.5">
                 {allDayEvents
                   .filter((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 })
@@ -1432,7 +1453,7 @@ export function CalendarPage() {
       />
 
       <EventModal
-        key={`${editingOccurrence?.id ?? defaultStartAt ?? defaultActivity?.id ?? 'new'}-${scheduleMode}`}
+        key={`${editingOccurrence?.id ?? defaultStartAt ?? defaultActivity?.id ?? 'new'}-${scheduleMode}-${editingOccurrence?.startAt ?? editingOccurrence?.windowStart ?? ''}`}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         occurrence={editingOccurrence}
@@ -1440,7 +1461,7 @@ export function CalendarPage() {
         defaultStartAt={defaultStartAt}
         defaultEndAt={defaultEndAt}
         defaultActivity={defaultActivity}
-        defaultMode={scheduleMode ? 'scheduled' : undefined}
+        scheduleOnly={scheduleMode}
       />
     </div>
   )

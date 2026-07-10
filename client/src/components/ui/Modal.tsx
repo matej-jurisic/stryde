@@ -42,7 +42,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex flex-col justify-end sm:items-center sm:justify-center sm:p-4"
-      style={{ paddingBottom: kbOffset > 0 ? `${kbOffset}px` : undefined }}
+      style={{ paddingBottom: `${kbOffset}px`, transition: 'padding-bottom 0.25s ease-out' }}
       aria-modal="true"
       role="dialog"
       aria-labelledby="modal-title"
@@ -59,6 +59,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
           maxHeight: kbOffset > 0
             ? `calc(100vh - ${kbOffset}px - 2.5rem)`
             : 'min(90vh, calc(100vh - 2.5rem))',
+          transition: 'max-height 0.25s ease-out',
         }}
       >
         {/* Drag handle — mobile only */}

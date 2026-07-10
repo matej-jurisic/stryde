@@ -66,5 +66,23 @@ public static class OccurrenceEndpoints
             var result = await svc.SetStatusAsync(id, userId.Value, req.Status);
             return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
         });
+
+        group.MapPost("/event", async (CreateEventRequest req, ClaimsPrincipal principal, OccurrenceService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var result = await svc.CreateEventAsync(userId.Value, req);
+            return result.IsSuccess
+                ? Results.Created($"/api/occurrences/{result.Value!.Id}", result.Value)
+                : result.Error!.ToProblem();
+        });
+
+        group.MapPut("/{id:guid}/event", async (Guid id, UpdateEventRequest req, ClaimsPrincipal principal, OccurrenceService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var result = await svc.UpdateEventAsync(id, userId.Value, req);
+            return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
+        });
     }
 }

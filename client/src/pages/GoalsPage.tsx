@@ -7,7 +7,6 @@ import type { Goal, GoalStatus, Checkpoint, CheckpointSize } from '@/lib/types'
 import { Badge } from '@/components/ui/Badge'
 import { GoalModal } from '@/components/goals/GoalModal'
 import { CheckpointModal } from '@/components/goals/CheckpointModal'
-import { CategoryIcon } from '@/components/categories/categoryIcons'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -86,12 +85,12 @@ function CheckpointRow({ checkpoint, goalId, isLast, onEdit }: CheckpointRowProp
         {!isLast && <span className="my-0.5 w-px flex-1 bg-border" />}
       </div>
       <div className={`flex min-w-0 flex-1 items-start justify-between gap-2 ${isLast ? '' : 'pb-3'}`}>
-        <span className={`text-sm ${reached ? 'text-muted-foreground line-through' : 'text-foreground'}`}>
-          {checkpoint.title}
-          {checkpoint.size !== 'normal' && (
-            <span className="ml-1.5 text-[11px] text-muted-foreground capitalize">{checkpoint.size}</span>
-          )}
-        </span>
+        <div className="flex min-w-0 flex-col">
+          <span className={`text-sm ${reached ? 'text-muted-foreground line-through' : 'text-foreground'}`}>
+            {checkpoint.title}
+          </span>
+          <span className="text-[11px] text-muted-foreground capitalize">{checkpoint.size}</span>
+        </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <button
             onClick={() => onEdit(checkpoint)}
@@ -228,7 +227,7 @@ function GoalRow({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalRowPro
   return (
     <li className="flex flex-col">
       <div className="flex items-center gap-2 px-3 py-2.5 transition-colors hover:bg-muted/40">
-        {/* Expand chevron (when checkpoints exist) or category icon */}
+        {/* Expand chevron (when checkpoints exist) */}
         {hasCheckpoints ? (
           <button
             onClick={() => setExpanded((e) => !e)}
@@ -239,10 +238,6 @@ function GoalRow({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalRowPro
               strokeWidth={2.5}
             />
           </button>
-        ) : goal.category ? (
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-            <CategoryIcon icon={goal.category.icon} color={goal.category.color} size={13} strokeWidth={2} />
-          </span>
         ) : (
           <span className="h-4 w-4 shrink-0" />
         )}

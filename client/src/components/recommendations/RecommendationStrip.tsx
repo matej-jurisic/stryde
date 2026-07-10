@@ -175,7 +175,7 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
 
       {/* Mobile drawer */}
       {mobileOpen && (
-        <div className="md:hidden fixed inset-0 z-40 flex">
+        <div className="md:hidden fixed inset-0 z-50 flex">
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={onMobileClose}

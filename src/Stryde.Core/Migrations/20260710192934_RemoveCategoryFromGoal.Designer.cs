@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Stryde.Core.Data;
 
@@ -10,9 +11,11 @@ using Stryde.Core.Data;
 namespace Stryde.Core.Migrations
 {
     [DbContext(typeof(StrydeDbContext))]
-    partial class StrydeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260710192934_RemoveCategoryFromGoal")]
+    partial class RemoveCategoryFromGoal
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
@@ -30,10 +33,6 @@ namespace Stryde.Core.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("GoalId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Title")

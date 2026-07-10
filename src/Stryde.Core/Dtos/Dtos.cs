@@ -33,18 +33,41 @@ public sealed record ActivityDto(
     string Title,
     Guid? CategoryId,
     Guid? GoalId,
+    string Kind,
     DateTimeOffset CreatedAt,
     CategorySummaryDto? Category,
     GoalSummaryDto? Goal)
 {
     public static ActivityDto FromEntity(Activity a) => new(
-        a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.CreatedAt,
+        a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.Kind.ToString(), a.CreatedAt,
         a.Category is not null ? CategorySummaryDto.FromEntity(a.Category) : null,
         a.Goal is not null ? GoalSummaryDto.FromEntity(a.Goal) : null);
 }
 
 public sealed record CreateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
 public sealed record UpdateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
+
+public sealed record CreateEventRequest(
+    string Title,
+    Guid? CategoryId,
+    Guid? GoalId,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? EndAt,
+    bool IsAllDay,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes);
+
+public sealed record UpdateEventRequest(
+    string Title,
+    Guid? CategoryId,
+    Guid? GoalId,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? EndAt,
+    bool IsAllDay,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes);
 
 // Occurrences
 public sealed record OccurrenceDto(
@@ -104,20 +127,17 @@ public sealed record GoalDto(
     string Title,
     string? Description,
     string Status,
-    Guid? CategoryId,
     DateTimeOffset CreatedAt,
-    CategorySummaryDto? Category,
     List<CheckpointDto> Checkpoints)
 {
     public static GoalDto FromEntity(Goal g) => new(
         g.Id, g.UserId, g.Title, g.Description,
-        g.Status.ToString(), g.CategoryId, g.CreatedAt,
-        g.Category is not null ? CategorySummaryDto.FromEntity(g.Category) : null,
+        g.Status.ToString(), g.CreatedAt,
         g.Checkpoints.Select(CheckpointDto.FromEntity).ToList());
 }
 
-public sealed record CreateGoalRequest(string Title, string? Description, Guid? CategoryId);
-public sealed record UpdateGoalRequest(string Title, string? Description, Guid? CategoryId);
+public sealed record CreateGoalRequest(string Title, string? Description);
+public sealed record UpdateGoalRequest(string Title, string? Description);
 public sealed record SetGoalStatusRequest(GoalStatus Status);
 
 // Checkpoints

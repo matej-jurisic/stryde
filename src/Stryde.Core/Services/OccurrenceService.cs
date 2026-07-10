@@ -64,7 +64,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             .Where(o => o.UserId == userId);
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
-        if (floatingOnly) query = query.Where(o => o.StartAt == null);
+        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.WindowStart == null);
 
         var all = await query.ToListAsync();
 
@@ -119,11 +119,122 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
 
     public async Task<Result> DeleteAsync(Guid id, Guid userId)
     {
-        var o = await db.Occurrences.FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+        var o = await db.Occurrences
+            .Include(o => o.Activity)
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
-        db.Occurrences.Remove(o);
+
+        // For event-kind, delete the backing activity (cascade removes the occurrence).
+        if (o.Activity.Kind == ActivityKind.@event)
+            db.Activities.Remove(o.Activity);
+        else
+            db.Occurrences.Remove(o);
+
         await db.SaveChangesAsync();
         return Result.Success();
+    }
+
+    public async Task<Result<OccurrenceDto>> CreateEventAsync(Guid userId, CreateEventRequest req)
+    {
+        var err = Validators.ValidateTitle(req.Title, "Title")
+            ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
+            ?? ValidateWindow(req.StartAt, req.WindowStart, req.WindowEnd, req.WindowDurationMinutes);
+        if (err is not null) return Result<OccurrenceDto>.Fail(err);
+
+        var a = new Activity
+        {
+            UserId = userId,
+            Title = req.Title.Trim(),
+            Kind = ActivityKind.@event,
+        };
+
+        if (req.CategoryId.HasValue)
+        {
+            var cat = await db.Categories.FirstOrDefaultAsync(c => c.Id == req.CategoryId.Value && c.UserId == userId);
+            if (cat is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Category not found."));
+            a.CategoryId = req.CategoryId.Value;
+            a.Category = cat;
+        }
+
+        if (req.GoalId.HasValue)
+        {
+            var goal = await db.Goals.FirstOrDefaultAsync(g => g.Id == req.GoalId.Value && g.UserId == userId);
+            if (goal is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
+            a.GoalId = req.GoalId.Value;
+            a.Goal = goal;
+        }
+
+        db.Activities.Add(a);
+
+        var o = new Occurrence
+        {
+            UserId = userId,
+            ActivityId = a.Id,
+            Activity = a,
+            StartAt = req.StartAt,
+            EndAt = req.IsAllDay ? null : req.EndAt,
+            IsAllDay = req.IsAllDay,
+            WindowStart = req.WindowStart,
+            WindowEnd = req.WindowEnd,
+            WindowDurationMinutes = req.WindowDurationMinutes,
+        };
+        db.Occurrences.Add(o);
+        await db.SaveChangesAsync();
+        return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
+    }
+
+    public async Task<Result<OccurrenceDto>> UpdateEventAsync(Guid id, Guid userId, UpdateEventRequest req)
+    {
+        var err = Validators.ValidateTitle(req.Title, "Title")
+            ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
+            ?? ValidateWindow(req.StartAt, req.WindowStart, req.WindowEnd, req.WindowDurationMinutes);
+        if (err is not null) return Result<OccurrenceDto>.Fail(err);
+
+        var o = await db.Occurrences
+            .Include(o => o.Activity).ThenInclude(a => a.Category)
+            .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+        if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
+        if (o.Activity.Kind != ActivityKind.@event)
+            return Result<OccurrenceDto>.Fail(new Error(ErrorType.Validation, "Use the standard update endpoint for activity-based occurrences."));
+
+        o.Activity.Title = req.Title.Trim();
+
+        if (req.CategoryId.HasValue)
+        {
+            var cat = await db.Categories.FirstOrDefaultAsync(c => c.Id == req.CategoryId.Value && c.UserId == userId);
+            if (cat is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Category not found."));
+            o.Activity.CategoryId = req.CategoryId.Value;
+            o.Activity.Category = cat;
+        }
+        else
+        {
+            o.Activity.CategoryId = null;
+            o.Activity.Category = null;
+        }
+
+        if (req.GoalId.HasValue)
+        {
+            var goal = await db.Goals.FirstOrDefaultAsync(g => g.Id == req.GoalId.Value && g.UserId == userId);
+            if (goal is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
+            o.Activity.GoalId = req.GoalId.Value;
+            o.Activity.Goal = goal;
+        }
+        else
+        {
+            o.Activity.GoalId = null;
+            o.Activity.Goal = null;
+        }
+
+        o.StartAt = req.StartAt;
+        o.EndAt = req.IsAllDay ? null : req.EndAt;
+        o.IsAllDay = req.IsAllDay;
+        o.WindowStart = req.WindowStart;
+        o.WindowEnd = req.WindowEnd;
+        o.WindowDurationMinutes = req.WindowDurationMinutes;
+
+        await db.SaveChangesAsync();
+        return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
     }
 
     public async Task<Result<OccurrenceDto>> SetStatusAsync(Guid id, Guid userId, EventStatus status)

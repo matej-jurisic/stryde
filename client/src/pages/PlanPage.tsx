@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, CalendarPlus } from 'lucide-react'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, CalendarPlus, MoreHorizontal } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, goalsApi, settingsApi } from '@/lib/api'
 import type { Activity, Checkpoint, CheckpointSize, Occurrence, EventStatus, Goal } from '@/lib/types'
@@ -62,12 +62,13 @@ function formatDuration(minutes: number | null): string {
 }
 
 function formatTimeRange(event: Occurrence): string {
+  if (event.isAllDay) return 'All day'
   if (event.windowStart) {
     const range = event.windowEnd
       ? `${formatTime(event.windowStart)} - ${formatTime(event.windowEnd)}`
       : formatTime(event.windowStart)
     const dur = formatDuration(event.windowDurationMinutes)
-    return dur ? `${range} · ~${dur}` : range
+    return dur ? `${range} ~${dur}` : range
   }
   if (!event.startAt) return ''
   if (event.endAt) return `${formatTime(event.startAt)} - ${formatTime(event.endAt)}`
@@ -130,6 +131,17 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
   const isPending = event.status === 'pending'
   const isDone = event.status === 'done'
   const isSkipped = event.status === 'skipped'
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onPointerDown(e: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [menuOpen])
 
   const statusMutation = useMutation({
     mutationFn: (status: EventStatus) => occurrencesApi.setStatus(event.id, status),
@@ -152,7 +164,7 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
   const goal = event.activity.goal
 
   return (
-    <li className="group flex items-center gap-3 border-b border-border bg-card px-5 py-3 last:border-b-0 hover:bg-muted/40 transition-colors">
+    <li className="group relative flex items-center gap-3 border-b border-border bg-card px-5 py-3 last:border-b-0 first:rounded-t-lg last:rounded-b-lg hover:bg-muted/40 transition-colors">
       {/* Status checkbox */}
       <button
         onClick={() => {
@@ -175,61 +187,73 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
 
       {/* Content */}
       <div className="min-w-0 flex-1">
-        <span className={`text-sm ${!isPending ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-          {event.effectiveTitle}
-        </span>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-          {timeRange && (
-            <span className="font-mono text-xs text-muted-foreground">{timeRange}</span>
-          )}
-          {cat && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <CategoryIcon icon={cat.icon} color={cat.color} size={11} strokeWidth={2} />
-              {cat.name}
-            </span>
-          )}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className={`text-sm ${!isPending ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+            {event.effectiveTitle}
+          </span>
           {goal && (
             <Badge tone={GOAL_TONE[goal.status] ?? 'neutral'}>{goal.title}</Badge>
           )}
         </div>
+        {(timeRange || cat) && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+            {timeRange && (
+              <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{timeRange}</span>
+            )}
+            {cat && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <CategoryIcon icon={cat.icon} color={cat.color} size={11} strokeWidth={2} />
+                {cat.name}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Actions */}
-      <div className="flex shrink-0 items-center gap-0.5">
-        {isPending && (
-          <>
-            <button
-              onClick={() => statusMutation.mutate('skipped')}
-              title="Skip"
-              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
-            >
-              <X className="h-3.5 w-3.5" strokeWidth={2.5} />
-            </button>
-            {!event.startAt && onSchedule && (
+      {/* Actions menu */}
+      <div ref={menuRef} className="shrink-0">
+        <button
+          onClick={() => setMenuOpen((o) => !o)}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
+        </button>
+        {menuOpen && (
+          <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+            {isPending && (
               <button
-                onClick={onSchedule}
-                title="Schedule"
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-primary"
+                onClick={() => { statusMutation.mutate('skipped'); setMenuOpen(false) }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
               >
-                <CalendarPlus className="h-3.5 w-3.5" strokeWidth={2} />
+                <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2.5} />
+                Skip
               </button>
             )}
-          </>
+            {isPending && !event.startAt && onSchedule && (
+              <button
+                onClick={() => { onSchedule(); setMenuOpen(false) }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+              >
+                <CalendarPlus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                Schedule
+              </button>
+            )}
+            <button
+              onClick={() => { onEdit(); setMenuOpen(false) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+            >
+              <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+              Edit
+            </button>
+            <button
+              onClick={() => { deleteMutation.mutate(); setMenuOpen(false) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              Delete
+            </button>
+          </div>
         )}
-        <button
-          onClick={onEdit}
-          title="Edit"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
-        </button>
-        <button
-          onClick={() => deleteMutation.mutate()}
-          title="Delete"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
-        >
-          <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-        </button>
       </div>
     </li>
   )
@@ -244,6 +268,16 @@ export function PlanPage() {
   const [editingOccurrence, setEditingOccurrence] = useState<Occurrence | undefined>()
   const [defaultActivity, setDefaultActivity] = useState<Activity | undefined>()
   const [focusStartAt, setFocusStartAt] = useState(false)
+  const [scheduleMode, setScheduleMode] = useState(false)
+  const dateInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const el = dateInputRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => e.preventDefault()
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [])
 
   const { data: settings } = useQuery({
     queryKey: ['settings'],
@@ -289,6 +323,11 @@ export function PlanPage() {
     [occurrences],
   )
 
+  const windowedEvents = useMemo(
+    () => occurrences.filter((o) => o.startAt === null && o.windowStart !== null),
+    [occurrences],
+  )
+
   const isLoading = occurrencesLoading || floatingLoading
 
   function prev() { setCurrent((d) => addDays(d, -1)) }
@@ -299,6 +338,7 @@ export function PlanPage() {
     setDefaultActivity(undefined)
     setEditingOccurrence(occurrence)
     setFocusStartAt(false)
+    setScheduleMode(false)
     setModalOpen(true)
   }
 
@@ -306,6 +346,7 @@ export function PlanPage() {
     setDefaultActivity(undefined)
     setEditingOccurrence(occurrence)
     setFocusStartAt(true)
+    setScheduleMode(true)
     setModalOpen(true)
   }
 
@@ -313,6 +354,7 @@ export function PlanPage() {
     setDefaultActivity(undefined)
     setEditingOccurrence(undefined)
     setFocusStartAt(false)
+    setScheduleMode(false)
     setModalOpen(true)
   }
 
@@ -320,6 +362,7 @@ export function PlanPage() {
     setEditingOccurrence(undefined)
     setDefaultActivity(activity)
     setFocusStartAt(true)
+    setScheduleMode(false)
     setModalOpen(true)
   }
 
@@ -381,11 +424,15 @@ export function PlanPage() {
             )}
 
             <input
+              ref={dateInputRef}
               type="date"
               value={dateStr}
               onChange={(e) => {
                 const d = new Date(e.target.value + 'T00:00:00')
                 if (!isNaN(d.getTime())) setCurrent(sod(d))
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
               }}
               className="hidden sm:block h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
             />
@@ -444,7 +491,7 @@ export function PlanPage() {
                       </button>
                     </div>
                   ) : (
-                    <div className="overflow-hidden rounded-lg border border-border">
+                    <div className="rounded-lg border border-border">
                       <ul>
                         {scheduledEvents.map((event) => (
                           <AgendaRow key={event.id} event={event} onEdit={() => openEdit(event)} />
@@ -455,17 +502,43 @@ export function PlanPage() {
                 </div>
 
                 {/* Unscheduled */}
-                {floatingOccurrences.length > 0 && (
+                {windowedEvents.length > 0 && (
                   <div>
                     <div className="mb-2 flex items-center justify-between px-1">
                       <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Unscheduled
                       </h2>
                       <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
+                        {windowedEvents.length}
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-border">
+                      <ul>
+                        {windowedEvents.map((event) => (
+                          <AgendaRow
+                            key={event.id}
+                            event={event}
+                            onEdit={() => openEdit(event)}
+                            onSchedule={() => openSchedule(event)}
+                          />
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
+                {/* Floating */}
+                {floatingOccurrences.length > 0 && (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Floating
+                      </h2>
+                      <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
                         {floatingOccurrences.length}
                       </span>
                     </div>
-                    <div className="overflow-hidden rounded-lg border border-border">
+                    <div className="rounded-lg border border-border">
                       <ul>
                         {floatingOccurrences.map((event) => (
                           <AgendaRow
@@ -486,12 +559,13 @@ export function PlanPage() {
       </div>
 
       <EventModal
-        key={editingOccurrence?.id ?? defaultActivity?.id ?? 'new'}
+        key={`${editingOccurrence?.id ?? defaultActivity?.id ?? 'new'}-${scheduleMode}`}
         open={modalOpen}
         onClose={closeModal}
         occurrence={editingOccurrence}
         defaultActivity={defaultActivity}
         focusStartAt={focusStartAt}
+        scheduleOnly={scheduleMode}
       />
     </div>
   )

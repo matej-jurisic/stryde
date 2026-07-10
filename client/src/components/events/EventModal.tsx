@@ -3,12 +3,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
-import { occurrencesApi, activitiesApi } from '@/lib/api'
-import type { Activity, Occurrence } from '@/lib/types'
+import { occurrencesApi, activitiesApi, categoriesApi, goalsApi } from '@/lib/api'
+import type { Activity, ActivityKind, Occurrence } from '@/lib/types'
 
 interface FormState {
   activityId: string
   title: string
+  categoryId: string
+  goalId: string
   startAt: string
   endAt: string
   windowStart: string
@@ -19,14 +21,16 @@ interface FormState {
 
 interface Errors {
   activityId?: string
+  title?: string
   endAt?: string
   windowEnd?: string
   windowDuration?: string
 }
 
-function validate(form: FormState, useStartEnd: boolean, useWindow: boolean): Errors {
+function validate(form: FormState, kind: ActivityKind, useStartEnd: boolean, useWindow: boolean): Errors {
   const errs: Errors = {}
-  if (!form.activityId) errs.activityId = 'Please select an activity.'
+  if (kind === 'activity' && !form.activityId) errs.activityId = 'Please select an activity.'
+  if (kind === 'event' && !form.title.trim()) errs.title = 'Title is required.'
   if (useStartEnd && form.startAt && form.endAt && form.endAt <= form.startAt) {
     errs.endAt = 'End time must be after start time.'
   }
@@ -42,6 +46,12 @@ function validate(form: FormState, useStartEnd: boolean, useWindow: boolean): Er
     }
   }
   return errs
+}
+
+function todayLocal(): string {
+  const d = new Date()
+  const z = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T00:00`
 }
 
 function toInputValue(iso: string | null | undefined): string {
@@ -78,26 +88,39 @@ interface OccurrenceModalProps {
   defaultEndAt?: string
   defaultActivity?: Activity
   defaultMode?: ScheduleMode
+  scheduleOnly?: boolean
 }
 
-type ScheduleMode = 'due' | 'scheduled' | 'window'
+type ScheduleMode = 'due' | 'scheduled' | 'window' | 'floating'
 
-export function EventModal({ open, onClose, occurrence, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, defaultMode }: OccurrenceModalProps) {
+export function EventModal({ open, onClose, occurrence, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, defaultMode, scheduleOnly }: OccurrenceModalProps) {
   const qc = useQueryClient()
   const isEdit = Boolean(occurrence)
 
   const dur = durationToHM(occurrence?.windowDurationMinutes ?? null)
 
+  const isEventKind = occurrence?.activity.kind === 'event'
+
+  const [kind, setKind] = useState<ActivityKind>(() =>
+    isEventKind ? 'event' : 'activity'
+  )
+
   const [form, setForm] = useState<FormState>(() => ({
     activityId: occurrence?.activityId ?? defaultActivity?.id ?? '',
-    title: occurrence?.title ?? '',
+    title: isEventKind
+      ? (occurrence?.activity.title ?? '')
+      : (occurrence?.title ?? ''),
+    categoryId: occurrence?.activity.categoryId ?? '',
+    goalId: occurrence?.activity.goalId ?? '',
     startAt: occurrence
-      ? (defaultMode === 'scheduled' && !occurrence.startAt && occurrence.windowStart
+      ? ((scheduleOnly || defaultMode === 'scheduled') && !occurrence.startAt && occurrence.windowStart
           ? toInputValue(occurrence.windowStart)
           : toInputValue(occurrence.startAt))
-      : (defaultStartAt ?? ''),
-    endAt: occurrence ? toInputValue(occurrence.endAt) : (defaultEndAt ?? ''),
-    windowStart: occurrence ? toInputValue(occurrence.windowStart) : '',
+      : (defaultStartAt ?? todayLocal()),
+    endAt: occurrence
+      ? (scheduleOnly && occurrence.windowEnd ? toInputValue(occurrence.windowEnd) : toInputValue(occurrence.endAt))
+      : (defaultEndAt ?? ''),
+    windowStart: occurrence ? toInputValue(occurrence.windowStart) : todayLocal(),
     windowEnd: occurrence ? toInputValue(occurrence.windowEnd) : '',
     windowDurationHours: dur.h,
     windowDurationMins: dur.m,
@@ -106,17 +129,24 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
   const [errors, setErrors] = useState<Errors>({})
   const [isAllDay, setIsAllDay] = useState(() => occurrence?.isAllDay ?? false)
   const [useStartEnd, setUseStartEnd] = useState(() => {
+    if (scheduleOnly) return true
     if (defaultMode) return defaultMode === 'scheduled'
     return occurrence ? Boolean(occurrence.endAt) : Boolean(defaultEndAt)
   })
   const [useWindow, setUseWindow] = useState(() => {
+    if (scheduleOnly) return false
     if (defaultMode) return defaultMode === 'window'
     return Boolean(occurrence?.windowStart)
+  })
+  const [isFloating, setIsFloating] = useState(() => {
+    if (scheduleOnly || defaultMode) return defaultMode === 'floating'
+    return occurrence ? (!occurrence.startAt && !occurrence.windowStart && !occurrence.isAllDay) : false
   })
 
   // New activity inline creation
   const [showNewActivity, setShowNewActivity] = useState(false)
   const [newActivityTitle, setNewActivityTitle] = useState('')
+  const [newActivityCategoryId, setNewActivityCategoryId] = useState('')
 
   useEffect(() => {
     if (open) setErrors({})
@@ -125,17 +155,30 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
   const { data: activities = [] } = useQuery({
     queryKey: ['activities'],
     queryFn: () => activitiesApi.list(),
-    enabled: open,
+    enabled: open && kind === 'activity',
   })
 
+  const { data: categories = [] } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => categoriesApi.list(),
+    enabled: open && (showNewActivity || kind === 'event'),
+  })
+
+  const { data: goals = [] } = useQuery({
+    queryKey: ['goals'],
+    queryFn: () => goalsApi.list(),
+    enabled: open && kind === 'event',
+  })
 
   const createActivityMutation = useMutation({
-    mutationFn: (title: string) => activitiesApi.create({ title }),
+    mutationFn: ({ title, categoryId }: { title: string; categoryId: string | null }) =>
+      activitiesApi.create({ title, categoryId }),
     onSuccess: (activity) => {
       qc.invalidateQueries({ queryKey: ['activities'] })
       setForm((f) => ({ ...f, activityId: activity.id }))
       setShowNewActivity(false)
       setNewActivityTitle('')
+      setNewActivityCategoryId('')
     },
   })
 
@@ -144,19 +187,35 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
       const windowDurationMinutes = useWindow
         ? (parseInt(form.windowDurationHours || '0') * 60) + parseInt(form.windowDurationMins || '0')
         : null
-      const payload = {
-        activityId: form.activityId,
-        title: form.title.trim() || null,
-        startAt: useWindow ? null : toIso(form.startAt),
-        endAt: useWindow || isAllDay ? null : (useStartEnd ? toIso(form.endAt) : null),
-        isAllDay: useWindow ? false : isAllDay,
+      const schedulePayload = {
+        startAt: useWindow || isFloating ? null : toIso(form.startAt),
+        endAt: useWindow || isAllDay || isFloating ? null : (useStartEnd ? toIso(form.endAt) : null),
+        isAllDay: useWindow || isFloating ? false : isAllDay,
         windowStart: useWindow ? toIso(form.windowStart) : null,
         windowEnd: useWindow ? toIso(form.windowEnd) : null,
         windowDurationMinutes: useWindow ? windowDurationMinutes : null,
       }
+
+      if (kind === 'event') {
+        const eventPayload = {
+          title: form.title.trim(),
+          categoryId: form.categoryId || null,
+          goalId: form.goalId || null,
+          ...schedulePayload,
+        }
+        return isEdit
+          ? occurrencesApi.updateEvent(occurrence!.id, eventPayload)
+          : occurrencesApi.createEvent(eventPayload)
+      }
+
+      const occurrencePayload = {
+        activityId: form.activityId,
+        title: form.title.trim() || null,
+        ...schedulePayload,
+      }
       return isEdit
-        ? occurrencesApi.update(occurrence!.id, payload)
-        : occurrencesApi.create(payload)
+        ? occurrencesApi.update(occurrence!.id, occurrencePayload)
+        : occurrencesApi.create(occurrencePayload)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
@@ -166,7 +225,7 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
   })
 
   function handleSubmit() {
-    const errs = validate(form, useStartEnd, useWindow)
+    const errs = validate(form, kind, useStartEnd, useWindow)
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
       return
@@ -219,7 +278,21 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
     setErrors({})
   }
 
+  function enableFloating() {
+    setIsFloating(true)
+    setUseWindow(false)
+    setUseStartEnd(false)
+    setIsAllDay(false)
+    setForm((f) => ({ ...f, startAt: '', endAt: '', windowStart: '', windowEnd: '', windowDurationHours: '', windowDurationMins: '' }))
+    setErrors({})
+  }
+
   function switchMode(mode: ScheduleMode) {
+    if (mode === 'floating') {
+      enableFloating()
+      return
+    }
+    setIsFloating(false)
     if (mode === 'due') {
       if (useWindow) disableWindow()
       if (useStartEnd) disableStartEnd()
@@ -230,7 +303,7 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
     }
   }
 
-  const scheduleMode: ScheduleMode = useWindow ? 'window' : useStartEnd ? 'scheduled' : 'due'
+  const scheduleMode: ScheduleMode = isFloating ? 'floating' : useWindow ? 'window' : useStartEnd ? 'scheduled' : 'due'
 
   const selectedActivity = activities.find((a) => a.id === form.activityId) ?? defaultActivity ?? null
 
@@ -241,11 +314,15 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
         : 'text-muted-foreground hover:text-foreground'
     }`
 
+  const kindTitle = isEdit
+    ? (kind === 'event' ? 'Edit Event' : 'Edit Occurrence')
+    : (kind === 'event' ? 'New Event' : 'New Occurrence')
+
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? 'Edit Occurrence' : 'New Occurrence'}
+      title={scheduleOnly ? 'Schedule Occurrence' : kindTitle}
       footer={
         <>
           {!isEdit && (
@@ -257,106 +334,193 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
         </>
       }
     >
-      {/* Activity picker */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-foreground">Activity</label>
-        {isEdit ? (
-          <div className="flex h-10 items-center rounded-lg border border-border bg-muted/40 px-3 text-sm text-foreground">
-            {occurrence?.activity.title}
-          </div>
-        ) : (
-          <>
-            <select
-              value={form.activityId}
-              onChange={(e) => {
-                if (e.target.value === '__new__') {
-                  setShowNewActivity(true)
-                } else {
-                  setForm((f) => ({ ...f, activityId: e.target.value }))
-                  setShowNewActivity(false)
-                }
-              }}
-              className={`h-10 w-full rounded-lg border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring ${errors.activityId ? 'border-destructive' : 'border-input'}`}
-            >
-              <option value="">Select an activity...</option>
-              {activities.map((a) => (
-                <option key={a.id} value={a.id}>{a.title}{a.goal ? ` (${a.goal.title})` : ''}</option>
-              ))}
-              <option value="__new__">+ Create new activity</option>
-            </select>
-            {errors.activityId && <p className="text-xs text-destructive">{errors.activityId}</p>}
-          </>
-        )}
+      {/* Kind picker — hidden in scheduleOnly or edit mode */}
+      {!scheduleOnly && !isEdit && (
+        <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+          <button
+            type="button"
+            onClick={() => { setKind('activity'); setErrors({}) }}
+            className={segmentClass(kind === 'activity')}
+          >
+            Activity
+          </button>
+          <button
+            type="button"
+            onClick={() => { setKind('event'); setErrors({}) }}
+            className={segmentClass(kind === 'event')}
+          >
+            Event
+          </button>
+        </div>
+      )}
 
-        {/* Inline new activity creation */}
-        {showNewActivity && !isEdit && (
-          <div className="flex gap-2 rounded-lg border border-border bg-muted/40 p-3">
+      {/* Event mode: title + category + optional goal */}
+      {kind === 'event' && !scheduleOnly && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Title</label>
             <input
               type="text"
-              placeholder="Activity name"
-              value={newActivityTitle}
-              onChange={(e) => setNewActivityTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && newActivityTitle.trim()) createActivityMutation.mutate(newActivityTitle.trim())
-                if (e.key === 'Escape') { setShowNewActivity(false); setNewActivityTitle('') }
-              }}
+              placeholder="Event title"
+              value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
               autoFocus
-              className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className={`h-11 rounded-lg border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring ${errors.title ? 'border-destructive' : 'border-input'}`}
             />
-            <Button
-              size="sm"
-              onClick={() => { if (newActivityTitle.trim()) createActivityMutation.mutate(newActivityTitle.trim()) }}
-              loading={createActivityMutation.isPending}
-            >
-              Add
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => { setShowNewActivity(false); setNewActivityTitle('') }}
-            >
-              Cancel
-            </Button>
+            {errors.title && <p className="text-xs text-destructive">{errors.title}</p>}
           </div>
-        )}
 
-        {/* Show selected activity's goal/category as read-only context */}
-        {selectedActivity && (selectedActivity.goal || selectedActivity.category) && (
-          <div className="flex flex-wrap gap-2 px-1">
-            {selectedActivity.goal && (
-              <span className="text-xs text-muted-foreground">Goal: {selectedActivity.goal.title}</span>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">Category</label>
+              <select
+                value={form.categoryId}
+                onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">No category</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">Goal <span className="font-normal text-muted-foreground">(optional)</span></label>
+              <select
+                value={form.goalId}
+                onChange={(e) => setForm((f) => ({ ...f, goalId: e.target.value }))}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">No goal</option>
+                {goals.map((g) => (
+                  <option key={g.id} value={g.id}>{g.title}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Activity mode: activity picker + optional title override */}
+      {kind === 'activity' && !scheduleOnly && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Activity</label>
+            {isEdit ? (
+              <div className="flex h-10 items-center rounded-lg border border-border bg-muted/40 px-3 text-sm text-foreground">
+                {occurrence?.activity.title}
+              </div>
+            ) : (
+              <>
+                <select
+                  value={form.activityId}
+                  onChange={(e) => {
+                    if (e.target.value === '__new__') {
+                      setShowNewActivity(true)
+                    } else {
+                      setForm((f) => ({ ...f, activityId: e.target.value }))
+                      setShowNewActivity(false)
+                    }
+                  }}
+                  className={`h-10 w-full rounded-lg border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring ${errors.activityId ? 'border-destructive' : 'border-input'}`}
+                >
+                  <option value="">Select an activity...</option>
+                  {activities.map((a) => (
+                    <option key={a.id} value={a.id}>{a.title}{a.goal ? ` (${a.goal.title})` : ''}</option>
+                  ))}
+                  <option value="__new__">+ Create new activity</option>
+                </select>
+                {errors.activityId && <p className="text-xs text-destructive">{errors.activityId}</p>}
+              </>
             )}
-            {selectedActivity.category && (
-              <span className="text-xs text-muted-foreground">Category: {selectedActivity.category.name}</span>
+
+            {/* Inline new activity creation */}
+            {showNewActivity && !isEdit && (
+              <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3">
+                <input
+                  type="text"
+                  placeholder="Activity name"
+                  value={newActivityTitle}
+                  onChange={(e) => setNewActivityTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newActivityTitle.trim()) createActivityMutation.mutate({ title: newActivityTitle.trim(), categoryId: newActivityCategoryId || null })
+                    if (e.key === 'Escape') { setShowNewActivity(false); setNewActivityTitle(''); setNewActivityCategoryId('') }
+                  }}
+                  autoFocus
+                  className="h-8 min-w-0 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <select
+                  value={newActivityCategoryId}
+                  onChange={(e) => setNewActivityCategoryId(e.target.value)}
+                  className="h-8 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">No category</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => { if (newActivityTitle.trim()) createActivityMutation.mutate({ title: newActivityTitle.trim(), categoryId: newActivityCategoryId || null }) }}
+                    loading={createActivityMutation.isPending}
+                  >
+                    Add
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => { setShowNewActivity(false); setNewActivityTitle(''); setNewActivityCategoryId('') }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Selected activity context */}
+            {selectedActivity && (selectedActivity.goal || selectedActivity.category) && (
+              <div className="flex flex-wrap gap-2 px-1">
+                {selectedActivity.goal && (
+                  <span className="text-xs text-muted-foreground">Goal: {selectedActivity.goal.title}</span>
+                )}
+                {selectedActivity.category && (
+                  <span className="text-xs text-muted-foreground">Category: {selectedActivity.category.name}</span>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
-      {/* Optional title override */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-foreground">
-          Title <span className="font-normal text-muted-foreground">(optional)</span>
-        </label>
-        <input
-          type="text"
-          placeholder={selectedActivity ? selectedActivity.title : 'Override activity title...'}
-          value={form.title}
-          onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
-          className="h-11 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-      </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">
+              Title <span className="font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <input
+              type="text"
+              placeholder={selectedActivity ? selectedActivity.title : 'Override activity title...'}
+              value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
+              className="h-11 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+        </>
+      )}
 
       {/* Scheduling section */}
       <div className="flex flex-col gap-3">
-        <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
-          <button type="button" onClick={() => switchMode('due')} className={segmentClass(scheduleMode === 'due')}>Due date</button>
-          <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(scheduleMode === 'scheduled')}>Scheduled</button>
-          <button type="button" onClick={() => switchMode('window')} className={segmentClass(scheduleMode === 'window')}>Window</button>
-        </div>
+        {!scheduleOnly && (
+          <div className="grid grid-cols-4 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+            <button type="button" onClick={() => switchMode('due')} className={segmentClass(scheduleMode === 'due')}>Due</button>
+            <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(scheduleMode === 'scheduled')}>Scheduled</button>
+            <button type="button" onClick={() => switchMode('window')} className={segmentClass(scheduleMode === 'window')}>Window</button>
+            <button type="button" onClick={() => switchMode('floating')} className={segmentClass(scheduleMode === 'floating')}>Floating</button>
+          </div>
+        )}
 
-        {scheduleMode === 'due' && (
+        {scheduleMode === 'due' && !scheduleOnly && (
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
@@ -388,7 +552,7 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
           </div>
         )}
 
-        {scheduleMode === 'scheduled' && (
+        {(scheduleMode === 'scheduled' || scheduleOnly) && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field
               label="Start"

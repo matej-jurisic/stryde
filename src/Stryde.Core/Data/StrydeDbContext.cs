@@ -35,6 +35,10 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<Activity>()
+            .Property(a => a.Kind)
+            .HasConversion<string>();
+
+        modelBuilder.Entity<Activity>()
             .HasOne(a => a.Category)
             .WithMany()
             .HasForeignKey(a => a.CategoryId)
@@ -49,12 +53,6 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
         modelBuilder.Entity<Goal>()
             .Property(g => g.Status)
             .HasConversion<string>();
-
-        modelBuilder.Entity<Goal>()
-            .HasOne(g => g.Category)
-            .WithMany()
-            .HasForeignKey(g => g.CategoryId)
-            .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<Checkpoint>()
             .Property(c => c.Status)

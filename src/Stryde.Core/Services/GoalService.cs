@@ -14,29 +14,20 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
         var err = Validators.ValidateTitle(req.Title, "Title");
         if (err is not null) return Result<GoalDto>.Fail(err);
 
-        if (req.CategoryId.HasValue)
-        {
-            var exists = await db.Categories.AnyAsync(c => c.Id == req.CategoryId.Value && c.UserId == userId);
-            if (!exists) return Result<GoalDto>.Fail(new Error(ErrorType.NotFound, "Category not found."));
-        }
-
         var goal = new Goal
         {
             UserId = userId,
             Title = req.Title.Trim(),
             Description = req.Description?.Trim(),
-            CategoryId = req.CategoryId,
         };
         db.Goals.Add(goal);
         await db.SaveChangesAsync();
-        await db.Entry(goal).Reference(g => g.Category).LoadAsync();
         return Result<GoalDto>.Success(GoalDto.FromEntity(goal));
     }
 
     public async Task<Result<GoalDto>> GetAsync(Guid id, Guid userId)
     {
         var goal = await db.Goals
-            .Include(g => g.Category)
             .Include(g => g.Checkpoints)
             .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
         if (goal is null) return Result<GoalDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
@@ -46,7 +37,6 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
     public async Task<List<GoalDto>> ListAsync(Guid userId, GoalStatus? status = null)
     {
         var query = db.Goals
-            .Include(g => g.Category)
             .Include(g => g.Checkpoints)
             .Where(g => g.UserId == userId);
 
@@ -66,23 +56,14 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
         var err = Validators.ValidateTitle(req.Title, "Title");
         if (err is not null) return Result<GoalDto>.Fail(err);
 
-        if (req.CategoryId.HasValue)
-        {
-            var exists = await db.Categories.AnyAsync(c => c.Id == req.CategoryId.Value && c.UserId == userId);
-            if (!exists) return Result<GoalDto>.Fail(new Error(ErrorType.NotFound, "Category not found."));
-        }
-
         var goal = await db.Goals
-            .Include(g => g.Category)
             .Include(g => g.Checkpoints)
             .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
         if (goal is null) return Result<GoalDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
 
         goal.Title = req.Title.Trim();
         goal.Description = req.Description?.Trim();
-        goal.CategoryId = req.CategoryId;
         await db.SaveChangesAsync();
-        await db.Entry(goal).Reference(g => g.Category).LoadAsync();
         return Result<GoalDto>.Success(GoalDto.FromEntity(goal));
     }
 
@@ -98,7 +79,6 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
     public async Task<Result<GoalDto>> SetStatusAsync(Guid id, Guid userId, GoalStatus status)
     {
         var goal = await db.Goals
-            .Include(g => g.Category)
             .Include(g => g.Checkpoints)
             .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
         if (goal is null) return Result<GoalDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));

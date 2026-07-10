@@ -3,6 +3,7 @@ using Stryde.Core.Common;
 using Stryde.Core.Data;
 using Stryde.Core.Dtos;
 using Stryde.Core.Entities;
+using Stryde.Core.Enums;
 
 namespace Stryde.Core.Services;
 
@@ -13,7 +14,7 @@ public class ActivityService(StrydeDbContext db)
         var query = db.Activities
             .Include(a => a.Category)
             .Include(a => a.Goal)
-            .Where(a => a.UserId == userId);
+            .Where(a => a.UserId == userId && a.Kind == ActivityKind.activity);
 
         if (goalId.HasValue)
             query = query.Where(a => a.GoalId == goalId.Value);

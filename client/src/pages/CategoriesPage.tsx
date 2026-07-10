@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Trash2, Plus } from 'lucide-react'
+import { Pencil, Trash2, Plus, MoreHorizontal } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { categoriesApi, ApiError } from '@/lib/api'
@@ -66,6 +66,17 @@ function CategoryForm({ initial, onSave, onCancel, submitLabel }: CategoryFormPr
 function CategoryCard({ category }: { category: Category }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onPointerDown(e: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [menuOpen])
 
   const deleteMutation = useMutation({
     mutationFn: () => categoriesApi.delete(category.id),
@@ -94,7 +105,7 @@ function CategoryCard({ category }: { category: Category }) {
   }
 
   return (
-    <article className="group flex items-center gap-4 rounded-xl border border-border bg-card p-4">
+    <article className="relative group flex items-center gap-4 rounded-xl border border-border bg-card p-4">
       <div
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
         style={{ backgroundColor: category.color + '22' }}
@@ -102,20 +113,32 @@ function CategoryCard({ category }: { category: Category }) {
         <CategoryIcon icon={category.icon} color={category.color} size={18} strokeWidth={2} />
       </div>
       <span className="flex-1 text-sm font-medium text-foreground">{category.name}</span>
-      <div className="flex items-center gap-0.5">
+      <div ref={menuRef} className="shrink-0">
         <button
-          onClick={() => setEditing(true)}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={() => setMenuOpen((o) => !o)}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         >
-          <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
+          <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
         </button>
-        <button
-          onClick={() => deleteMutation.mutate()}
-          disabled={deleteMutation.isPending}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
-        >
-          <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-        </button>
+        {menuOpen && (
+          <div className="absolute right-3 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+            <button
+              onClick={() => { setEditing(true); setMenuOpen(false) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+            >
+              <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+              Edit
+            </button>
+            <button
+              onClick={() => { deleteMutation.mutate(); setMenuOpen(false) }}
+              disabled={deleteMutation.isPending}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              Delete
+            </button>
+          </div>
+        )}
       </div>
     </article>
   )

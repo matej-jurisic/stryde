@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock, Menu, Inbox } from 'lucide-react'
+import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock, Menu, Inbox, MoreHorizontal } from 'lucide-react'
 import { occurrencesApi, categoriesApi } from '@/lib/api'
 import type { Category, Occurrence, EventStatus } from '@/lib/types'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
@@ -41,13 +41,14 @@ function getDayLabel(iso: string): string {
 }
 
 function formatOccurrenceDate(o: Occurrence): string {
+  if (o.isAllDay && o.startAt) return `${getDayLabel(o.startAt)}, All day`
   if (o.windowStart) {
     const dayLabel = getDayLabel(o.windowStart)
     const range = o.windowEnd
       ? `${formatTime(o.windowStart)} - ${formatTime(o.windowEnd)}`
       : formatTime(o.windowStart)
     const dur = formatDuration(o.windowDurationMinutes)
-    return dur ? `${dayLabel}, ${range} · ~${dur}` : `${dayLabel}, ${range}`
+    return dur ? `${dayLabel}, ${range} ~${dur}` : `${dayLabel}, ${range}`
   }
   if (!o.startAt) return ''
   const dayLabel = getDayLabel(o.startAt)
@@ -56,11 +57,12 @@ function formatOccurrenceDate(o: Occurrence): string {
   return `${dayLabel}, ${timeStr}`
 }
 
-type Group = 'overdue' | 'today' | 'floating' | 'upcoming' | 'done'
+type Group = 'overdue' | 'today' | 'unscheduled' | 'floating' | 'upcoming' | 'done'
 
 function classify(o: Occurrence): Group {
   if (o.status !== 'pending') return 'done'
-  if (!o.startAt) return 'floating'
+  if (!o.startAt && !o.windowStart) return 'floating'
+  if (!o.startAt) return 'unscheduled'
   if (o.isOverdue) return 'overdue'
 
   const start = new Date(o.startAt)
@@ -71,13 +73,14 @@ function classify(o: Occurrence): Group {
   return 'upcoming'
 }
 
-const GROUP_ORDER: Group[] = ['overdue', 'today', 'floating', 'upcoming', 'done']
+const GROUP_ORDER: Group[] = ['overdue', 'today', 'unscheduled', 'upcoming', 'floating', 'done']
 
 const GROUP_LABELS: Record<Group, string> = {
   overdue: 'Overdue',
   today: 'Today',
-  floating: 'Unscheduled',
+  unscheduled: 'Unscheduled',
   upcoming: 'Upcoming',
+  floating: 'Floating',
   done: 'Completed / Skipped',
 }
 
@@ -91,6 +94,17 @@ interface InboxRowProps {
 
 function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
   const qc = useQueryClient()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onPointerDown(e: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [menuOpen])
 
   const statusMutation = useMutation({
     mutationFn: (status: EventStatus) => occurrencesApi.setStatus(occurrence.id, status),
@@ -114,7 +128,7 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
   const goal = occurrence.activity.goal
 
   return (
-    <li className="group flex items-center gap-3 border-b border-border bg-card px-5 py-3 last:border-b-0 hover:bg-muted/40 transition-colors">
+    <li className="group relative flex items-center gap-3 border-b border-border bg-card px-5 py-3 last:border-b-0 first:rounded-t-lg last:rounded-b-lg hover:bg-muted/40 transition-colors">
       {/* Checkbox */}
       <button
         onClick={() => isPending && statusMutation.mutate('done')}
@@ -132,64 +146,76 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
 
       {/* Title + meta */}
       <div className="min-w-0 flex-1">
-        <span className={`text-sm ${occurrence.status !== 'pending' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-          {occurrence.effectiveTitle}
-        </span>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-          {(occurrence.startAt || occurrence.windowStart) && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Clock className="h-3 w-3" strokeWidth={2} />
-              {formatOccurrenceDate(occurrence)}
-            </span>
-          )}
-          {category && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <CategoryIcon icon={category.icon} color={category.color} size={11} strokeWidth={2} />
-              {category.name}
-            </span>
-          )}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className={`text-sm ${occurrence.status !== 'pending' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+            {occurrence.effectiveTitle}
+          </span>
           {goal && (
             <Badge key={goal.id} tone="focus">{goal.title}</Badge>
           )}
         </div>
+        {(occurrence.startAt || occurrence.windowStart || category) && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+            {(occurrence.startAt || occurrence.windowStart) && (
+              <span className="whitespace-nowrap flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock className="h-3 w-3 shrink-0" strokeWidth={2} />
+                {formatOccurrenceDate(occurrence)}
+              </span>
+            )}
+            {category && (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                <CategoryIcon icon={category.icon} color={category.color} size={11} strokeWidth={2} />
+                {category.name}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Actions */}
-      <div className="flex shrink-0 items-center gap-0.5">
-        {isPending && (
-          <>
-            <button
-              onClick={() => statusMutation.mutate('skipped')}
-              title="Skip"
-              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
-            >
-              <X className="h-3.5 w-3.5" strokeWidth={2.5} />
-            </button>
-            {isFloating && (
+      {/* Actions menu */}
+      <div ref={menuRef} className="shrink-0">
+        <button
+          onClick={() => setMenuOpen((o) => !o)}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
+        </button>
+        {menuOpen && (
+          <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+            {isPending && (
               <button
-                onClick={() => onSchedule(occurrence)}
-                title="Schedule"
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-primary"
+                onClick={() => { statusMutation.mutate('skipped'); setMenuOpen(false) }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
               >
-                <CalendarPlus className="h-3.5 w-3.5" strokeWidth={2} />
+                <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2.5} />
+                Skip
               </button>
             )}
-          </>
+            {isPending && isFloating && (
+              <button
+                onClick={() => { onSchedule(occurrence); setMenuOpen(false) }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+              >
+                <CalendarPlus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                Schedule
+              </button>
+            )}
+            <button
+              onClick={() => { onEdit(occurrence); setMenuOpen(false) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+            >
+              <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+              Edit
+            </button>
+            <button
+              onClick={() => { deleteMutation.mutate(); setMenuOpen(false) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              Delete
+            </button>
+          </div>
         )}
-        <button
-          onClick={() => onEdit(occurrence)}
-          title="Edit"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
-        </button>
-        <button
-          onClick={() => deleteMutation.mutate()}
-          title="Delete"
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
-        >
-          <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-        </button>
       </div>
     </li>
   )
@@ -251,9 +277,12 @@ export function InboxPage() {
   }
 
   const activeCategory = categoryId ? categories.find((c) => c.id === categoryId) : null
+
+  const isFloatingOccurrence = (o: Occurrence) => !o.startAt && !o.windowStart && !o.isAllDay
+
   const visibleOccurrences = categoryId
     ? occurrences.filter((o) => o.activity.category?.id === categoryId)
-    : occurrences.filter((o) => !o.activity.category)
+    : occurrences.filter((o) => !o.activity.category || isFloatingOccurrence(o))
 
   function openCreate() {
     setEditingOccurrence(undefined)
@@ -324,8 +353,8 @@ export function InboxPage() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-6">
-        <div className="mx-auto max-w-2xl">
+      <div className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6">
+        <div>
           {isLoading ? (
             <div className="flex justify-center py-16">
               <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -363,7 +392,7 @@ export function InboxPage() {
                       }`}>
                         {GROUP_LABELS[key]}
                       </p>
-                    <div className="overflow-hidden rounded-lg border border-border">
+                    <div className="rounded-lg border border-border">
                       <ul>
                         {list.map((o) => (
                           <InboxRow key={o.id} occurrence={o} onEdit={openEdit} onSchedule={openSchedule} />
@@ -379,11 +408,12 @@ export function InboxPage() {
       </div>
 
       <EventModal
-        key={editingOccurrence?.id ?? 'new'}
+        key={`${editingOccurrence?.id ?? 'new'}-${scheduleMode}`}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         occurrence={editingOccurrence}
         focusStartAt={scheduleMode}
+        scheduleOnly={scheduleMode}
       />
 
       <CategoryModal

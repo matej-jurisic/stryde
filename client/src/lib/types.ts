@@ -13,6 +13,7 @@ export type EventStatus = 'pending' | 'done' | 'skipped'
 export type GoalStatus = 'focus' | 'active' | 'bench' | 'closed'
 export type CheckpointStatus = 'pending' | 'reached'
 export type CheckpointSize = 'tiny' | 'small' | 'normal' | 'big' | 'huge'
+export type ActivityKind = 'activity' | 'event'
 
 export interface GoalSummary {
   id: string
@@ -36,9 +37,7 @@ export interface Goal {
   title: string
   description: string | null
   status: GoalStatus
-  categoryId: string | null
   createdAt: string
-  category: CategorySummary | null
   checkpoints: Checkpoint[]
 }
 
@@ -64,6 +63,7 @@ export interface Activity {
   title: string
   categoryId: string | null
   goalId: string | null
+  kind: ActivityKind
   createdAt: string
   category: CategorySummary | null
   goal: GoalSummary | null

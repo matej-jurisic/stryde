@@ -98,6 +98,12 @@ export const occurrencesApi = {
 
   setStatus: (id: string, status: import('./types').EventStatus) =>
     request<Occurrence>(`/api/occurrences/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+
+  createEvent: (body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null }) =>
+    request<Occurrence>('/api/occurrences/event', { method: 'POST', body: JSON.stringify(body) }),
+
+  updateEvent: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null }) =>
+    request<Occurrence>(`/api/occurrences/${id}/event`, { method: 'PUT', body: JSON.stringify(body) }),
 }
 
 export const goalsApi = {
