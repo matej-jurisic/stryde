@@ -12,11 +12,11 @@ public class TestContext : IDisposable
     public StrydeDbContext Db { get; }
     public AuthService AuthService { get; }
     public GoalService GoalService { get; }
-    public EventService EventService { get; }
+    public ActivityService ActivityService { get; }
+    public OccurrenceService OccurrenceService { get; }
     public CheckpointService CheckpointService { get; }
     public UserSettingsService UserSettingsService { get; }
     public RecommendationService RecommendationService { get; }
-    public BaseEventService BaseEventService { get; }
 
     public TestContext()
     {
@@ -42,10 +42,10 @@ public class TestContext : IDisposable
         AuthService = new AuthService(Db, tokens, hasher);
         UserSettingsService = new UserSettingsService(Db);
         GoalService = new GoalService(Db, UserSettingsService);
-        EventService = new EventService(Db, UserSettingsService);
+        ActivityService = new ActivityService(Db);
+        OccurrenceService = new OccurrenceService(Db, UserSettingsService);
         CheckpointService = new CheckpointService(Db);
         RecommendationService = new RecommendationService(Db, UserSettingsService);
-        BaseEventService = new BaseEventService(Db);
     }
 
     public void Dispose()

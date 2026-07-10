@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, ChevronDown, Menu } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { eventsApi, settingsApi } from '@/lib/api'
-import type { BaseEventSummary, Event } from '@/lib/types'
+import { occurrencesApi, settingsApi } from '@/lib/api'
+import type { Activity, Occurrence } from '@/lib/types'
 import { EventModal } from '@/components/events/EventModal'
 import { EventDetailModal } from '@/components/events/EventDetailModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
@@ -103,21 +103,27 @@ function dayHeader(d: Date): string {
 // ── Layout algorithm ────────────────────────────────────────────────────────
 
 interface LayoutEvent {
-  event: Event
+  event: Occurrence
   col: number
   totalCols: number
   topPx: number
   heightPx: number
 }
 
-function layoutDay(events: Event[], day: Date): LayoutEvent[] {
+function layoutDay(events: Occurrence[], day: Date): LayoutEvent[] {
   const dayStartMs = sod(day).getTime()
 
   const items = events
-    .filter((e) => e.startAt)
+    .filter((e) => e.windowStart ? !!(e.windowStart && e.windowEnd) : !!e.startAt)
     .map((e) => {
-      const startMs = new Date(e.startAt!).getTime()
-      const endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
+      let startMs: number, endMs: number
+      if (e.windowStart && e.windowEnd) {
+        startMs = new Date(e.windowStart).getTime()
+        endMs = new Date(e.windowEnd).getTime()
+      } else {
+        startMs = new Date(e.startAt!).getTime()
+        endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
+      }
       // Clip to this day's boundaries (handles cross-midnight events)
       const clipStartMin = Math.max((startMs - dayStartMs) / 60000, 0)
       const clipEndMin = Math.min((endMs - dayStartMs) / 60000, 24 * 60)
@@ -163,95 +169,25 @@ function layoutDay(events: Event[], day: Date): LayoutEvent[] {
 
 type EventColors = { bgClass: string; bgHex?: string; leftColor: string; textClass: string }
 
-function eventColors(event: Event): EventColors {
-  if (event.category) {
+function eventColors(o: Occurrence): EventColors {
+  const category = o.activity.category
+  if (category) {
     return {
       bgClass: '',
-      bgHex: event.category.color,
-      leftColor: event.category.color,
+      bgHex: category.color,
+      leftColor: category.color,
       textClass: 'text-foreground',
     }
   }
   return { bgClass: 'bg-muted', leftColor: 'var(--color-border)', textClass: 'text-foreground' }
 }
 
-function eventAllDayColors(event: Event): { className: string; style?: React.CSSProperties } {
-  if (event.category) {
-    return { className: 'text-foreground', style: { backgroundColor: event.category.color + '26' } }
+function eventAllDayColors(o: Occurrence): { className: string; style?: React.CSSProperties } {
+  const category = o.activity.category
+  if (category) {
+    return { className: 'text-foreground', style: { backgroundColor: category.color + '26' } }
   }
   return { className: 'bg-primary/10 text-primary' }
-}
-
-// ── Windowed event helpers ──────────────────────────────────────────────────
-
-interface WindowedSegment {
-  event: Event
-  topPx: number
-  heightPx: number
-}
-
-function windowedSegmentsForDay(events: Event[], day: Date): WindowedSegment[] {
-  const dayStartMs = sod(day).getTime()
-  const dayEndMs = dayStartMs + 86400000
-  const segments: WindowedSegment[] = []
-  for (const e of events) {
-    if (!e.windowStart || !e.windowEnd) continue
-    const wsMs = new Date(e.windowStart).getTime()
-    const weMs = new Date(e.windowEnd).getTime()
-    const clipStartMs = Math.max(wsMs, dayStartMs)
-    const clipEndMs = Math.min(weMs, dayEndMs)
-    if (clipStartMs >= clipEndMs) continue
-    const startMin = (clipStartMs - dayStartMs) / 60000
-    const endMin = (clipEndMs - dayStartMs) / 60000
-    segments.push({
-      event: e,
-      topPx: (startMin / 60) * HOUR_PX,
-      heightPx: Math.max(((endMin - startMin) / 60) * HOUR_PX, 20),
-    })
-  }
-  return segments
-}
-
-function WindowedEventBlock({
-  segment,
-  onClick,
-}: {
-  segment: WindowedSegment
-  onClick: (e: Event) => void
-}) {
-  const { event, topPx, heightPx } = segment
-  const isDone = event.status !== 'pending'
-  const accentColor = event.category ? event.category.color : 'var(--color-border)'
-
-  const durationLabel = event.windowDurationMinutes
-    ? event.windowDurationMinutes >= 60
-      ? `~${Math.floor(event.windowDurationMinutes / 60)}h${event.windowDurationMinutes % 60 ? `${event.windowDurationMinutes % 60}m` : ''}`
-      : `~${event.windowDurationMinutes}m`
-    : null
-
-  return (
-    <button
-      className={`absolute inset-x-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 ${isDone ? 'opacity-40' : 'opacity-70'}`}
-      style={{
-        top: topPx + 1,
-        height: Math.max(heightPx - 2, 16),
-        left: 2,
-        right: 2,
-        width: 'calc(100% - 4px)',
-        background: `repeating-linear-gradient(135deg, transparent, transparent 4px, ${accentColor}18 4px, ${accentColor}18 8px)`,
-        border: `1.5px dashed ${accentColor}60`,
-      }}
-      onClick={(e) => { e.stopPropagation(); onClick(event) }}
-    >
-      <div className="px-1.5 py-0.5">
-        {heightPx >= 20 && (
-          <p className="overflow-hidden whitespace-nowrap text-[10px] font-medium leading-tight" style={{ color: accentColor }}>
-            {event.title}{durationLabel ? ` ${durationLabel}` : ''}
-          </p>
-        )}
-      </div>
-    </button>
-  )
 }
 
 // ── EventBlock ──────────────────────────────────────────────────────────────
@@ -266,7 +202,7 @@ function EventBlock({
   isResizing,
 }: {
   layout: LayoutEvent
-  onClick: (e: Event) => void
+  onClick: (e: Occurrence) => void
   onMoveStart?: (e: React.PointerEvent, topPx: number) => void
   onResizeStart?: (e: React.PointerEvent, side: 'top' | 'bottom') => void
   suppressClickRef?: { current: boolean }
@@ -276,6 +212,11 @@ function EventBlock({
   const { event, col, totalCols, topPx, heightPx } = layout
   const { bgClass, bgHex, leftColor, textClass } = eventColors(event)
   const isDone = event.status !== 'pending'
+  const isWindowed = !!(event.windowStart && event.windowEnd)
+  const accentColor = event.activity.category ? event.activity.category.color : 'var(--color-primary)'
+  const isHex = accentColor.startsWith('#')
+  const accentFaded = isHex ? `${accentColor}18` : `color-mix(in srgb, ${accentColor} 9%, transparent)`
+  const accentMid   = isHex ? `${accentColor}60` : `color-mix(in srgb, ${accentColor} 38%, transparent)`
 
   const GAP = 2
   const leftPct = (col / totalCols) * 100
@@ -285,11 +226,30 @@ function EventBlock({
     ? `${timeLabel(event.startAt)}${event.endAt ? ` – ${timeLabel(event.endAt)}` : ''}`
     : ''
 
+  const durationLabel = isWindowed && event.windowDurationMinutes
+    ? event.windowDurationMinutes >= 60
+      ? `~${Math.floor(event.windowDurationMinutes / 60)}h${event.windowDurationMinutes % 60 ? `${event.windowDurationMinutes % 60}m` : ''}`
+      : `~${event.windowDurationMinutes}m`
+    : null
+
   // Handles show always when resizing (touch mode), or on mouse hover via CSS
   const handleVisibility = isResizing ? 'flex' : 'hidden group-hover/calev:flex'
 
   function stopAll(e: React.SyntheticEvent) {
     e.stopPropagation()
+  }
+
+  const bodyPointerProps = {
+    style: { touchAction: 'pan-y' as const },
+    onPointerDown: (e: React.PointerEvent) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      onMoveStart?.(e, topPx)
+    },
+    onClick: (e: React.MouseEvent) => {
+      if (suppressClickRef?.current) return
+      e.stopPropagation()
+      onClick(event)
+    },
   }
 
   return (
@@ -308,6 +268,7 @@ function EventBlock({
       <div
         data-resize-handle="true"
         className={`absolute inset-x-0 top-0 z-20 h-2.5 cursor-ns-resize ${handleVisibility} items-center justify-center`}
+        style={{ touchAction: 'none' }}
         onMouseDown={stopAll}
         onPointerDown={(e) => { e.stopPropagation(); onResizeStart?.(e, 'top') }}
         onClick={stopAll}
@@ -316,47 +277,61 @@ function EventBlock({
       </div>
 
       {/* Event body */}
-      <button
-        className={`absolute inset-0 overflow-hidden rounded-[4px] border bg-card text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-50' : ''} ${isResizing ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border/50'}`}
-        onPointerDown={(e) => {
-          if (e.pointerType === 'mouse' && e.button !== 0) return
-          onMoveStart?.(e, topPx)
-        }}
-        onClick={(e) => {
-          if (suppressClickRef?.current) return
-          e.stopPropagation()
-          onClick(event)
-        }}
-      >
-        <div
-          className={`absolute inset-0 ${bgClass}`}
-          style={bgHex ? { backgroundColor: bgHex + '22' } : undefined}
-        />
-        <div className="relative flex h-full">
-          <div style={{ width: 3, minWidth: 3, background: leftColor }} className="shrink-0" />
-          <div className="@container min-w-0 flex-1 px-1.5 py-0.5">
+      {isWindowed ? (
+        <button
+          className={`absolute inset-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : 'opacity-70'}`}
+          style={{
+            background: `repeating-linear-gradient(135deg, transparent, transparent 4px, ${accentFaded} 4px, ${accentFaded} 8px)`,
+            border: `1.5px dashed ${accentMid}`,
+            touchAction: 'pan-y',
+          }}
+          onPointerDown={bodyPointerProps.onPointerDown}
+          onClick={bodyPointerProps.onClick}
+        >
+          <div className="px-1.5 py-0.5">
             {heightPx >= 20 && (
-              <p
-                className={`@max-[10px]:hidden break-all overflow-hidden text-[11px] font-medium leading-tight ${
-                  isDone ? 'line-through text-muted-foreground' : textClass
-                }`}
-              >
-                {event.title}
-              </p>
-            )}
-            {heightPx >= 44 && timeText && (
-              <p className={`@max-[10px]:hidden overflow-hidden whitespace-nowrap text-[10px] leading-tight opacity-70 ${isDone ? 'text-muted-foreground' : textClass}`}>
-                {timeText}
+              <p className="overflow-hidden whitespace-nowrap text-[10px] font-medium leading-tight" style={{ color: accentColor }}>
+                {event.effectiveTitle}{durationLabel ? ` ${durationLabel}` : ''}
               </p>
             )}
           </div>
-        </div>
-      </button>
+        </button>
+      ) : (
+        <button
+          className={`absolute inset-0 overflow-hidden rounded-[4px] border bg-card text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-50' : ''} ${isResizing ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border/50'}`}
+          {...bodyPointerProps}
+        >
+          <div
+            className={`absolute inset-0 ${bgClass}`}
+            style={bgHex ? { backgroundColor: bgHex + '22' } : undefined}
+          />
+          <div className="relative flex h-full">
+            <div style={{ width: 3, minWidth: 3, background: leftColor }} className="shrink-0" />
+            <div className="@container min-w-0 flex-1 px-1.5 py-0.5">
+              {heightPx >= 20 && (
+                <p
+                  className={`@max-[10px]:hidden break-all overflow-hidden text-[11px] font-medium leading-tight ${
+                    isDone ? 'line-through text-muted-foreground' : textClass
+                  }`}
+                >
+                  {event.effectiveTitle}
+                </p>
+              )}
+              {heightPx >= 44 && timeText && (
+                <p className={`@max-[10px]:hidden overflow-hidden whitespace-nowrap text-[10px] leading-tight opacity-70 ${isDone ? 'text-muted-foreground' : textClass}`}>
+                  {timeText}
+                </p>
+              )}
+            </div>
+          </div>
+        </button>
+      )}
 
       {/* Bottom resize handle */}
       <div
         data-resize-handle="true"
         className={`absolute inset-x-0 bottom-0 z-20 h-2.5 cursor-ns-resize ${handleVisibility} items-center justify-center`}
+        style={{ touchAction: 'none' }}
         onMouseDown={stopAll}
         onPointerDown={(e) => { e.stopPropagation(); onResizeStart?.(e, 'bottom') }}
         onClick={stopAll}
@@ -388,40 +363,40 @@ function snapToGrid(day: Date, yPx: number): Date {
 
 interface DayColumnProps {
   day: Date
-  allEvents: Event[]
-  windowedEvents: Event[]
-  onEventClick: (e: Event) => void
+  allEvents: Occurrence[]
+  onEventClick: (e: Occurrence) => void
   overlay: { topPx: number; heightPx: number } | null
   moveOverlay: { topPx: number; heightPx: number } | null
   resizeOverlay: { topPx: number; heightPx: number } | null
   isToday: boolean
   borderLeft: boolean
-  onEventMoveStart: (e: React.PointerEvent, event: Event, topPx: number) => void
-  onEventResizeStart: (e: React.PointerEvent, event: Event, side: 'top' | 'bottom') => void
+  onEventMoveStart: (e: React.PointerEvent, event: Occurrence, topPx: number) => void
+  onEventResizeStart: (e: React.PointerEvent, event: Occurrence, side: 'top' | 'bottom') => void
   suppressClickRef: { current: boolean }
   movingEventId: string | null
   resizingEventId: string | null
 }
 
-function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId }: DayColumnProps) {
+function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
   const dayEvents = useMemo(
     () =>
       allEvents.filter((e) => {
-        if (!e.startAt) return false
-        const startMs = new Date(e.startAt).getTime()
-        const endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
-        // Include events that overlap this day (catches cross-midnight continuations)
+        let startMs: number, endMs: number
+        if (e.windowStart && e.windowEnd) {
+          startMs = new Date(e.windowStart).getTime()
+          endMs = new Date(e.windowEnd).getTime()
+        } else if (e.startAt) {
+          startMs = new Date(e.startAt).getTime()
+          endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
+        } else {
+          return false
+        }
         return startMs < dayEnd.getTime() && endMs > dayStart.getTime()
       }),
     [allEvents, dayStart.getTime(), dayEnd.getTime()],
-  )
-
-  const windowed = useMemo(
-    () => windowedSegmentsForDay(windowedEvents, day),
-    [windowedEvents, day],
   )
 
   const layout = useMemo(() => layoutDay(dayEvents, day), [dayEvents, day])
@@ -481,10 +456,6 @@ function DayColumn({ day, allEvents, windowedEvents, onEventClick, overlay, move
           style={{ top: resizeOverlay.topPx, height: resizeOverlay.heightPx }}
         />
       )}
-      {/* Windowed event blocks (rendered below regular events) */}
-      {windowed.map((s) => (
-        <WindowedEventBlock key={`w-${s.event.id}`} segment={s} onClick={onEventClick} />
-      ))}
       {/* Event blocks */}
       {layout.map((l) => (
         <EventBlock
@@ -516,13 +487,14 @@ export function CalendarPage() {
   const viewDropRef = useRef<HTMLDivElement>(null)
   const [current, setCurrent] = useState(() => new Date())
   const [modalOpen, setModalOpen] = useState(false)
-  const [editingEvent, setEditingEvent] = useState<Event | undefined>()
+  const [editingOccurrence, setEditingOccurrence] = useState<Occurrence | undefined>()
   const [defaultStartAt, setDefaultStartAt] = useState<string | undefined>()
   const [defaultEndAt, setDefaultEndAt] = useState<string | undefined>()
-  const [defaultBaseEvent, setDefaultBaseEvent] = useState<BaseEventSummary | undefined>()
+  const [defaultActivity, setDefaultActivity] = useState<Activity | undefined>()
   const [focusStartAt, setFocusStartAt] = useState(false)
+  const [scheduleMode, setScheduleMode] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
-  const [detailEvent, setDetailEvent] = useState<Event | null>(null)
+  const [detailEvent, setDetailEvent] = useState<Occurrence | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
@@ -545,7 +517,7 @@ export function CalendarPage() {
     () => new Map(),
   )
   const eventMoveRef = useRef<{
-    event: Event
+    event: Occurrence
     durationMs: number
     offsetPx: number
     isDragging: boolean
@@ -554,8 +526,13 @@ export function CalendarPage() {
   const [moveOverlay, setMoveOverlay] = useState<{ dayIdx: number; topPx: number; heightPx: number } | null>(null)
   const [movingEventId, setMovingEventId] = useState<string | null>(null)
   const [resizingEventId, setResizingEventId] = useState<string | null>(null)
-  const [resizeOverlay, setResizeOverlay] = useState<{ dayIdx: number; topPx: number; heightPx: number } | null>(null)
+  const [resizeOverlay, setResizeOverlay] = useState<Map<number, { topPx: number; heightPx: number }>>(() => new Map())
   const resizeDragActiveRef = useRef(false)
+  const resizeStateRef = useRef<{
+    origStartMs: number
+    origEndMs: number
+    side: 'top' | 'bottom'
+  } | null>(null)
 
   const queryClient = useQueryClient()
 
@@ -589,7 +566,7 @@ export function CalendarPage() {
   const { data: events = [], isLoading } = useQuery({
     queryKey: ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
     queryFn: () =>
-      eventsApi.list({
+      occurrencesApi.list({
         startFrom: rangeStart.toISOString(),
         endBefore: rangeEnd.toISOString(),
       }),
@@ -628,43 +605,55 @@ export function CalendarPage() {
     setCurrent(effectiveToday)
   }
 
-  function openFromBaseEvent(baseEvent: BaseEventSummary) {
-    setEditingEvent(undefined)
+  function openFromActivity(activity: Activity) {
+    setEditingOccurrence(undefined)
     setDefaultStartAt(undefined)
     setDefaultEndAt(undefined)
-    setDefaultBaseEvent(baseEvent)
+    setDefaultActivity(activity)
     setFocusStartAt(true)
     setModalOpen(true)
   }
 
   function openCreate(startAt?: string, endAt?: string) {
-    setDefaultBaseEvent(undefined)
-    setEditingEvent(undefined)
+    setDefaultActivity(undefined)
+    setEditingOccurrence(undefined)
     setDefaultStartAt(startAt)
     setDefaultEndAt(endAt)
     setFocusStartAt(false)
     setModalOpen(true)
   }
 
-  function openDetail(event: Event) {
-    setDetailEvent(event)
+  function openDetail(o: Occurrence) {
+    setDetailEvent(o)
     setDetailOpen(true)
   }
 
-  function openEdit(event: Event) {
-    setDefaultBaseEvent(undefined)
-    setEditingEvent(event)
+  function openEdit(o: Occurrence) {
+    setDefaultActivity(undefined)
+    setEditingOccurrence(o)
     setDefaultStartAt(undefined)
     setDefaultEndAt(undefined)
-    setFocusStartAt(!event.startAt)
+    setFocusStartAt(!o.startAt)
+    setScheduleMode(false)
+    setModalOpen(true)
+  }
+
+  function openSchedule(o: Occurrence) {
+    setDefaultActivity(undefined)
+    setEditingOccurrence(o)
+    setDefaultStartAt(undefined)
+    setDefaultEndAt(undefined)
+    setFocusStartAt(true)
+    setScheduleMode(true)
     setModalOpen(true)
   }
 
   // ── Event move drag ──────────────────────────────────────────────────────
 
-  function handleEventMoveStart(e: React.PointerEvent, event: Event, topPx: number) {
+  function handleEventMoveStart(e: React.PointerEvent, event: Occurrence, topPx: number) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
-    if (!event.startAt) return
+    const isWindowed = !!(event.windowStart && event.windowEnd)
+    if (!event.startAt && !isWindowed) return
     // Dismiss any active touch resize mode when interacting with an event body
     if (resizingEventId) {
       setResizingEventId(null)
@@ -676,9 +665,11 @@ export function CalendarPage() {
     }
     e.stopPropagation()
 
-    const durationMs = event.endAt
-      ? new Date(event.endAt).getTime() - new Date(event.startAt).getTime()
-      : 15 * 60 * 1000
+    const startMs = isWindowed ? new Date(event.windowStart!).getTime() : new Date(event.startAt!).getTime()
+    const endMs = isWindowed
+      ? new Date(event.windowEnd!).getTime()
+      : (event.endAt ? new Date(event.endAt).getTime() : startMs + 15 * 60 * 1000)
+    const durationMs = endMs - startMs
     const isTouch = e.pointerType === 'touch'
     const pointerId = e.pointerId
     const startClientX = e.clientX
@@ -717,6 +708,7 @@ export function CalendarPage() {
           topPx: (startMin / 60) * HOUR_PX,
           heightPx: Math.max((durationMin / 60) * HOUR_PX, 20),
         })
+        startAutoScroll(mv.clientX, mv.clientY)
       }
 
       function cleanup() {
@@ -724,6 +716,7 @@ export function CalendarPage() {
         window.removeEventListener('pointerup', onPointerUp)
         window.removeEventListener('pointercancel', onPointerCancel)
         document.body.style.cursor = ''
+        stopAutoScroll()
       }
 
       function onPointerUp(mu: PointerEvent) {
@@ -750,6 +743,8 @@ export function CalendarPage() {
         const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
         const newStart = snapToGrid(days[curDayIdx], anchorY)
         const newEnd = new Date(newStart.getTime() + dur)
+        const origStartMs = ev.windowStart ? new Date(ev.windowStart).getTime() : new Date(ev.startAt!).getTime()
+        if (newStart.getTime() === origStartMs) return
         rescheduleEvent(ev, newStart, newEnd)
       }
 
@@ -767,7 +762,10 @@ export function CalendarPage() {
     }
 
     if (isTouch) {
-      // Long-press (500ms) before drag activates, so normal taps/scrolls still work
+      // Long-press (500ms) before drag activates, so normal taps/scrolls still work.
+      // touch-action:pan-y on the event body means the browser only claims the touch when
+      // it detects actual vertical movement (firing pointercancel then), so a stationary
+      // hold never gets cancelled and the timer always reaches 500ms.
       let cancelled = false
       let timer: ReturnType<typeof setTimeout>
 
@@ -813,24 +811,25 @@ export function CalendarPage() {
     }
   }
 
-  function rescheduleEvent(ev: Event, newStart: Date, newEnd: Date) {
-    queryClient.setQueryData<Event[]>(
+  function rescheduleEvent(ev: Occurrence, newStart: Date, newEnd: Date) {
+    const isWindowed = !!(ev.windowStart && ev.windowEnd)
+    queryClient.setQueryData<Occurrence[]>(
       ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
-      (old) => old?.map((e) => e.id === ev.id
-        ? { ...e, startAt: newStart.toISOString(), endAt: newEnd.toISOString() }
-        : e
-      ),
+      (old) => old?.map((o) => {
+        if (o.id !== ev.id) return o
+        return isWindowed
+          ? { ...o, windowStart: newStart.toISOString(), windowEnd: newEnd.toISOString() }
+          : { ...o, startAt: newStart.toISOString(), endAt: newEnd.toISOString() }
+      }),
     )
-    eventsApi.update(ev.id, {
+    occurrencesApi.update(ev.id, {
       title: ev.title,
-      startAt: newStart.toISOString(),
-      endAt: newEnd.toISOString(),
+      startAt: isWindowed ? ev.startAt : newStart.toISOString(),
+      endAt: isWindowed ? ev.endAt : newEnd.toISOString(),
       isAllDay: ev.isAllDay,
-      windowStart: ev.windowStart,
-      windowEnd: ev.windowEnd,
+      windowStart: isWindowed ? newStart.toISOString() : ev.windowStart,
+      windowEnd: isWindowed ? newEnd.toISOString() : ev.windowEnd,
       windowDurationMinutes: ev.windowDurationMinutes,
-      goalIds: ev.goals.map((g) => g.id),
-      categoryId: ev.category?.id ?? null,
     }).finally(() => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
       queryClient.invalidateQueries({ queryKey: ['recommendations'] })
@@ -839,45 +838,35 @@ export function CalendarPage() {
 
   // ── Event resize drag ──────────────────────────────────────────────────────
 
-  function handleResizeStart(e: React.PointerEvent, event: Event, side: 'top' | 'bottom') {
-    if (!event.startAt) return
+  function handleResizeStart(e: React.PointerEvent, event: Occurrence, side: 'top' | 'bottom') {
+    const isWindowed = !!(event.windowStart && event.windowEnd)
+    if (!event.startAt && !isWindowed) return
     e.stopPropagation()
 
-    const origStartMs = new Date(event.startAt).getTime()
-    const origEndMs = event.endAt
-      ? new Date(event.endAt).getTime()
-      : origStartMs + 15 * 60 * 1000
-
-    const dayIdx = Math.max(0, days.findIndex((d) => isSameDay(d, sod(new Date(event.startAt!)))))
-    const day = days[dayIdx]
-    const dayStartMs = sod(day).getTime()
+    const origStartMs = isWindowed
+      ? new Date(event.windowStart!).getTime()
+      : new Date(event.startAt!).getTime()
+    const origEndMs = isWindowed
+      ? new Date(event.windowEnd!).getTime()
+      : (event.endAt ? new Date(event.endAt).getTime() : origStartMs + 15 * 60 * 1000)
 
     resizeDragActiveRef.current = true
+    resizeStateRef.current = { origStartMs, origEndMs, side }
     document.body.style.cursor = 'ns-resize'
 
-    function onPointerMove(mv: PointerEvent) {
-      const curY = getYInGrid(mv.clientY)
-      const snapped = snapToGrid(day, Math.max(0, Math.min(curY, HOUR_PX * 24 - 1)))
-      const snappedMs = snapped.getTime()
-
-      let topPx: number
-      let heightPx: number
-
+    function overlayForPointer(clientX: number, clientY: number): Map<number, { topPx: number; heightPx: number }> {
+      const curDay = days[Math.max(0, Math.min(getDayIdxFromX(clientX), days.length - 1))]
+      const snappedMs = snapToGrid(curDay, Math.max(0, Math.min(getYInGrid(clientY), HOUR_PX * 24 - 1))).getTime()
       if (side === 'top') {
-        const newStartMs = Math.max(dayStartMs, Math.min(snappedMs, origEndMs - 15 * 60 * 1000))
-        const startMin = (newStartMs - dayStartMs) / 60000
-        const endMin = (origEndMs - dayStartMs) / 60000
-        topPx = (startMin / 60) * HOUR_PX
-        heightPx = Math.max(((endMin - startMin) / 60) * HOUR_PX, 20)
+        return computeResizeOverlays(Math.min(snappedMs, origEndMs - 15 * 60 * 1000), origEndMs)
       } else {
-        const newEndMs = Math.max(snappedMs, origStartMs + 15 * 60 * 1000)
-        const startMin = (origStartMs - dayStartMs) / 60000
-        const endMin = (newEndMs - dayStartMs) / 60000
-        topPx = (startMin / 60) * HOUR_PX
-        heightPx = Math.max(((endMin - startMin) / 60) * HOUR_PX, 20)
+        return computeResizeOverlays(origStartMs, Math.max(snappedMs, origStartMs + 15 * 60 * 1000))
       }
+    }
 
-      setResizeOverlay({ dayIdx, topPx, heightPx })
+    function onPointerMove(mv: PointerEvent) {
+      setResizeOverlay(overlayForPointer(mv.clientX, mv.clientY))
+      startAutoScroll(mv.clientX, mv.clientY)
     }
 
     function cleanup() {
@@ -885,36 +874,39 @@ export function CalendarPage() {
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerCancel)
       resizeDragActiveRef.current = false
+      resizeStateRef.current = null
       document.body.style.cursor = ''
+      stopAutoScroll()
     }
 
     function onPointerUp(mu: PointerEvent) {
       cleanup()
-      setResizeOverlay(null)
+      setResizeOverlay(new Map())
 
+      const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
+      const curDay = days[curDayIdx]
       const curY = getYInGrid(mu.clientY)
-      const snapped = snapToGrid(day, Math.max(0, Math.min(curY, HOUR_PX * 24 - 1)))
-      const snappedMs = snapped.getTime()
+      const snappedMs = snapToGrid(curDay, Math.max(0, Math.min(curY, HOUR_PX * 24 - 1))).getTime()
 
       let newStart: Date
       let newEnd: Date
 
       if (side === 'top') {
-        const newStartMs = Math.max(dayStartMs, Math.min(snappedMs, origEndMs - 15 * 60 * 1000))
-        newStart = new Date(newStartMs)
+        newStart = new Date(Math.min(snappedMs, origEndMs - 15 * 60 * 1000))
         newEnd = new Date(origEndMs)
       } else {
-        const newEndMs = Math.max(snappedMs, origStartMs + 15 * 60 * 1000)
         newStart = new Date(origStartMs)
-        newEnd = new Date(newEndMs)
+        newEnd = new Date(Math.max(snappedMs, origStartMs + 15 * 60 * 1000))
       }
 
-      rescheduleEvent(event, newStart, newEnd)
+      if (newStart.getTime() !== origStartMs || newEnd.getTime() !== origEndMs) {
+        rescheduleEvent(event, newStart, newEnd)
+      }
     }
 
     function onPointerCancel() {
       cleanup()
-      setResizeOverlay(null)
+      setResizeOverlay(new Map())
     }
 
     window.addEventListener('pointermove', onPointerMove)
@@ -968,6 +960,24 @@ export function CalendarPage() {
       } else {
         result.set(i, { topPx: 0, heightPx: HOUR_PX * 24 })
       }
+    }
+    return result
+  }
+
+  function computeResizeOverlays(startMs: number, endMs: number): Map<number, { topPx: number; heightPx: number }> {
+    const result = new Map<number, { topPx: number; heightPx: number }>()
+    for (let i = 0; i < days.length; i++) {
+      const dayStartMs = sod(days[i]).getTime()
+      const dayEndMs = dayStartMs + 86400000
+      if (endMs <= dayStartMs || startMs >= dayEndMs) continue
+      const segStartMs = Math.max(startMs, dayStartMs)
+      const segEndMs = Math.min(endMs, dayEndMs)
+      const startMin = (segStartMs - dayStartMs) / 60000
+      const endMin = (segEndMs - dayStartMs) / 60000
+      result.set(i, {
+        topPx: (startMin / 60) * HOUR_PX,
+        heightPx: Math.max(((endMin - startMin) / 60) * HOUR_PX, 20),
+      })
     }
     return result
   }
@@ -1078,7 +1088,8 @@ export function CalendarPage() {
     const MAX_SPEED = 12
     function tick() {
       if (!autoScrollRef.current || autoScrollRef.current !== state) return
-      if (!dragRef.current?.isDrag || !scrollRef.current) { autoScrollRef.current = null; return }
+      const anyDragActive = dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current
+      if (!anyDragActive || !scrollRef.current) { autoScrollRef.current = null; return }
       const rect = scrollRef.current.getBoundingClientRect()
       const distTop = state.clientY - rect.top
       const distBot = rect.bottom - state.clientY
@@ -1087,9 +1098,32 @@ export function CalendarPage() {
       else if (distBot < ZONE && distBot >= 0) speed = MAX_SPEED * (1 - distBot / ZONE)
       if (speed !== 0) {
         scrollRef.current.scrollTop += speed
-        const endDayIdx = getDayIdxFromX(state.clientX)
-        const endY = getYInGrid(state.clientY)
-        setDragOverlays(computeOverlays(dragRef.current.startDayIdx, dragRef.current.startY, endDayIdx, endY))
+        if (dragRef.current?.isDrag) {
+          const endDayIdx = getDayIdxFromX(state.clientX)
+          const endY = getYInGrid(state.clientY)
+          setDragOverlays(computeOverlays(dragRef.current.startDayIdx, dragRef.current.startY, endDayIdx, endY))
+        } else if (eventMoveRef.current?.isDragging) {
+          const curY = getYInGrid(state.clientY)
+          const anchorY = Math.max(0, curY - eventMoveRef.current.offsetPx)
+          const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(state.clientX), days.length - 1))
+          const startSnapped = snapToGrid(days[curDayIdx], anchorY)
+          const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
+          const durationMin = eventMoveRef.current.durationMs / 60000
+          setMoveOverlay({
+            dayIdx: curDayIdx,
+            topPx: (startMin / 60) * HOUR_PX,
+            heightPx: Math.max((durationMin / 60) * HOUR_PX, 20),
+          })
+        } else if (resizeDragActiveRef.current && resizeStateRef.current) {
+          const rs = resizeStateRef.current
+          const curDay = days[Math.max(0, Math.min(getDayIdxFromX(state.clientX), days.length - 1))]
+          const snappedMs = snapToGrid(curDay, Math.max(0, Math.min(getYInGrid(state.clientY), HOUR_PX * 24 - 1))).getTime()
+          if (rs.side === 'top') {
+            setResizeOverlay(computeResizeOverlays(Math.min(snappedMs, rs.origEndMs - 15 * 60 * 1000), rs.origEndMs))
+          } else {
+            setResizeOverlay(computeResizeOverlays(rs.origStartMs, Math.max(snappedMs, rs.origStartMs + 15 * 60 * 1000)))
+          }
+        }
       }
       state.rafId = requestAnimationFrame(tick)
     }
@@ -1187,15 +1221,14 @@ export function CalendarPage() {
   }
 
   const allDayEvents = events.filter((e) => e.isAllDay && e.startAt)
-  const windowedEvents = events.filter((e) => e.windowStart && e.windowEnd)
-  const timedEvents = events.filter((e) => !e.isAllDay && !e.windowStart)
+  const calendarEvents = events.filter((e) => !e.isAllDay)
 
   return (
     <div className="flex flex-1 overflow-hidden">
       <RecommendationPanel
         date={formatDateInput(effectiveToday)}
-        onEventClick={openEdit}
-        onBaseEventClick={openFromBaseEvent}
+        onOccurrenceClick={openEdit}
+        onActivityClick={openFromActivity}
         mobileOpen={drawerOpen}
         onMobileClose={() => setDrawerOpen(false)}
       />
@@ -1287,7 +1320,7 @@ export function CalendarPage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           {/* Multi-day headers + all-day row — sticky, inside scroll container to share column widths */}
           {view !== 'day' && (
-            <div className="sticky top-0 z-10 bg-background">
+            <div className="sticky top-0 z-40 bg-background">
               <div className="flex border-b border-border">
                 <div className="w-12 shrink-0" />
                 {days.map((day) => (
@@ -1312,7 +1345,7 @@ export function CalendarPage() {
                       <div key={day.toISOString()} className={`flex flex-1 flex-col gap-0.5 px-0.5 py-0.5 ${idx === 0 ? 'border-l border-border' : 'border-l border-border'}`}>
                         {dayAll.map((e) => (
                           <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e).className}`} style={eventAllDayColors(e).style}>
-                            {e.title}
+                            {e.effectiveTitle}
                           </button>
                         ))}
                       </div>
@@ -1325,7 +1358,7 @@ export function CalendarPage() {
 
           {/* Day view all-day row */}
           {view === 'day' && allDayEvents.some((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 }) && (
-            <div className="sticky top-0 z-10 flex border-b border-border bg-background">
+            <div className="sticky top-0 z-40 flex border-b border-border bg-background">
               <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
                 <span className="select-none text-[9px] leading-tight text-muted-foreground">all{'\n'}day</span>
               </div>
@@ -1333,8 +1366,8 @@ export function CalendarPage() {
                 {allDayEvents
                   .filter((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 })
                   .map((e) => (
-                    <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e)}`}>
-                      {e.title}
+                    <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e).className}`} style={eventAllDayColors(e).style}>
+                      {e.effectiveTitle}
                     </button>
                   ))}
               </div>
@@ -1369,12 +1402,11 @@ export function CalendarPage() {
                 <DayColumn
                   key={day.toISOString()}
                   day={day}
-                  allEvents={timedEvents}
-                  windowedEvents={windowedEvents}
+                  allEvents={calendarEvents}
                   onEventClick={openDetail}
                   overlay={dragOverlays.get(idx) ?? null}
                   moveOverlay={moveOverlay?.dayIdx === idx ? { topPx: moveOverlay.topPx, heightPx: moveOverlay.heightPx } : null}
-                  resizeOverlay={resizeOverlay?.dayIdx === idx ? { topPx: resizeOverlay.topPx, heightPx: resizeOverlay.heightPx } : null}
+                  resizeOverlay={resizeOverlay.get(idx) ?? null}
                   isToday={isSameDay(day, effectiveToday)}
                   borderLeft={idx === 0 || view !== 'day'}
                   onEventMoveStart={handleEventMoveStart}
@@ -1395,18 +1427,20 @@ export function CalendarPage() {
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
         event={detailEvent}
-        onEdit={(ev) => { setDetailOpen(false); openEdit(ev) }}
+        onEdit={(o) => { setDetailOpen(false); openEdit(o) }}
+        onSchedule={(o) => { setDetailOpen(false); openSchedule(o) }}
       />
 
       <EventModal
-        key={editingEvent?.id ?? defaultStartAt ?? defaultBaseEvent?.id ?? 'new'}
+        key={`${editingOccurrence?.id ?? defaultStartAt ?? defaultActivity?.id ?? 'new'}-${scheduleMode}`}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        event={editingEvent}
+        occurrence={editingOccurrence}
         focusStartAt={focusStartAt}
         defaultStartAt={defaultStartAt}
         defaultEndAt={defaultEndAt}
-        defaultBaseEvent={defaultBaseEvent}
+        defaultActivity={defaultActivity}
+        defaultMode={scheduleMode ? 'scheduled' : undefined}
       />
     </div>
   )

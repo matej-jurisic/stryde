@@ -50,6 +50,12 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .Property(g => g.Status)
             .HasConversion<string>();
 
+        modelBuilder.Entity<Goal>()
+            .HasOne(g => g.Category)
+            .WithMany()
+            .HasForeignKey(g => g.CategoryId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         modelBuilder.Entity<Checkpoint>()
             .Property(c => c.Status)
             .HasConversion<string>();

@@ -2,13 +2,13 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { CalendarPlus, Sparkles, X } from 'lucide-react'
 import { recommendationsApi } from '@/lib/api'
-import type { BaseEventSummary, Event, GoalStatus, Recommendation } from '@/lib/types'
+import type { Activity, GoalStatus, Occurrence, Recommendation } from '@/lib/types'
 import { Badge } from '@/components/ui/Badge'
 
 interface RecommendationPanelProps {
   date: string
-  onEventClick: (event: Event) => void
-  onBaseEventClick: (baseEvent: BaseEventSummary) => void
+  onOccurrenceClick: (o: Occurrence) => void
+  onActivityClick: (a: Activity) => void
   mobileOpen?: boolean
   onMobileClose?: () => void
 }
@@ -26,10 +26,10 @@ function goalTone(status: GoalStatus): 'focus' | 'active' | 'bench' {
   return 'bench'
 }
 
-function formatDuration(event: Event): string | null {
-  if (!event.startAt || !event.endAt) return null
+function formatDuration(o: Occurrence): string | null {
+  if (!o.startAt || !o.endAt) return null
   const mins = Math.round(
-    (new Date(event.endAt).getTime() - new Date(event.startAt).getTime()) / 60000,
+    (new Date(o.endAt).getTime() - new Date(o.startAt).getTime()) / 60000,
   )
   if (mins <= 0) return null
   if (mins < 60) return `${mins}m`
@@ -38,33 +38,30 @@ function formatDuration(event: Event): string | null {
   return m === 0 ? `${h}h` : `${h}h ${m}m`
 }
 
-function EventRecItem({ event, onSchedule }: { event: Event; onSchedule: () => void }) {
-  const primaryGoal =
-    event.goals.find((g) => g.status === 'focus') ??
-    event.goals.find((g) => g.status === 'active') ??
-    event.goals[0]
-  const duration = formatDuration(event)
+function OccurrenceRecItem({ occurrence, onSchedule }: { occurrence: Occurrence; onSchedule: () => void }) {
+  const goal = occurrence.activity.goal
+  const duration = formatDuration(occurrence)
 
   return (
     <li className="group flex items-start gap-2 rounded-lg border border-transparent px-2 py-2.5 transition-colors hover:border-border hover:bg-muted/40">
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <p className="truncate text-sm text-foreground">{event.title}</p>
+          <p className="truncate text-sm text-foreground">{occurrence.effectiveTitle}</p>
           {duration && (
             <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{duration}</span>
           )}
         </div>
-        {primaryGoal && (
+        {goal && (
           <div className="mt-1.5">
-            <Badge tone={goalTone(primaryGoal.status)} className="max-w-[160px] truncate block">
-              {primaryGoal.title}
+            <Badge tone={goalTone(goal.status)} className="max-w-[160px] truncate block">
+              {goal.title}
             </Badge>
           </div>
         )}
       </div>
       <button
         onClick={onSchedule}
-        title={event.startAt ? 'Edit event' : 'Schedule event'}
+        title={occurrence.startAt ? 'Edit occurrence' : 'Schedule occurrence'}
         className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary"
       >
         <CalendarPlus className="h-4 w-4" />
@@ -73,22 +70,22 @@ function EventRecItem({ event, onSchedule }: { event: Event; onSchedule: () => v
   )
 }
 
-function BaseEventRecItem({ baseEvent, onCreate }: { baseEvent: BaseEventSummary; onCreate: () => void }) {
+function ActivityRecItem({ activity, onCreate }: { activity: Activity; onCreate: () => void }) {
   return (
     <li className="group flex items-start gap-2 rounded-lg border border-transparent px-2 py-2.5 transition-colors hover:border-border hover:bg-muted/40">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-foreground">{baseEvent.title}</p>
-        {baseEvent.goal && (
+        <p className="truncate text-sm text-foreground">{activity.title}</p>
+        {activity.goal && (
           <div className="mt-1.5">
-            <Badge tone={goalTone(baseEvent.goal.status)} className="max-w-[160px] truncate block">
-              {baseEvent.goal.title}
+            <Badge tone={goalTone(activity.goal.status)} className="max-w-[160px] truncate block">
+              {activity.goal.title}
             </Badge>
           </div>
         )}
       </div>
       <button
         onClick={onCreate}
-        title="Create event from habit"
+        title="Create occurrence from habit"
         className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary"
       >
         <CalendarPlus className="h-4 w-4" />
@@ -97,7 +94,7 @@ function BaseEventRecItem({ baseEvent, onCreate }: { baseEvent: BaseEventSummary
   )
 }
 
-export function RecommendationPanel({ date, onEventClick, onBaseEventClick, mobileOpen, onMobileClose }: RecommendationPanelProps) {
+export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, mobileOpen, onMobileClose }: RecommendationPanelProps) {
   const { data: recommendations = [], isLoading } = useQuery({
     queryKey: ['recommendations', date],
     queryFn: () => recommendationsApi.list(date),
@@ -146,17 +143,17 @@ export function RecommendationPanel({ date, onEventClick, onBaseEventClick, mobi
         </div>
         <ul className="flex flex-col gap-0.5">
           {group.items.map((rec, i) =>
-            rec.type === 'event' ? (
-              <EventRecItem
-                key={rec.event.id}
-                event={rec.event}
-                onSchedule={() => onEventClick(rec.event)}
+            rec.type === 'occurrence' ? (
+              <OccurrenceRecItem
+                key={rec.occurrence.id}
+                occurrence={rec.occurrence}
+                onSchedule={() => onOccurrenceClick(rec.occurrence)}
               />
             ) : (
-              <BaseEventRecItem
-                key={rec.baseEvent.id + i}
-                baseEvent={rec.baseEvent}
-                onCreate={() => onBaseEventClick(rec.baseEvent)}
+              <ActivityRecItem
+                key={rec.activity.id + i}
+                activity={rec.activity}
+                onCreate={() => onActivityClick(rec.activity)}
               />
             )
           )}

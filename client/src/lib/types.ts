@@ -36,7 +36,9 @@ export interface Goal {
   title: string
   description: string | null
   status: GoalStatus
+  categoryId: string | null
   createdAt: string
+  category: CategorySummary | null
   checkpoints: Checkpoint[]
 }
 
@@ -56,10 +58,23 @@ export interface Category {
   createdAt: string
 }
 
-export interface Event {
+export interface Activity {
   id: string
   userId: string
   title: string
+  categoryId: string | null
+  goalId: string | null
+  createdAt: string
+  category: CategorySummary | null
+  goal: GoalSummary | null
+}
+
+export interface Occurrence {
+  id: string
+  userId: string
+  activityId: string
+  title: string | null
+  effectiveTitle: string
   startAt: string | null
   endAt: string | null
   status: EventStatus
@@ -70,21 +85,12 @@ export interface Event {
   repeatRuleId: string | null
   createdAt: string
   isOverdue: boolean
-  goals: GoalSummary[]
-  category: CategorySummary | null
-}
-
-export interface BaseEventSummary {
-  id: string
-  goalId: string | null
-  title: string
-  category: CategorySummary | null
-  goal: GoalSummary | null
+  activity: Activity
 }
 
 export type Recommendation =
-  | { tier: number; type: 'event'; event: Event; baseEvent: null }
-  | { tier: number; type: 'base_event'; event: null; baseEvent: BaseEventSummary }
+  | { tier: number; type: 'occurrence'; occurrence: Occurrence; activity: null }
+  | { tier: number; type: 'activity'; occurrence: null; activity: Activity }
 
 export interface UserSettings {
   userId: string

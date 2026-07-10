@@ -64,7 +64,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             .Where(o => o.UserId == userId);
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
-        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.WindowStart == null);
+        if (floatingOnly) query = query.Where(o => o.StartAt == null);
 
         var all = await query.ToListAsync();
 

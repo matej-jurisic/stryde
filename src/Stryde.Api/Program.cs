@@ -70,12 +70,12 @@ app.UseAuthorization();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapAuthEndpoints();
 app.MapGoalEndpoints();
-app.MapEventEndpoints();
+app.MapActivityEndpoints();
+app.MapOccurrenceEndpoints();
 app.MapCheckpointEndpoints();
 app.MapSettingsEndpoints();
 app.MapRecommendationEndpoints();
 app.MapCategoryEndpoints();
-app.MapBaseEventEndpoints();
 
 app.MapFallbackToFile("index.html");
 

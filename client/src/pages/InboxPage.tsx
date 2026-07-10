@@ -2,10 +2,9 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock, Menu, Inbox } from 'lucide-react'
-import { eventsApi, categoriesApi } from '@/lib/api'
-import type { Category, Event, EventStatus } from '@/lib/types'
+import { occurrencesApi, categoriesApi } from '@/lib/api'
+import type { Category, Occurrence, EventStatus } from '@/lib/types'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
-import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { EventModal } from '@/components/events/EventModal'
 import { CategoryModal } from '@/components/categories/CategoryModal'
@@ -17,39 +16,54 @@ function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate())
 }
 
-function formatEventDate(startAt: string, endAt: string | null): string {
-  const start = new Date(startAt)
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
+function formatDuration(minutes: number | null): string {
+  if (!minutes) return ''
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h > 0 && m > 0) return `${h}h ${m}m`
+  if (h > 0) return `${h}h`
+  return `${m}m`
+}
+
+function getDayLabel(iso: string): string {
+  const d = new Date(iso)
   const now = new Date()
   const todayStart = startOfDay(now)
   const tomorrowStart = new Date(todayStart.getTime() + 86400000)
-  const dayStart = startOfDay(start)
+  const dayStart = startOfDay(d)
+  if (dayStart.getTime() === todayStart.getTime()) return 'Today'
+  if (dayStart.getTime() === tomorrowStart.getTime()) return 'Tomorrow'
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
-  let dayLabel: string
-  if (dayStart.getTime() === todayStart.getTime()) {
-    dayLabel = 'Today'
-  } else if (dayStart.getTime() === tomorrowStart.getTime()) {
-    dayLabel = 'Tomorrow'
-  } else {
-    dayLabel = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+function formatOccurrenceDate(o: Occurrence): string {
+  if (o.windowStart) {
+    const dayLabel = getDayLabel(o.windowStart)
+    const range = o.windowEnd
+      ? `${formatTime(o.windowStart)} - ${formatTime(o.windowEnd)}`
+      : formatTime(o.windowStart)
+    const dur = formatDuration(o.windowDurationMinutes)
+    return dur ? `${dayLabel}, ${range} · ~${dur}` : `${dayLabel}, ${range}`
   }
-
-  const timeStr = start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  if (endAt) {
-    const end = new Date(endAt)
-    const endTime = end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-    return `${dayLabel}, ${timeStr} - ${endTime}`
-  }
+  if (!o.startAt) return ''
+  const dayLabel = getDayLabel(o.startAt)
+  const timeStr = formatTime(o.startAt)
+  if (o.endAt) return `${dayLabel}, ${timeStr} - ${formatTime(o.endAt)}`
   return `${dayLabel}, ${timeStr}`
 }
 
 type Group = 'overdue' | 'today' | 'floating' | 'upcoming' | 'done'
 
-function classify(e: Event): Group {
-  if (e.status !== 'pending') return 'done'
-  if (!e.startAt) return 'floating'
-  if (e.isOverdue) return 'overdue'
+function classify(o: Occurrence): Group {
+  if (o.status !== 'pending') return 'done'
+  if (!o.startAt) return 'floating'
+  if (o.isOverdue) return 'overdue'
 
-  const start = new Date(e.startAt)
+  const start = new Date(o.startAt)
   const todayStart = startOfDay(new Date())
   const tomorrowStart = new Date(todayStart.getTime() + 86400000)
 
@@ -70,16 +84,16 @@ const GROUP_LABELS: Record<Group, string> = {
 // --- row component ---
 
 interface InboxRowProps {
-  event: Event
-  onEdit: (e: Event) => void
-  onSchedule: (e: Event) => void
+  occurrence: Occurrence
+  onEdit: (o: Occurrence) => void
+  onSchedule: (o: Occurrence) => void
 }
 
-function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
+function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
   const qc = useQueryClient()
 
   const statusMutation = useMutation({
-    mutationFn: (status: EventStatus) => eventsApi.setStatus(event.id, status),
+    mutationFn: (status: EventStatus) => occurrencesApi.setStatus(occurrence.id, status),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
@@ -87,15 +101,17 @@ function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: () => eventsApi.delete(event.id),
+    mutationFn: () => occurrencesApi.delete(occurrence.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
   })
 
-  const isPending = event.status === 'pending'
-  const isFloating = !event.startAt
+  const isPending = occurrence.status === 'pending'
+  const isFloating = !occurrence.startAt
+  const category = occurrence.activity.category
+  const goal = occurrence.activity.goal
 
   return (
     <li className="group flex items-center gap-3 border-b border-border bg-card px-5 py-3 last:border-b-0 hover:bg-muted/40 transition-colors">
@@ -103,38 +119,38 @@ function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
       <button
         onClick={() => isPending && statusMutation.mutate('done')}
         className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border transition-colors ${
-          event.status === 'done'
+          occurrence.status === 'done'
             ? 'border-primary bg-primary text-primary-foreground'
-            : event.status === 'skipped'
+            : occurrence.status === 'skipped'
               ? 'border-dashed border-muted-foreground text-muted-foreground'
               : 'border-border bg-background hover:border-primary'
         }`}
       >
-        {event.status === 'done' && <Check className="h-3 w-3" strokeWidth={3} />}
-        {event.status === 'skipped' && <X className="h-3 w-3" strokeWidth={3} />}
+        {occurrence.status === 'done' && <Check className="h-3 w-3" strokeWidth={3} />}
+        {occurrence.status === 'skipped' && <X className="h-3 w-3" strokeWidth={3} />}
       </button>
 
       {/* Title + meta */}
       <div className="min-w-0 flex-1">
-        <span className={`text-sm ${event.status !== 'pending' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-          {event.title}
+        <span className={`text-sm ${occurrence.status !== 'pending' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+          {occurrence.effectiveTitle}
         </span>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-          {event.startAt && (
+          {(occurrence.startAt || occurrence.windowStart) && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="h-3 w-3" strokeWidth={2} />
-              {formatEventDate(event.startAt, event.endAt)}
+              {formatOccurrenceDate(occurrence)}
             </span>
           )}
-          {event.category && (
+          {category && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <CategoryIcon icon={event.category.icon} color={event.category.color} size={11} strokeWidth={2} />
-              {event.category.name}
+              <CategoryIcon icon={category.icon} color={category.color} size={11} strokeWidth={2} />
+              {category.name}
             </span>
           )}
-          {event.goals.map((g) => (
-            <Badge key={g.id} tone="focus">{g.title}</Badge>
-          ))}
+          {goal && (
+            <Badge key={goal.id} tone="focus">{goal.title}</Badge>
+          )}
         </div>
       </div>
 
@@ -151,7 +167,7 @@ function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
             </button>
             {isFloating && (
               <button
-                onClick={() => onSchedule(event)}
+                onClick={() => onSchedule(occurrence)}
                 title="Schedule"
                 className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-primary"
               >
@@ -161,7 +177,7 @@ function InboxRow({ event, onEdit, onSchedule }: InboxRowProps) {
           </>
         )}
         <button
-          onClick={() => onEdit(event)}
+          onClick={() => onEdit(occurrence)}
           title="Edit"
           className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
@@ -188,16 +204,16 @@ export function InboxPage() {
   const qc = useQueryClient()
 
   const [modalOpen, setModalOpen] = useState(false)
-  const [editingEvent, setEditingEvent] = useState<Event | undefined>()
+  const [editingOccurrence, setEditingOccurrence] = useState<Occurrence | undefined>()
   const [scheduleMode, setScheduleMode] = useState(false)
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [catModalOpen, setCatModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | undefined>()
 
-  const { data: events = [], isLoading } = useQuery({
+  const { data: occurrences = [], isLoading } = useQuery({
     queryKey: ['events', 'all'],
-    queryFn: () => eventsApi.list(),
+    queryFn: () => occurrencesApi.list(),
   })
 
   const { data: categories = [] } = useQuery({
@@ -235,33 +251,32 @@ export function InboxPage() {
   }
 
   const activeCategory = categoryId ? categories.find((c) => c.id === categoryId) : null
-  const visibleEvents = categoryId
-    ? events.filter((e) => e.category?.id === categoryId)
-    : events.filter((e) => !e.category)
+  const visibleOccurrences = categoryId
+    ? occurrences.filter((o) => o.activity.category?.id === categoryId)
+    : occurrences.filter((o) => !o.activity.category)
 
   function openCreate() {
-    setEditingEvent(undefined)
+    setEditingOccurrence(undefined)
     setScheduleMode(false)
     setModalOpen(true)
   }
 
-  function openEdit(event: Event) {
-    setEditingEvent(event)
+  function openEdit(o: Occurrence) {
+    setEditingOccurrence(o)
     setScheduleMode(false)
     setModalOpen(true)
   }
 
-  function openSchedule(event: Event) {
-    setEditingEvent(event)
+  function openSchedule(o: Occurrence) {
+    setEditingOccurrence(o)
     setScheduleMode(true)
     setModalOpen(true)
   }
 
-  const groups = new Map<Group, Event[]>()
+  const groups = new Map<Group, Occurrence[]>()
   for (const g of GROUP_ORDER) groups.set(g, [])
-  for (const e of visibleEvents) groups.get(classify(e))!.push(e)
+  for (const o of visibleOccurrences) groups.get(classify(o))!.push(o)
 
-  // sort each group
   for (const [key, list] of groups) {
     if (key === 'floating' || key === 'done') continue
     list.sort((a, b) => {
@@ -271,7 +286,7 @@ export function InboxPage() {
     })
   }
 
-  const hasAny = visibleEvents.length > 0
+  const hasAny = visibleOccurrences.length > 0
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -299,10 +314,13 @@ export function InboxPage() {
           </button>
         }
         action={
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" strokeWidth={2.5} />
-            New Event
-          </Button>
+          <button
+            onClick={openCreate}
+            className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+            New
+          </button>
         }
       />
 
@@ -323,9 +341,15 @@ export function InboxPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-foreground">Inbox is empty</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">All your events will appear here.</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">All your occurrences will appear here.</p>
               </div>
-              <Button size="sm" onClick={openCreate}>New Event</Button>
+              <button
+                onClick={openCreate}
+                className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                New
+              </button>
             </div>
           ) : (
             <div className="flex flex-col gap-4">
@@ -341,8 +365,8 @@ export function InboxPage() {
                       </p>
                     <div className="overflow-hidden rounded-lg border border-border">
                       <ul>
-                        {list.map((e) => (
-                          <InboxRow key={e.id} event={e} onEdit={openEdit} onSchedule={openSchedule} />
+                        {list.map((o) => (
+                          <InboxRow key={o.id} occurrence={o} onEdit={openEdit} onSchedule={openSchedule} />
                         ))}
                       </ul>
                     </div>
@@ -355,10 +379,10 @@ export function InboxPage() {
       </div>
 
       <EventModal
-        key={editingEvent?.id ?? 'new'}
+        key={editingOccurrence?.id ?? 'new'}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        event={editingEvent}
+        occurrence={editingOccurrence}
         focusStartAt={scheduleMode}
       />
 
@@ -372,12 +396,10 @@ export function InboxPage() {
       {/* Mobile category drawer */}
       {drawerOpen && (
         <div className="md:hidden fixed inset-0 z-40 flex">
-          {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setDrawerOpen(false)}
           />
-          {/* Panel */}
           <div className="relative z-10 flex w-64 flex-col bg-background border-r border-border">
             <div className="flex items-center justify-between px-4 py-4 border-b border-border">
               <span className="text-sm font-semibold text-foreground">Categories</span>
@@ -390,7 +412,6 @@ export function InboxPage() {
             </div>
 
             <nav className="flex-1 overflow-y-auto px-3 py-2">
-              {/* Inbox item */}
               <Link
                 to="/inbox"
                 onClick={() => setDrawerOpen(false)}
@@ -411,7 +432,6 @@ export function InboxPage() {
 
               {categories.length > 0 && <div className="my-2 border-t border-border" />}
 
-              {/* Category items */}
               {categories.map((cat) => {
                 const active = categoryId === cat.id
                 return (
@@ -446,7 +466,6 @@ export function InboxPage() {
                 )
               })}
 
-              {/* Add category */}
               <button
                 onClick={() => { openAddCat(); setDrawerOpen(false) }}
                 className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"

@@ -18,7 +18,7 @@ Keep `CLAUDE.md` small: it is a navigation and convention guide, not a product s
 
 ## What this is
 
-Personal operations app built around three primitives: **Events**, **Goals**, and the **Daily Plan**. Single-user initially; schema and auth are multi-user-ready from day one.
+Personal operations app built around three primitives: **Activities**, **Goals**, and the **Daily Plan**. Single-user initially; schema and auth are multi-user-ready from day one.
 
 ## Stack & layout
 
@@ -53,14 +53,16 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Backend (`Stryde.Core`)**
 - `Entities/` — POCOs; `Guid Id = Guid.NewGuid()` + `DateTimeOffset CreatedAt`, no base class.
-  Key entities: `User, Event, BaseEvent, Goal, Checkpoint, RepeatRule, EventGoal (join), UserSettings`.
+  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, RepeatRule, UserSettings`.
 - `Enums/` — stored as strings (`HasConversion<string>`).
-- `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. Many-to-many via skip nav (`Event.Goals`).
+- `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. `Occurrence → Activity` cascade delete; `Activity → Category/Goal` set-null.
 - `Common/Result.cs` — `Result`/`Result<T>` + `Error(ErrorType, msg)`. **Expected failures = Results, not exceptions.**
 - `Common/Validators.cs` — shared static validation rules.
 - `Common/DayMath.cs` — all "which day / is this overdue?" logic goes through here, in the user's IANA
   timezone offset by `DayBoundaryTime`. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
+  Key methods: `OccurrenceDay(Occurrence, DayContext)`, `IsOverdue(Occurrence, DayContext, DateTimeOffset)`.
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
+  Key DTOs: `ActivityDto`, `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`), `RecommendationDto` (discriminated: `type: 'occurrence' | 'activity'`).
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
 - ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
 
@@ -70,13 +72,14 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   Both `JwtSecurityTokenHandler.DefaultMapInboundClaims = false` and `options.MapInboundClaims = false`
   must be set — the static property alone is not enough.
 - `Endpoints/*Endpoints.cs` — thin: parse → service → `result.ToProblem()`. Auth required on all routes except `/api/auth/*`.
+  Key endpoint files: `ActivityEndpoints.cs` (`/api/activities`), `OccurrenceEndpoints.cs` (`/api/occurrences`).
 - `Endpoints/ApiResults.cs` — `Error.ToProblem()` + `principal.GetUserId()` (reads `sub` claim).
 
 **Frontend (`client/src`)**
 - `App.tsx` — auth-gated routing; index → `/plan`.
-- `pages/` — `PlanPage` (stub), `InboxPage`, `CalendarPage`, `GoalsPage`, `SettingsPage`.
-- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh).
-- `lib/types.ts` — mirrors backend DTOs.
+- `pages/` — `PlanPage`, `InboxPage`, `CalendarPage`, `GoalsPage`, `ActivitiesPage`, `SettingsPage`.
+- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`.
+- `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Recommendation` (discriminated union).
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
 - `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field`.
@@ -103,13 +106,13 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - **Enums as strings** in DB and on the frontend.
 - **Theming:** semantic CSS variables in `index.css` → Tailwind via `@theme inline`. Never hardcode
   `bg-slate-*` / `text-*-600`. Dark mode = `.dark` on `<html>`, controlled by `lib/theme.ts`.
-- **Day math is server-side.** The client consumes `event.isOverdue`; it never recomputes overdue
+- **Day math is server-side.** The client consumes `occurrence.isOverdue`; it never recomputes overdue
   locally. Purely presentational date formatting may stay client-side.
 - **Frontend:** `verbatimModuleSyntax` — use `import type` for type-only imports. TanStack Query for
   server state; Zustand for auth (access token in memory).
-- **Query keys:** every event list lives under `['events', ...]` (`['events', 'all']` for Inbox + nav
-  badge, `['events', 'calendar', ...]` for calendar ranges). After any event write invalidate `['events']`
-  and `['recommendations']`. After any goal write also invalidate `['goals']`.
+- **Query keys:** every occurrence list lives under `['events', ...]` (`['events', 'all']` for Inbox + nav
+  badge, `['events', 'calendar', ...]` for calendar ranges). After any occurrence write invalidate `['events']`
+  and `['recommendations']`. After any activity write invalidate `['activities']`. After any goal write also invalidate `['goals']`.
 - **Design:** see `design.md`. Use semantic color tokens, not hardcoded values.
 
 ## Gotchas

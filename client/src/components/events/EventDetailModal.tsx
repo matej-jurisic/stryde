@@ -1,19 +1,30 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, X, Pencil, Trash2, Clock } from 'lucide-react'
+import { Check, X, Pencil, Trash2, Clock, CalendarPlus } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
-import { eventsApi } from '@/lib/api'
-import type { Event, EventStatus } from '@/lib/types'
+import { occurrencesApi } from '@/lib/api'
+import type { Occurrence, EventStatus } from '@/lib/types'
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
-function formatEventTime(event: Event): string {
-  if (!event.startAt) return ''
-  const d = new Date(event.startAt)
+function formatDuration(minutes: number | null): string {
+  if (!minutes) return ''
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h > 0 && m > 0) return `${h}h ${m}m`
+  if (h > 0) return `${h}h`
+  return `${m}m`
+}
+
+function formatOccurrenceTime(o: Occurrence): string {
+  const refIso = o.windowStart ?? o.startAt
+  if (!refIso) return ''
+
+  const d = new Date(refIso)
   const today = new Date()
   const tomorrow = new Date(today)
   tomorrow.setDate(today.getDate() + 1)
@@ -26,8 +37,16 @@ function formatEventTime(event: Event): string {
   else if (sameDay(d, tomorrow)) dateLabel = 'Tomorrow'
   else dateLabel = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 
-  const timeStr = formatTime(event.startAt)
-  if (event.endAt) return `${dateLabel}, ${timeStr} - ${formatTime(event.endAt)}`
+  if (o.windowStart) {
+    const range = o.windowEnd
+      ? `${formatTime(o.windowStart)} - ${formatTime(o.windowEnd)}`
+      : formatTime(o.windowStart)
+    const dur = formatDuration(o.windowDurationMinutes)
+    return dur ? `${dateLabel}, ${range} · ~${dur}` : `${dateLabel}, ${range}`
+  }
+
+  const timeStr = formatTime(o.startAt!)
+  if (o.endAt) return `${dateLabel}, ${timeStr} - ${formatTime(o.endAt)}`
   return `${dateLabel}, ${timeStr}`
 }
 
@@ -41,15 +60,16 @@ const GOAL_TONE: Record<string, 'focus' | 'active' | 'bench' | 'neutral'> = {
 interface EventDetailModalProps {
   open: boolean
   onClose: () => void
-  event: Event | null
-  onEdit: (event: Event) => void
+  event: Occurrence | null
+  onEdit: (o: Occurrence) => void
+  onSchedule?: (o: Occurrence) => void
 }
 
-export function EventDetailModal({ open, onClose, event, onEdit }: EventDetailModalProps) {
+export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onSchedule }: EventDetailModalProps) {
   const qc = useQueryClient()
 
   const statusMutation = useMutation({
-    mutationFn: (status: EventStatus) => eventsApi.setStatus(event!.id, status),
+    mutationFn: (status: EventStatus) => occurrencesApi.setStatus(occurrence!.id, status),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
@@ -58,10 +78,10 @@ export function EventDetailModal({ open, onClose, event, onEdit }: EventDetailMo
   })
 
   const deleteMutation = useMutation({
-    mutationFn: () => eventsApi.delete(event!.id),
+    mutationFn: () => occurrencesApi.delete(occurrence!.id),
     onSuccess: () => {
-      qc.setQueriesData<Event[]>({ queryKey: ['events'] }, (old) =>
-        old ? old.filter((e) => e.id !== event!.id) : old,
+      qc.setQueriesData<Occurrence[]>({ queryKey: ['events'] }, (old) =>
+        old ? old.filter((o) => o.id !== occurrence!.id) : old,
       )
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
@@ -69,20 +89,21 @@ export function EventDetailModal({ open, onClose, event, onEdit }: EventDetailMo
     },
   })
 
-  if (!event) return null
+  if (!occurrence) return null
 
-  const isPending = event.status === 'pending'
+  const isPending = occurrence.status === 'pending'
   const busy = statusMutation.isPending || deleteMutation.isPending
-  const timeLabel = formatEventTime(event)
+  const timeLabel = formatOccurrenceTime(occurrence)
+  const category = occurrence.activity.category
+  const goal = occurrence.activity.goal
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={event.title}
+      title={occurrence.effectiveTitle}
       footer={
         <>
-          {/* Delete — icon only, destructive, pinned left */}
           <button
             onClick={() => deleteMutation.mutate()}
             disabled={busy}
@@ -94,9 +115,8 @@ export function EventDetailModal({ open, onClose, event, onEdit }: EventDetailMo
               : <Trash2 className="h-4 w-4" strokeWidth={2} />}
           </button>
 
-          {/* Edit — icon only */}
           <button
-            onClick={() => { onClose(); onEdit(event) }}
+            onClick={() => { onClose(); onEdit(occurrence) }}
             disabled={busy}
             aria-label="Edit"
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
@@ -104,9 +124,19 @@ export function EventDetailModal({ open, onClose, event, onEdit }: EventDetailMo
             <Pencil className="h-4 w-4" strokeWidth={2} />
           </button>
 
+          {isPending && occurrence.windowStart && onSchedule && (
+            <button
+              onClick={() => { onClose(); onSchedule(occurrence) }}
+              disabled={busy}
+              aria-label="Schedule"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            >
+              <CalendarPlus className="h-4 w-4" strokeWidth={2} />
+            </button>
+          )}
+
           {isPending && (
             <>
-              {/* Skip — icon only */}
               <button
                 onClick={() => statusMutation.mutate('skipped')}
                 disabled={busy}
@@ -118,7 +148,6 @@ export function EventDetailModal({ open, onClose, event, onEdit }: EventDetailMo
                   : <X className="h-4 w-4" strokeWidth={2.5} />}
               </button>
 
-              {/* Done — keeps text, it's the primary action */}
               <Button
                 onClick={() => statusMutation.mutate('done')}
                 loading={statusMutation.isPending && statusMutation.variables === 'done'}
@@ -140,25 +169,23 @@ export function EventDetailModal({ open, onClose, event, onEdit }: EventDetailMo
           </div>
         )}
 
-        {event.category && (
+        {category && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <CategoryIcon icon={event.category.icon} color={event.category.color} size={16} strokeWidth={2} />
-            {event.category.name}
+            <CategoryIcon icon={category.icon} color={category.color} size={16} strokeWidth={2} />
+            {category.name}
           </div>
         )}
 
-        {event.goals.length > 0 && (
+        {goal && (
           <div className="flex flex-wrap gap-1.5">
-            {event.goals.map((g) => (
-              <Badge key={g.id} tone={GOAL_TONE[g.status] ?? 'neutral'}>{g.title}</Badge>
-            ))}
+            <Badge tone={GOAL_TONE[goal.status] ?? 'neutral'}>{goal.title}</Badge>
           </div>
         )}
 
-        {event.status !== 'pending' && (
+        {occurrence.status !== 'pending' && (
           <div className="flex items-center gap-2">
-            <Badge tone={event.status === 'done' ? 'green' : 'neutral'}>
-              {event.status === 'done' ? 'Completed' : 'Skipped'}
+            <Badge tone={occurrence.status === 'done' ? 'green' : 'neutral'}>
+              {occurrence.status === 'done' ? 'Completed' : 'Skipped'}
             </Badge>
           </div>
         )}

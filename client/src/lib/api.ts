@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl } from './server-config'
-import type { AuthResponse, User, Goal, GoalStatus, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Event, BaseEventSummary } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, Occurrence } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -60,28 +60,44 @@ export async function request<T>(path: string, init: RequestInit = {}, retry = t
   return body as T
 }
 
-export const eventsApi = {
+export const activitiesApi = {
+  list: (params?: { goalId?: string }) => {
+    const q = new URLSearchParams()
+    if (params?.goalId) q.set('goalId', params.goalId)
+    return request<Activity[]>(`/api/activities${q.size ? `?${q}` : ''}`)
+  },
+
+  create: (body: { title: string; categoryId?: string | null; goalId?: string | null }) =>
+    request<Activity>('/api/activities', { method: 'POST', body: JSON.stringify(body) }),
+
+  update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null }) =>
+    request<Activity>(`/api/activities/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  delete: (id: string) => request<void>(`/api/activities/${id}`, { method: 'DELETE' }),
+}
+
+export const occurrencesApi = {
   list: (params?: { status?: string; startFrom?: string; endBefore?: string; floating?: boolean }) => {
     const q = new URLSearchParams()
     if (params?.status) q.set('status', params.status)
     if (params?.startFrom) q.set('startFrom', params.startFrom)
     if (params?.endBefore) q.set('endBefore', params.endBefore)
     if (params?.floating) q.set('floating', 'true')
-    return request<Event[]>(`/api/events${q.size ? `?${q}` : ''}`)
+    return request<Occurrence[]>(`/api/occurrences${q.size ? `?${q}` : ''}`)
   },
 
-  get: (id: string) => request<Event>(`/api/events/${id}`),
+  get: (id: string) => request<Occurrence>(`/api/occurrences/${id}`),
 
-  create: (body: { title: string; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null; goalIds?: string[]; categoryId?: string | null; baseEventId?: string | null }) =>
-    request<Event>('/api/events', { method: 'POST', body: JSON.stringify(body) }),
+  create: (body: { activityId: string; title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null }) =>
+    request<Occurrence>('/api/occurrences', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title: string; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null; goalIds?: string[]; categoryId?: string | null }) =>
-    request<Event>(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  update: (id: string, body: { title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; windowStart?: string | null; windowEnd?: string | null; windowDurationMinutes?: number | null }) =>
+    request<Occurrence>(`/api/occurrences/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
-  delete: (id: string) => request<void>(`/api/events/${id}`, { method: 'DELETE' }),
+  delete: (id: string) => request<void>(`/api/occurrences/${id}`, { method: 'DELETE' }),
 
   setStatus: (id: string, status: import('./types').EventStatus) =>
-    request<Event>(`/api/events/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+    request<Occurrence>(`/api/occurrences/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
 }
 
 export const goalsApi = {
@@ -93,10 +109,10 @@ export const goalsApi = {
 
   get: (id: string) => request<Goal>(`/api/goals/${id}`),
 
-  create: (body: { title: string; description?: string | null }) =>
+  create: (body: { title: string; description?: string | null; categoryId?: string | null }) =>
     request<Goal>('/api/goals', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title: string; description?: string | null }) =>
+  update: (id: string, body: { title: string; description?: string | null; categoryId?: string | null }) =>
     request<Goal>(`/api/goals/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (id: string) => request<void>(`/api/goals/${id}`, { method: 'DELETE' }),
@@ -132,33 +148,6 @@ export const categoriesApi = {
   update: (id: string, body: { name: string; color: string; icon?: string | null }) =>
     request<Category>(`/api/categories/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (id: string) => request<void>(`/api/categories/${id}`, { method: 'DELETE' }),
-}
-
-export const baseEventsApi = {
-  listByGoal: (goalId: string) =>
-    request<BaseEventSummary[]>(`/api/goals/${goalId}/base-events`),
-
-  listGoalless: () => request<BaseEventSummary[]>(`/api/base-events/goalless`),
-
-  create: (goalId: string, body: { title: string; categoryId?: string | null }) =>
-    request<BaseEventSummary>(`/api/goals/${goalId}/base-events`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-
-  createGoalless: (body: { title: string; categoryId?: string | null }) =>
-    request<BaseEventSummary>(`/api/base-events/`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-
-  update: (id: string, body: { title: string; categoryId?: string | null }) =>
-    request<BaseEventSummary>(`/api/base-events/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    }),
-
-  delete: (id: string) => request<void>(`/api/base-events/${id}`, { method: 'DELETE' }),
 }
 
 export const recommendationsApi = {

@@ -21,11 +21,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<AuthService>();
         services.AddScoped<UserSettingsService>();
         services.AddScoped<GoalService>();
-        services.AddScoped<EventService>();
+        services.AddScoped<ActivityService>();
+        services.AddScoped<OccurrenceService>();
         services.AddScoped<CheckpointService>();
         services.AddScoped<RecommendationService>();
         services.AddScoped<CategoryService>();
-        services.AddScoped<BaseEventService>();
 
         return services;
     }

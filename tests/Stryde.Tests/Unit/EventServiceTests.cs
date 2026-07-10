@@ -4,13 +4,13 @@ using Stryde.Core.Entities;
 
 namespace Stryde.Tests.Unit;
 
-public class EventServiceTests : IDisposable
+public class OccurrenceServiceTests : IDisposable
 {
     private readonly TestContext _ctx = new();
 
     public void Dispose() => _ctx.Dispose();
 
-    private async Task<Guid> CreateUserAsync()
+    private async Task<(Guid userId, Guid activityId)> CreateUserAndActivityAsync()
     {
         var user = new User
         {
@@ -19,27 +19,29 @@ public class EventServiceTests : IDisposable
             Timezone = "UTC",
         };
         _ctx.Db.Users.Add(user);
+        var activity = new Activity { UserId = user.Id, Title = "Test activity" };
+        _ctx.Db.Activities.Add(activity);
         await _ctx.Db.SaveChangesAsync();
-        return user.Id;
+        return (user.Id, activity.Id);
     }
 
     private static readonly DateTimeOffset WinStart = new(2026, 7, 10, 9, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset WinEnd = new(2026, 7, 10, 17, 0, 0, TimeSpan.Zero); // 8-hour window
 
-    private static CreateEventRequest Req(
-        string title = "Task",
+    private static CreateOccurrenceRequest Req(
+        Guid activityId,
         DateTimeOffset? startAt = null,
         DateTimeOffset? windowStart = null,
         DateTimeOffset? windowEnd = null,
         int? windowDurationMinutes = null) =>
-        new(title, startAt, null, false, windowStart, windowEnd, windowDurationMinutes, null, null, null);
+        new(activityId, null, startAt, null, false, windowStart, windowEnd, windowDurationMinutes);
 
     [Fact]
-    public async Task CreateAsync_windowed_event_succeeds()
+    public async Task CreateAsync_windowed_occurrence_succeeds()
     {
-        var userId = await CreateUserAsync();
+        var (userId, activityId) = await CreateUserAndActivityAsync();
 
-        var result = await _ctx.EventService.CreateAsync(userId, Req(windowStart: WinStart, windowEnd: WinEnd, windowDurationMinutes: 60));
+        var result = await _ctx.OccurrenceService.CreateAsync(userId, Req(activityId, windowStart: WinStart, windowEnd: WinEnd, windowDurationMinutes: 60));
 
         Assert.True(result.IsSuccess);
         Assert.Equal(WinStart, result.Value!.WindowStart);
@@ -51,10 +53,10 @@ public class EventServiceTests : IDisposable
     [Fact]
     public async Task CreateAsync_window_and_startAt_returns_validation()
     {
-        var userId = await CreateUserAsync();
+        var (userId, activityId) = await CreateUserAndActivityAsync();
         var startAt = new DateTimeOffset(2026, 7, 10, 8, 0, 0, TimeSpan.Zero);
 
-        var result = await _ctx.EventService.CreateAsync(userId, Req(startAt: startAt, windowStart: WinStart, windowEnd: WinEnd, windowDurationMinutes: 60));
+        var result = await _ctx.OccurrenceService.CreateAsync(userId, Req(activityId, startAt: startAt, windowStart: WinStart, windowEnd: WinEnd, windowDurationMinutes: 60));
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorType.Validation, result.Error!.Type);
@@ -63,10 +65,10 @@ public class EventServiceTests : IDisposable
     [Fact]
     public async Task CreateAsync_partial_window_fields_returns_validation()
     {
-        var userId = await CreateUserAsync();
+        var (userId, activityId) = await CreateUserAndActivityAsync();
 
         // windowStart + windowEnd provided but duration omitted
-        var result = await _ctx.EventService.CreateAsync(userId, Req(windowStart: WinStart, windowEnd: WinEnd));
+        var result = await _ctx.OccurrenceService.CreateAsync(userId, Req(activityId, windowStart: WinStart, windowEnd: WinEnd));
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorType.Validation, result.Error!.Type);
@@ -75,9 +77,9 @@ public class EventServiceTests : IDisposable
     [Fact]
     public async Task CreateAsync_window_end_before_start_returns_validation()
     {
-        var userId = await CreateUserAsync();
+        var (userId, activityId) = await CreateUserAndActivityAsync();
 
-        var result = await _ctx.EventService.CreateAsync(userId, Req(windowStart: WinEnd, windowEnd: WinStart, windowDurationMinutes: 60));
+        var result = await _ctx.OccurrenceService.CreateAsync(userId, Req(activityId, windowStart: WinEnd, windowEnd: WinStart, windowDurationMinutes: 60));
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorType.Validation, result.Error!.Type);
@@ -86,27 +88,26 @@ public class EventServiceTests : IDisposable
     [Fact]
     public async Task CreateAsync_duration_exceeds_window_returns_validation()
     {
-        var userId = await CreateUserAsync();
+        var (userId, activityId) = await CreateUserAndActivityAsync();
 
         // Window is 8 hours (480 min); duration 600 min > window
-        var result = await _ctx.EventService.CreateAsync(userId, Req(windowStart: WinStart, windowEnd: WinEnd, windowDurationMinutes: 600));
+        var result = await _ctx.OccurrenceService.CreateAsync(userId, Req(activityId, windowStart: WinStart, windowEnd: WinEnd, windowDurationMinutes: 600));
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorType.Validation, result.Error!.Type);
     }
 
     [Fact]
-    public async Task ListAsync_floatingOnly_excludes_windowed_events()
+    public async Task ListAsync_floatingOnly_excludes_windowed_occurrences()
     {
-        var userId = await CreateUserAsync();
+        var (userId, activityId) = await CreateUserAndActivityAsync();
 
-        // Create a floating event and a windowed event
-        await _ctx.EventService.CreateAsync(userId, Req("Floating task"));
-        await _ctx.EventService.CreateAsync(userId, Req("Windowed task", windowStart: WinStart, windowEnd: WinEnd, windowDurationMinutes: 60));
+        await _ctx.OccurrenceService.CreateAsync(userId, Req(activityId));
+        await _ctx.OccurrenceService.CreateAsync(userId, Req(activityId, windowStart: WinStart, windowEnd: WinEnd, windowDurationMinutes: 60));
 
-        var floating = await _ctx.EventService.ListAsync(userId, floatingOnly: true);
+        var floating = await _ctx.OccurrenceService.ListAsync(userId, floatingOnly: true);
 
         Assert.Single(floating);
-        Assert.Equal("Floating task", floating[0].Title);
+        Assert.Equal("Test activity", floating[0].EffectiveTitle);
     }
 }

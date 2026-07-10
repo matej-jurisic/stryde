@@ -142,10 +142,13 @@ export function CategoriesPage() {
         title="Categories"
         action={
           !adding ? (
-            <Button size="sm" onClick={() => setAdding(true)}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" strokeWidth={2.5} />
+            <button
+              onClick={() => setAdding(true)}
+              className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
               New Category
-            </Button>
+            </button>
           ) : undefined
         }
       />
@@ -176,7 +179,13 @@ export function CategoriesPage() {
                 <p className="text-sm font-medium text-foreground">No categories yet</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">Group events that aren't tied to a goal.</p>
               </div>
-              <Button size="sm" onClick={() => setAdding(true)}>New Category</Button>
+              <button
+                onClick={() => setAdding(true)}
+                className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                New Category
+              </button>
             </div>
           ) : (
             categories.map((cat) => <CategoryCard key={cat.id} category={cat} />)

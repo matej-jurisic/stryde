@@ -24,66 +24,79 @@ public class RecommendationServiceTests : IDisposable
         return user.Id;
     }
 
-    private async Task<Event> AddEventAsync(
+    private async Task<(Activity activity, Occurrence occurrence)> AddOccurrenceAsync(
         Guid userId, string title,
         DateTimeOffset? startAt = null, DateTimeOffset? endAt = null,
         GoalStatus? goalStatus = null, EventStatus status = EventStatus.pending,
-        Guid? baseEventId = null)
+        Activity? existingActivity = null)
     {
-        var ev = new Event
+        var activity = existingActivity;
+        if (activity is null)
         {
-            UserId = userId, Title = title,
-            StartAt = startAt, EndAt = endAt,
-            Status = status, BaseEventId = baseEventId,
+            Goal? goal = null;
+            if (goalStatus.HasValue)
+            {
+                goal = new Goal { UserId = userId, Title = title + " goal", Status = goalStatus.Value };
+                _ctx.Db.Goals.Add(goal);
+                await _ctx.Db.SaveChangesAsync();
+            }
+            activity = new Activity { UserId = userId, Title = title, GoalId = goal?.Id };
+            _ctx.Db.Activities.Add(activity);
+            await _ctx.Db.SaveChangesAsync();
+        }
+
+        var o = new Occurrence
+        {
+            UserId = userId,
+            ActivityId = activity.Id,
+            StartAt = startAt,
+            EndAt = endAt,
+            Status = status,
         };
-        if (goalStatus.HasValue)
-            ev.Goals.Add(new Goal { UserId = userId, Title = title + " goal", Status = goalStatus.Value });
-        _ctx.Db.Events.Add(ev);
+        _ctx.Db.Occurrences.Add(o);
         await _ctx.Db.SaveChangesAsync();
-        return ev;
+        return (activity, o);
     }
 
-    private async Task<BaseEvent> AddBaseEventAsync(Guid userId, string title, GoalStatus goalStatus = GoalStatus.active)
+    private async Task<Activity> AddActivityAsync(Guid userId, string title, GoalStatus goalStatus = GoalStatus.active)
     {
         var goal = new Goal { UserId = userId, Title = title + " goal", Status = goalStatus };
         _ctx.Db.Goals.Add(goal);
         await _ctx.Db.SaveChangesAsync();
-        var be = new BaseEvent { UserId = userId, Title = title, GoalId = goal.Id, Goal = goal };
-        _ctx.Db.BaseEvents.Add(be);
+        var activity = new Activity { UserId = userId, Title = title, GoalId = goal.Id };
+        _ctx.Db.Activities.Add(activity);
         await _ctx.Db.SaveChangesAsync();
-        return be;
+        return activity;
     }
 
     private static readonly DateTimeOffset Now = new(2026, 7, 7, 12, 0, 0, TimeSpan.Zero); // Tuesday
     private static readonly DateOnly Today = new(2026, 7, 7);
 
     [Fact]
-    public async Task GetAsync_tier1_returns_floating_focus_events()
+    public async Task GetAsync_tier1_returns_floating_focus_occurrences()
     {
         var userId = await CreateUserAsync();
-        var focusFloating = await AddEventAsync(userId, "focus task", goalStatus: GoalStatus.focus);
-        var activeFloating = await AddEventAsync(userId, "active task", goalStatus: GoalStatus.active);
+        var (_, focus) = await AddOccurrenceAsync(userId, "focus task", goalStatus: GoalStatus.focus);
+        var (_, active) = await AddOccurrenceAsync(userId, "active task", goalStatus: GoalStatus.active);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Equal(2, recs.Count);
         Assert.Equal(1, recs[0].Tier);
-        Assert.Equal("event", recs[0].Type);
-        Assert.Equal(focusFloating.Id, recs[0].Event!.Id);
+        Assert.Equal("occurrence", recs[0].Type);
+        Assert.Equal(focus.Id, recs[0].Occurrence!.Id);
         Assert.Equal(2, recs[1].Tier);
-        Assert.Equal(activeFloating.Id, recs[1].Event!.Id);
+        Assert.Equal(active.Id, recs[1].Occurrence!.Id);
     }
 
     [Fact]
-    public async Task GetAsync_scheduled_events_are_not_recommended()
+    public async Task GetAsync_scheduled_occurrences_are_not_recommended()
     {
         var userId = await CreateUserAsync();
-        // Scheduled for today — should NOT appear in recommendations
-        await AddEventAsync(userId, "today scheduled",
+        await AddOccurrenceAsync(userId, "today scheduled",
             startAt: new DateTimeOffset(2026, 7, 7, 9, 0, 0, TimeSpan.Zero),
             goalStatus: GoalStatus.focus);
-        // Overdue — should NOT appear either
-        await AddEventAsync(userId, "overdue",
+        await AddOccurrenceAsync(userId, "overdue",
             startAt: new DateTimeOffset(2026, 7, 5, 9, 0, 0, TimeSpan.Zero),
             goalStatus: GoalStatus.active);
 
@@ -93,45 +106,44 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_tier3_surfaces_base_events_with_weekday_pattern()
+    public async Task GetAsync_tier3_surfaces_activities_with_weekday_pattern()
     {
         var userId = await CreateUserAsync();
-        var be = await AddBaseEventAsync(userId, "Tuesday deep work");
+        var activity = await AddActivityAsync(userId, "Tuesday deep work");
 
-        // 3 completions on Tuesdays (day of week 2): Jul 7, Jun 30, Jun 23 are all Tuesdays
-        await AddEventAsync(userId, "Tuesday deep work",
+        // 2 completions on Tuesdays: Jun 23 and Jun 30
+        await AddOccurrenceAsync(userId, "Tuesday deep work",
             startAt: new DateTimeOffset(2026, 6, 23, 9, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, baseEventId: be.Id);
-        await AddEventAsync(userId, "Tuesday deep work",
+            status: EventStatus.done, existingActivity: activity);
+        await AddOccurrenceAsync(userId, "Tuesday deep work",
             startAt: new DateTimeOffset(2026, 6, 30, 9, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, baseEventId: be.Id);
-        // No pending event with this base event id for today → should appear in tier 3
+            status: EventStatus.done, existingActivity: activity);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Single(recs);
         Assert.Equal(3, recs[0].Tier);
-        Assert.Equal("base_event", recs[0].Type);
-        Assert.Equal(be.Id, recs[0].BaseEvent!.Id);
+        Assert.Equal("activity", recs[0].Type);
+        Assert.Equal(activity.Id, recs[0].Activity!.Id);
     }
 
     [Fact]
-    public async Task GetAsync_tier3_suppressed_when_base_event_already_on_today_schedule()
+    public async Task GetAsync_tier3_suppressed_when_activity_already_on_today_schedule()
     {
         var userId = await CreateUserAsync();
-        var be = await AddBaseEventAsync(userId, "Morning run");
+        var activity = await AddActivityAsync(userId, "Morning run");
 
-        await AddEventAsync(userId, "Morning run",
+        await AddOccurrenceAsync(userId, "Morning run",
             startAt: new DateTimeOffset(2026, 6, 23, 6, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, baseEventId: be.Id);
-        await AddEventAsync(userId, "Morning run",
+            status: EventStatus.done, existingActivity: activity);
+        await AddOccurrenceAsync(userId, "Morning run",
             startAt: new DateTimeOffset(2026, 6, 30, 6, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, baseEventId: be.Id);
+            status: EventStatus.done, existingActivity: activity);
 
-        // Instance already scheduled for today
-        await AddEventAsync(userId, "Morning run",
+        // Pending occurrence already scheduled for today
+        await AddOccurrenceAsync(userId, "Morning run",
             startAt: new DateTimeOffset(2026, 7, 7, 6, 0, 0, TimeSpan.Zero),
-            baseEventId: be.Id);
+            existingActivity: activity);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -142,12 +154,11 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_tier3_requires_at_least_2_completions_on_weekday()
     {
         var userId = await CreateUserAsync();
-        var be = await AddBaseEventAsync(userId, "Tuesday solo");
+        var activity = await AddActivityAsync(userId, "Tuesday solo");
 
-        // Only 1 completion on a Tuesday — below threshold
-        await AddEventAsync(userId, "Tuesday solo",
+        await AddOccurrenceAsync(userId, "Tuesday solo",
             startAt: new DateTimeOffset(2026, 6, 30, 9, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, baseEventId: be.Id);
+            status: EventStatus.done, existingActivity: activity);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -158,44 +169,37 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_tier4_bench_surfaces_only_when_tiers_1_to_3_empty()
     {
         var userId = await CreateUserAsync();
-        var bench = await AddEventAsync(userId, "bench task", goalStatus: GoalStatus.bench);
+        var (_, bench) = await AddOccurrenceAsync(userId, "bench task", goalStatus: GoalStatus.bench);
 
         var alone = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
         Assert.Single(alone);
         Assert.Equal(4, alone[0].Tier);
-        Assert.Equal(bench.Id, alone[0].Event!.Id);
+        Assert.Equal(bench.Id, alone[0].Occurrence!.Id);
 
-        // Add a focus floating event — bench should disappear
-        await AddEventAsync(userId, "focus task", goalStatus: GoalStatus.focus);
+        await AddOccurrenceAsync(userId, "focus task", goalStatus: GoalStatus.focus);
 
         var withFocus = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
-        Assert.DoesNotContain(withFocus, r => r.Event?.Id == bench.Id);
+        Assert.DoesNotContain(withFocus, r => r.Occurrence?.Id == bench.Id);
     }
 
     [Fact]
-    public async Task GetAsync_event_appears_at_most_once_in_highest_tier()
+    public async Task GetAsync_occurrence_appears_at_most_once()
     {
         var userId = await CreateUserAsync();
-        // Event linked to both focus and active goals — should appear only in tier 1
-        var ev = new Event { UserId = userId, Title = "multi-goal task" };
-        ev.Goals.Add(new Goal { UserId = userId, Title = "focus g", Status = GoalStatus.focus });
-        ev.Goals.Add(new Goal { UserId = userId, Title = "active g", Status = GoalStatus.active });
-        _ctx.Db.Events.Add(ev);
-        await _ctx.Db.SaveChangesAsync();
+        var (_, o) = await AddOccurrenceAsync(userId, "focus task", goalStatus: GoalStatus.focus);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Single(recs);
-        Assert.Equal(1, recs[0].Tier);
-        Assert.Equal(ev.Id, recs[0].Event!.Id);
+        Assert.Equal(o.Id, recs[0].Occurrence!.Id);
     }
 
     [Fact]
-    public async Task GetAsync_excludes_done_and_skipped_events()
+    public async Task GetAsync_excludes_done_and_skipped_occurrences()
     {
         var userId = await CreateUserAsync();
-        await AddEventAsync(userId, "done task", goalStatus: GoalStatus.focus, status: EventStatus.done);
-        await AddEventAsync(userId, "skipped task", goalStatus: GoalStatus.active, status: EventStatus.skipped);
+        await AddOccurrenceAsync(userId, "done task", goalStatus: GoalStatus.focus, status: EventStatus.done);
+        await AddOccurrenceAsync(userId, "skipped task", goalStatus: GoalStatus.active, status: EventStatus.skipped);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -206,15 +210,14 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_tier3_ignores_completions_older_than_6_weeks()
     {
         var userId = await CreateUserAsync();
-        var be = await AddBaseEventAsync(userId, "Old habit");
+        var activity = await AddActivityAsync(userId, "Old habit");
 
-        // Both completions are > 42 days ago
-        await AddEventAsync(userId, "Old habit",
-            startAt: new DateTimeOffset(2026, 5, 19, 9, 0, 0, TimeSpan.Zero), // 49 days before Jul 7
-            status: EventStatus.done, baseEventId: be.Id);
-        await AddEventAsync(userId, "Old habit",
-            startAt: new DateTimeOffset(2026, 5, 26, 9, 0, 0, TimeSpan.Zero), // 42 days before Jul 7
-            status: EventStatus.done, baseEventId: be.Id);
+        await AddOccurrenceAsync(userId, "Old habit",
+            startAt: new DateTimeOffset(2026, 5, 19, 9, 0, 0, TimeSpan.Zero),
+            status: EventStatus.done, existingActivity: activity);
+        await AddOccurrenceAsync(userId, "Old habit",
+            startAt: new DateTimeOffset(2026, 5, 26, 9, 0, 0, TimeSpan.Zero),
+            status: EventStatus.done, existingActivity: activity);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -224,14 +227,11 @@ public class RecommendationServiceTests : IDisposable
     [Fact]
     public async Task GetAsync_buckets_days_in_user_timezone()
     {
-        // 22:30 UTC on Jul 7 is 00:30 on Jul 8 in Zagreb (UTC+2 in summer)
-        // An event starting then is NOT floating and is on Jul 8, so should not appear in recommendations for Jul 7
         var userId = await CreateUserAsync(timezone: "Europe/Zagreb");
-        await AddEventAsync(userId, "tomorrow local",
+        await AddOccurrenceAsync(userId, "tomorrow local",
             startAt: new DateTimeOffset(2026, 7, 7, 22, 30, 0, TimeSpan.Zero),
             goalStatus: GoalStatus.focus);
 
-        // The event is scheduled (not floating), so it should not appear as a recommendation at all
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Empty(recs);

@@ -104,17 +104,20 @@ public sealed record GoalDto(
     string Title,
     string? Description,
     string Status,
+    Guid? CategoryId,
     DateTimeOffset CreatedAt,
+    CategorySummaryDto? Category,
     List<CheckpointDto> Checkpoints)
 {
     public static GoalDto FromEntity(Goal g) => new(
         g.Id, g.UserId, g.Title, g.Description,
-        g.Status.ToString(), g.CreatedAt,
+        g.Status.ToString(), g.CategoryId, g.CreatedAt,
+        g.Category is not null ? CategorySummaryDto.FromEntity(g.Category) : null,
         g.Checkpoints.Select(CheckpointDto.FromEntity).ToList());
 }
 
-public sealed record CreateGoalRequest(string Title, string? Description);
-public sealed record UpdateGoalRequest(string Title, string? Description);
+public sealed record CreateGoalRequest(string Title, string? Description, Guid? CategoryId);
+public sealed record UpdateGoalRequest(string Title, string? Description, Guid? CategoryId);
 public sealed record SetGoalStatusRequest(GoalStatus Status);
 
 // Checkpoints

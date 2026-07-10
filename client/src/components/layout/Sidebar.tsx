@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { CalendarRange, CalendarDays, Inbox, Target, Settings, Zap, Pencil, Trash2, Plus } from 'lucide-react'
+import { CalendarRange, CalendarDays, Inbox, Target, Settings, Zap, Pencil, Trash2, Plus, Layers } from 'lucide-react'
 import { useInboxCount } from './useInboxCount'
 import { categoriesApi } from '@/lib/api'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
@@ -149,7 +149,7 @@ export function Sidebar() {
       await categoriesApi.create({ name, color, icon })
     }
     qc.invalidateQueries({ queryKey: ['categories'] })
-    qc.invalidateQueries({ queryKey: ['events'] })
+    qc.invalidateQueries({ queryKey: ['events'] }) // refreshes occurrences cache (same key)
   }
 
   function openAdd() {
@@ -175,9 +175,10 @@ export function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 px-3 py-1">
         <ul className="flex flex-col gap-0.5">
-          <li><NavItem to="/plan"     label="Daily Plan" Icon={CalendarRange} /></li>
-          <li><NavItem to="/calendar" label="Calendar"   Icon={CalendarDays} /></li>
-          <li><NavItem to="/goals"    label="Goals"      Icon={Target} /></li>
+          <li><NavItem to="/plan"       label="Daily Plan"  Icon={CalendarRange} /></li>
+          <li><NavItem to="/calendar"   label="Calendar"    Icon={CalendarDays} /></li>
+          <li><NavItem to="/goals"      label="Goals"       Icon={Target} /></li>
+          <li><NavItem to="/activities" label="Activities"  Icon={Layers} /></li>
         </ul>
 
         <div className="my-2 border-t border-border" />

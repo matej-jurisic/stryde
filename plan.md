@@ -298,6 +298,38 @@ Unplanned addition after Phase 9. Adds a third event scheduling state between fl
 
 ---
 
+## Activity / Occurrence Remodel (July 2026) ✅
+
+**Problem:** The `BaseEvent`/`Event` naming was confusing ("base event" is not a natural term), and the model mixed the definition of an activity with its scheduled instance. The GoalsPage hosted base-event management inline, making it cluttered and limiting (activities without goals had no clean home).
+
+**Change:** Replace `BaseEvent` + `Event` with `Activity` + `Occurrence`.
+
+- `Activity` — the definition layer (title, single optional goal, optional category). Managed on the new `/activities` page.
+- `Occurrence` — the scheduling layer (required `ActivityId` FK, optional title override, all scheduling fields). Exposed via `/api/occurrences`.
+
+**Data model**
+- Dropped: `BaseEvents`, `Events`, `EventGoals` tables.
+- Added: `Activities` (Id, UserId, Title, CategoryId?, GoalId?, CreatedAt) and `Occurrences` (Id, UserId, ActivityId, Title?, StartAt?, EndAt?, Status, IsAllDay, WindowStart?, WindowEnd?, WindowDurationMinutes?, RepeatRuleId?, CreatedAt).
+- Migration: `ActivityOccurrenceModel`.
+- `OccurrenceDto.EffectiveTitle` = `occurrence.Title ?? occurrence.Activity.Title`.
+- Recommendations now return a discriminated union: `type: 'occurrence' | 'activity'`.
+
+**Backend**
+- New: `Activity.cs`, `Occurrence.cs`, `ActivityService.cs`, `OccurrenceService.cs`, `ActivityEndpoints.cs`, `OccurrenceEndpoints.cs`.
+- Deleted: `Event.cs`, `BaseEvent.cs`, `EventService.cs`, `BaseEventService.cs`, `EventEndpoints.cs`, `BaseEventEndpoints.cs`.
+- `RecommendationService` rewritten: tier-3 returns Activity items, not BaseEvent items.
+- `DayMath` updated: `OccurrenceDay(Occurrence, DayContext)`, `IsOverdue(Occurrence, ...)`.
+- All unit and integration tests updated and passing.
+
+**Frontend**
+- New: `ActivitiesPage.tsx` — CRUD for activities, grouped by goal, with inline modal.
+- Removed: all `BaseEventSummary`, `Event`, `baseEventsApi`, `eventsApi` references.
+- Updated: `types.ts`, `api.ts`, `InboxPage`, `CalendarPage`, `PlanPage`, `GoalsPage`, `EventModal`, `EventDetailModal`, `RecommendationStrip`, `Sidebar`, `BottomNav`, `useInboxCount`.
+- GoalsPage no longer hosts template management (that moved to ActivitiesPage).
+- Route `/activities` added; Sidebar and BottomNav updated with Activities link.
+
+---
+
 ## Phase 11 — Repeat Rules
 
 **Goal:** Events can repeat. The calendar renders all future occurrences virtually; lists show only the next upcoming instance.

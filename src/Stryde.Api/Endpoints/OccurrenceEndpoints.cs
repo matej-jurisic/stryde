@@ -5,14 +5,14 @@ using System.Security.Claims;
 
 namespace Stryde.Api.Endpoints;
 
-public static class EventEndpoints
+public static class OccurrenceEndpoints
 {
-    public static void MapEventEndpoints(this WebApplication app)
+    public static void MapOccurrenceEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/api/events").RequireAuthorization();
+        var group = app.MapGroup("/api/occurrences").RequireAuthorization();
 
         group.MapGet("/", async (
-            ClaimsPrincipal principal, EventService svc,
+            ClaimsPrincipal principal, OccurrenceService svc,
             string? status, DateTimeOffset? startFrom, DateTimeOffset? endBefore, bool floating = false) =>
         {
             var userId = principal.GetUserId();
@@ -22,11 +22,10 @@ public static class EventEndpoints
             if (status is not null && Enum.TryParse<EventStatus>(status, ignoreCase: true, out var parsed))
                 filter = parsed;
 
-            var events = await svc.ListAsync(userId.Value, filter, startFrom, endBefore, floating);
-            return Results.Ok(events);
+            return Results.Ok(await svc.ListAsync(userId.Value, filter, startFrom, endBefore, floating));
         });
 
-        group.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal principal, EventService svc) =>
+        group.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal principal, OccurrenceService svc) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
@@ -34,15 +33,17 @@ public static class EventEndpoints
             return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
         });
 
-        group.MapPost("/", async (CreateEventRequest req, ClaimsPrincipal principal, EventService svc) =>
+        group.MapPost("/", async (CreateOccurrenceRequest req, ClaimsPrincipal principal, OccurrenceService svc) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
             var result = await svc.CreateAsync(userId.Value, req);
-            return result.IsSuccess ? Results.Created($"/api/events/{result.Value!.Id}", result.Value) : result.Error!.ToProblem();
+            return result.IsSuccess
+                ? Results.Created($"/api/occurrences/{result.Value!.Id}", result.Value)
+                : result.Error!.ToProblem();
         });
 
-        group.MapPut("/{id:guid}", async (Guid id, UpdateEventRequest req, ClaimsPrincipal principal, EventService svc) =>
+        group.MapPut("/{id:guid}", async (Guid id, UpdateOccurrenceRequest req, ClaimsPrincipal principal, OccurrenceService svc) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
@@ -50,7 +51,7 @@ public static class EventEndpoints
             return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
         });
 
-        group.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal principal, EventService svc) =>
+        group.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal principal, OccurrenceService svc) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
@@ -58,7 +59,7 @@ public static class EventEndpoints
             return result.IsSuccess ? Results.NoContent() : result.Error!.ToProblem();
         });
 
-        group.MapPost("/{id:guid}/status", async (Guid id, SetEventStatusRequest req, ClaimsPrincipal principal, EventService svc) =>
+        group.MapPost("/{id:guid}/status", async (Guid id, SetOccurrenceStatusRequest req, ClaimsPrincipal principal, OccurrenceService svc) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();

@@ -29,7 +29,7 @@ Username + password. Schema and auth layer designed for multi-user from day one 
 
 ## Core Concepts
 
-Stryde is built around three primitives: **Events**, **Goals**, and the **Daily Plan**. Everything else is a view or a rule that operates on these.
+Stryde is built around three primitives: **Activities**, **Goals**, and the **Daily Plan**. Everything else is a view or a rule that operates on these.
 
 ---
 
@@ -47,58 +47,69 @@ The shared implementation lives in `Stryde.Core/Common/DayMath.cs`; every featur
 
 ---
 
-## Events
+## Activities and Occurrences
 
-An event is the atomic unit of work. Every event has:
+The scheduling primitive is split into two layers:
+
+**Activity** — the definition of a type of work. Created and managed on the Activities page.
 
 | Field | Notes |
 |---|---|
 | Title | Required |
-| Goals | Optional — can link to zero, one, or many goals |
-| Start datetime | Optional — absent for floating and windowed events |
+| Goal | Optional — links to one goal |
+| Category | Optional |
+
+**Occurrence** — a scheduled (or floating) instance of an Activity.
+
+| Field | Notes |
+|---|---|
+| Activity | Required — which Activity this occurrence is of |
+| Title | Optional — overrides the Activity title for this instance |
+| Start datetime | Optional — absent for floating and windowed occurrences |
 | End datetime | Optional — defines duration when combined with start |
-| Window start | Optional — start of the flexible scheduling window (windowed events only) |
-| Window end | Optional — end of the flexible scheduling window (windowed events only) |
-| Window duration | Optional — how long the event is expected to take, in minutes (windowed events only) |
+| Window start | Optional — start of the flexible scheduling window (windowed occurrences only) |
+| Window end | Optional — end of the flexible scheduling window (windowed occurrences only) |
+| Window duration | Optional — how long the occurrence is expected to take, in minutes (windowed only) |
 | Repeat rule | Optional — see Repeats below |
 | Status | `pending`, `done`, `skipped` |
 
-Events exist in one of three scheduling states:
+`effectiveTitle` on the occurrence DTO = `title ?? activity.title`.
 
-### Floating Events
+Occurrences exist in one of three scheduling states:
 
-An event with no start datetime and no window is floating. It lives in the Inbox and surfaces in Daily Plan recommendations when relevant. It is not overdue and carries no urgency signal by itself.
+### Floating Occurrences
 
-### Windowed Events
+An occurrence with no start datetime and no window is floating. It lives in the Inbox and surfaces in Daily Plan recommendations when relevant. It is not overdue and carries no urgency signal by itself.
 
-An event with a known duration but no fixed start time, constrained to a time window (`WindowStart`, `WindowEnd`, `WindowDurationMinutes`). The user knows the event will take a certain amount of time but hasn't decided exactly when within the window it will happen.
+### Windowed Occurrences
 
-- Windowed events appear on the calendar spanning their full window, rendered as dashed blocks with a diagonal stripe pattern.
+An occurrence with a known duration but no fixed start time, constrained to a time window (`WindowStart`, `WindowEnd`, `WindowDurationMinutes`). The user knows the occurrence will take a certain amount of time but hasn't decided exactly when within the window it will happen.
+
+- Windowed occurrences appear on the calendar spanning their full window, rendered as dashed blocks with a diagonal stripe pattern.
 - They do not appear in the Inbox — they already have calendar placement context.
 - They are not overdue. The window is a constraint, not a deadline.
 - The window and all three window fields must be provided together; they cannot be combined with a start datetime.
 - Duration must be positive and must not exceed the length of the window.
-- Windowed events are visible to the recommendation engine as candidates for future planning enhancements.
 
-### Scheduled Events
+### Scheduled Occurrences
 
-An event with a start datetime is scheduled. It participates in scheduling, overdue detection, and goal progress.
+An occurrence with a start datetime is scheduled. It participates in scheduling, overdue detection, and goal progress.
 
 ### Overdue
 
-An event is overdue if it is still pending and:
+An occurrence is overdue if it is still pending and:
 - It has an end datetime and that datetime has passed, **or**
 - It has a start datetime (no end) and its day has ended (the day boundary on the following date has passed, in the user's timezone — see Timezone & Day Semantics).
 
-Floating events and windowed events are never overdue.
+Floating and windowed occurrences are never overdue.
 
 ### Scheduling
 
-Scheduling an event means setting its start datetime (and optionally end datetime). An event can be rescheduled by updating these fields.
+Scheduling an occurrence means setting its start datetime (and optionally end datetime). An occurrence can be rescheduled by updating these fields.
 
 ### Repeats
 
-Repeat rules use a **virtual-rendering model**: future occurrences are computed from a stored rule and rendered by the calendar for any requested date range — they are never pre-stored in the database. Event lists (Inbox, Daily Plan, recommendations) show only the next upcoming instance.
+Repeat rules use a **virtual-rendering model**: future occurrences are computed from a stored rule and rendered by the calendar for any requested date range — they are never pre-stored in the database. Occurrence lists (Inbox, Daily Plan, recommendations) show only the next upcoming instance.
 
 Supported patterns: daily, weekly on specific days, every N days/weeks/months, monthly on a date.
 
@@ -112,31 +123,13 @@ A rule is stored as a `Pattern` discriminator plus a JSON `Config`:
 | `monthly` | `{ "day": 15 }` (clamped to the month's last day) | the 15th monthly |
 
 Behavior on completion: current instance is marked done; calendar continues showing future occurrences derived from the rule.
-Behavior on skip: current instance is marked skipped (does not count toward goal progress); calendar continues showing future occurrences.
+Behavior on skip: current instance is marked skipped; calendar continues showing future occurrences.
 Behavior on reschedule: datetimes of current instance moved, repeat rule unchanged.
 Behavior on delete: user is prompted — delete this instance only, or delete the rule (stops all future occurrences).
 
-### Base Events
-
-A Base Event is a reusable activity template. It may optionally belong to a goal, or exist independently for recurring activities that have no goal (e.g. "Work", "Exercise").
-
-| Field | Notes |
-|---|---|
-| Goal | Optional — the goal this template belongs to |
-| Title | Required |
-| Category | Optional |
-
-Base events are created and managed from within the Goals view — there is no standalone Base Events management page. Goal-linked templates appear within their goal's card. Templates without a goal appear in the **"Other Templates"** section at the bottom of the Goals view.
-
-**No auto-creation.** Base events exist only when the user explicitly creates them. Creating an event with no base event link is valid — that event simply has no template ancestry and will not contribute to tier-3 pattern suggestions.
-
-**Linking on event creation:** When creating or editing an event, if the event is linked to a goal, the user can optionally pick one of that goal's base events as the template. The event's title and category are pre-filled from the template and remain editable after.
-
-Base Events are the grouping unit for the recommendation engine's day-of-week pattern detection (tier 3). Goal-less base events participate in tier-3 suggestions identically to goal-linked ones; their recommendation items simply show no goal badge.
-
 ### Creation
 
-Events are created via a modal.
+Occurrences are created via a modal. Creating an occurrence requires selecting an Activity (or quick-creating one inline).
 
 ---
 
@@ -233,9 +226,10 @@ Only these views are in scope for v1:
 | View | Purpose |
 |---|---|
 | Daily Plan | Execution view for a single day: agenda, recommendations, goal health. Index route. |
-| Inbox | Triage list of all events grouped by state (Overdue, Today, Unscheduled, Upcoming, Completed). Entry point for unscheduled work. |
-| Calendar | Day/week view of scheduled events. Primary scheduling surface. |
+| Inbox | Triage list of all floating occurrences, filterable by category. Entry point for unscheduled work. |
+| Calendar | Day/week view of scheduled occurrences. Primary scheduling surface. |
 | Goals | Goal list with progress insight per goal. Checkpoint management. |
+| Activities | Manage activity definitions: create, edit, delete activities grouped by goal. |
 | Settings | Timezone, day boundary, max Focus goals, appearance, sign out. |
 
 Additional views (Cockpit, Lab) are deferred — defined during development if needed.
