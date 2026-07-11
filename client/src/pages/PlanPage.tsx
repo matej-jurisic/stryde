@@ -1,9 +1,10 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, CalendarPlus, MoreHorizontal, CalendarCheck } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, CalendarPlus, MoreHorizontal, CalendarCheck, ListChecks } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, goalsApi, settingsApi } from '@/lib/api'
 import type { Activity, Checkpoint, CheckpointSize, Occurrence, EventStatus, Goal } from '@/lib/types'
 import { EventModal } from '@/components/events/EventModal'
+import { OccurrenceSubtasksModal } from '@/components/events/OccurrenceSubtasksModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 import { Badge } from '@/components/ui/Badge'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
@@ -133,7 +134,10 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
   const isDone = event.status === 'done'
   const isSkipped = event.status === 'skipped'
   const [menuOpen, setMenuOpen] = useState(false)
+  const [subtasksOpen, setSubtasksOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const hasSubtasks = event.activity.subtasks.length > 0
+  const completedCount = event.completedSubtaskIds.length
 
   useEffect(() => {
     if (!menuOpen) return
@@ -196,7 +200,7 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
             <Badge tone={GOAL_TONE[goal.status] ?? 'neutral'}>{goal.title}</Badge>
           )}
         </div>
-        {(timeRange || cat) && (
+        {(timeRange || cat || hasSubtasks) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
             {timeRange && (
               <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{timeRange}</span>
@@ -206,6 +210,9 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
                 <CategoryIcon icon={cat.icon} color={cat.color} size={11} strokeWidth={2} />
                 {cat.name}
               </span>
+            )}
+            {hasSubtasks && (
+              <span className="text-xs text-muted-foreground">{completedCount}/{event.activity.subtasks.length}</span>
             )}
           </div>
         )}
@@ -221,6 +228,15 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
         </button>
         {menuOpen && (
           <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+            {hasSubtasks && (
+              <button
+                onClick={() => { setSubtasksOpen(true); setMenuOpen(false) }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+              >
+                <ListChecks className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                Subtasks
+              </button>
+            )}
             {isPending && (
               <button
                 onClick={() => { statusMutation.mutate('skipped'); setMenuOpen(false) }}
@@ -256,6 +272,14 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
           </div>
         )}
       </div>
+
+      {hasSubtasks && subtasksOpen && (
+        <OccurrenceSubtasksModal
+          open={subtasksOpen}
+          onClose={() => setSubtasksOpen(false)}
+          occurrence={event}
+        />
+      )}
     </li>
   )
 }

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { Plus, Pencil, Trash2, Check, MoreHorizontal, ChevronRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { goalsApi, checkpointsApi, ApiError } from '@/lib/api'
@@ -7,7 +8,6 @@ import type { Goal, GoalStatus, Checkpoint, CheckpointSize } from '@/lib/types'
 import { Badge } from '@/components/ui/Badge'
 import { GoalModal } from '@/components/goals/GoalModal'
 import { CheckpointModal } from '@/components/goals/CheckpointModal'
-import { GoalDetailModal } from '@/components/goals/GoalDetailModal'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -252,7 +252,7 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
         {/* Title + description */}
         <button
           onClick={() => onView(goal)}
-          className="min-w-0 flex-1 text-left hover:underline"
+          className="min-w-0 flex-1 text-left"
         >
           <span className="text-sm text-foreground">{goal.title}</span>
           {goal.description && (
@@ -325,8 +325,8 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
 // ── page ───────────────────────────────────────────────────────────────────
 
 export function GoalsPage() {
+  const navigate = useNavigate()
   const [goalModal, setGoalModal] = useState<{ open: boolean; goal?: Goal }>({ open: false })
-  const [detailModal, setDetailModal] = useState<{ open: boolean; goal: Goal | null }>({ open: false, goal: null })
   const [cpModal, setCpModal] = useState<{ open: boolean; goalId: string; checkpoint?: Checkpoint }>({
     open: false, goalId: '',
   })
@@ -404,7 +404,7 @@ export function GoalsPage() {
                           <GoalRow
                             key={g.id}
                             goal={g}
-                            onView={(g) => setDetailModal({ open: true, goal: g })}
+                            onView={(g) => navigate(`/goals/${g.id}`)}
                             onEdit={(g) => setGoalModal({ open: true, goal: g })}
                             onAddCheckpoint={(goalId) => setCpModal({ open: true, goalId })}
                             onEditCheckpoint={(goalId, cp) => setCpModal({ open: true, goalId, checkpoint: cp })}
@@ -420,11 +420,6 @@ export function GoalsPage() {
         </div>
       </div>
 
-      <GoalDetailModal
-        open={detailModal.open}
-        onClose={() => setDetailModal({ open: false, goal: null })}
-        goal={detailModal.goal}
-      />
       <GoalModal
         open={goalModal.open}
         onClose={() => setGoalModal({ open: false })}

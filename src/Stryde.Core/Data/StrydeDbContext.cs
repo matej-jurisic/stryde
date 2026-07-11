@@ -17,6 +17,7 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<ActivitySubtask> ActivitySubtasks => Set<ActivitySubtask>();
+    public DbSet<OccurrenceSubtaskCompletion> OccurrenceSubtaskCompletions => Set<OccurrenceSubtaskCompletion>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -90,6 +91,21 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .HasOne(s => s.Activity)
             .WithMany(a => a.Subtasks)
             .HasForeignKey(s => s.ActivityId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<OccurrenceSubtaskCompletion>()
+            .HasKey(c => new { c.OccurrenceId, c.SubtaskId });
+
+        modelBuilder.Entity<OccurrenceSubtaskCompletion>()
+            .HasOne(c => c.Occurrence)
+            .WithMany(o => o.SubtaskCompletions)
+            .HasForeignKey(c => c.OccurrenceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<OccurrenceSubtaskCompletion>()
+            .HasOne(c => c.Subtask)
+            .WithMany()
+            .HasForeignKey(c => c.SubtaskId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }

@@ -65,7 +65,6 @@ export interface ActivitySubtask {
   id: string
   activityId: string
   title: string
-  isDone: boolean
   createdAt: string
 }
 
@@ -97,6 +96,7 @@ export interface Occurrence {
   repeatRuleId: string | null
   createdAt: string
   isOverdue: boolean
+  completedSubtaskIds: string[]
   activity: Activity
 }
 

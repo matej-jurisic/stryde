@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock, Menu, Inbox, MoreHorizontal } from 'lucide-react'
+import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock, Menu, Inbox, MoreHorizontal, ListChecks } from 'lucide-react'
 import { occurrencesApi, categoriesApi } from '@/lib/api'
 import type { Category, Occurrence, EventStatus } from '@/lib/types'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
 import { Badge } from '@/components/ui/Badge'
 import { EventModal } from '@/components/events/EventModal'
+import { OccurrenceSubtasksModal } from '@/components/events/OccurrenceSubtasksModal'
 import { CategoryModal } from '@/components/categories/CategoryModal'
 import { PageHeader } from '@/components/layout/PageHeader'
 
@@ -97,7 +98,10 @@ interface InboxRowProps {
 function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
   const qc = useQueryClient()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [subtasksOpen, setSubtasksOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const hasSubtasks = occurrence.activity.subtasks.length > 0
+  const completedCount = occurrence.completedSubtaskIds.length
 
   useEffect(() => {
     if (!menuOpen) return
@@ -156,7 +160,7 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
             <Badge key={goal.id} tone="focus">{goal.title}</Badge>
           )}
         </div>
-        {(occurrence.startAt || occurrence.endAt || occurrence.isAllDay || category) && (
+        {(occurrence.startAt || occurrence.endAt || occurrence.isAllDay || category || hasSubtasks) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
             {(occurrence.startAt || occurrence.endAt || occurrence.isAllDay) && (
               <span className="whitespace-nowrap flex items-center gap-1 text-xs text-muted-foreground">
@@ -169,6 +173,9 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
                 <CategoryIcon icon={category.icon} color={category.color} size={11} strokeWidth={2} />
                 {category.name}
               </span>
+            )}
+            {hasSubtasks && (
+              <span className="text-xs text-muted-foreground">{completedCount}/{occurrence.activity.subtasks.length}</span>
             )}
           </div>
         )}
@@ -184,6 +191,15 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
         </button>
         {menuOpen && (
           <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+            {hasSubtasks && (
+              <button
+                onClick={() => { setSubtasksOpen(true); setMenuOpen(false) }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+              >
+                <ListChecks className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                Subtasks
+              </button>
+            )}
             {isPending && (
               <button
                 onClick={() => { statusMutation.mutate('skipped'); setMenuOpen(false) }}
@@ -219,6 +235,14 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
           </div>
         )}
       </div>
+
+      {hasSubtasks && subtasksOpen && (
+        <OccurrenceSubtasksModal
+          open={subtasksOpen}
+          onClose={() => setSubtasksOpen(false)}
+          occurrence={occurrence}
+        />
+      )}
     </li>
   )
 }

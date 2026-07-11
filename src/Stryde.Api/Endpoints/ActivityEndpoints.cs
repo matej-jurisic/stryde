@@ -18,6 +18,14 @@ public static class ActivityEndpoints
             return Results.Ok(await svc.ListAsync(userId.Value, goalId));
         });
 
+        group.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal principal, ActivityService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var result = await svc.GetAsync(id, userId.Value);
+            return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
+        });
+
         group.MapPost("/", async (CreateActivityRequest req, ClaimsPrincipal principal, ActivityService svc) =>
         {
             var userId = principal.GetUserId();
@@ -70,12 +78,5 @@ public static class ActivityEndpoints
             return result.IsSuccess ? Results.NoContent() : result.Error!.ToProblem();
         });
 
-        subtasks.MapPost("/{id:guid}/toggle", async (Guid activityId, Guid id, ClaimsPrincipal principal, ActivitySubtaskService svc) =>
-        {
-            var userId = principal.GetUserId();
-            if (userId is null) return Results.Unauthorized();
-            var result = await svc.ToggleAsync(id, activityId, userId.Value);
-            return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
-        });
     }
 }

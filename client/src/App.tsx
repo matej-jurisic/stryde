@@ -11,6 +11,8 @@ import { InboxPage } from '@/pages/InboxPage'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { ActivitiesPage } from '@/pages/ActivitiesPage'
+import { GoalDetailPage } from '@/pages/GoalDetailPage'
+import { ActivityDetailPage } from '@/pages/ActivityDetailPage'
 
 function AppRoutes() {
   const { status, setStatus } = useAuthStore()
@@ -45,8 +47,10 @@ function AppRoutes() {
         <Route path="/plan"     element={<PlanPage />} />
         <Route path="/inbox"    element={<InboxPage />} />
         <Route path="/calendar" element={<CalendarPage />} />
-        <Route path="/goals"      element={<GoalsPage />} />
-        <Route path="/activities" element={<ActivitiesPage />} />
+        <Route path="/goals"         element={<GoalsPage />} />
+        <Route path="/goals/:id"     element={<GoalDetailPage />} />
+        <Route path="/activities"    element={<ActivitiesPage />} />
+        <Route path="/activities/:id" element={<ActivityDetailPage />} />
         <Route path="/settings"   element={<SettingsPage />} />
         <Route path="/"       element={<Navigate to="/plan" replace />} />
         <Route path="*"       element={<Navigate to="/plan" replace />} />

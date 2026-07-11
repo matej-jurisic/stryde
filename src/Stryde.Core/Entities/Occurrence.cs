@@ -22,4 +22,5 @@ public class Occurrence
 
     public Activity Activity { get; set; } = null!;
     public RepeatRule? RepeatRule { get; set; }
+    public ICollection<OccurrenceSubtaskCompletion> SubtaskCompletions { get; set; } = [];
 }

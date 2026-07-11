@@ -48,16 +48,4 @@ public class ActivitySubtaskService(StrydeDbContext db)
         await db.SaveChangesAsync();
         return Result.Success();
     }
-
-    public async Task<Result<ActivitySubtaskDto>> ToggleAsync(Guid id, Guid activityId, Guid userId)
-    {
-        var subtask = await db.ActivitySubtasks
-            .Include(s => s.Activity)
-            .FirstOrDefaultAsync(s => s.Id == id && s.ActivityId == activityId && s.Activity.UserId == userId);
-        if (subtask is null) return Result<ActivitySubtaskDto>.Fail(new Error(ErrorType.NotFound, "Subtask not found."));
-
-        subtask.IsDone = !subtask.IsDone;
-        await db.SaveChangesAsync();
-        return Result<ActivitySubtaskDto>.Success(ActivitySubtaskDto.FromEntity(subtask));
-    }
 }

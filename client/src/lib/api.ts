@@ -69,6 +69,8 @@ export async function request<T>(path: string, init: RequestInit = {}, retry = t
 }
 
 export const activitiesApi = {
+  get: (id: string) => request<Activity>(`/api/activities/${id}`),
+
   list: (params?: { goalId?: string }) => {
     const q = new URLSearchParams()
     if (params?.goalId) q.set('goalId', params.goalId)
@@ -93,19 +95,17 @@ export const activitySubtasksApi = {
 
   delete: (activityId: string, id: string) =>
     request<void>(`/api/activities/${activityId}/subtasks/${id}`, { method: 'DELETE' }),
-
-  toggle: (activityId: string, id: string) =>
-    request<ActivitySubtask>(`/api/activities/${activityId}/subtasks/${id}/toggle`, { method: 'POST' }),
 }
 
 export const occurrencesApi = {
-  list: (params?: { status?: string; startFrom?: string; endBefore?: string; floating?: boolean; goalId?: string }) => {
+  list: (params?: { status?: string; startFrom?: string; endBefore?: string; floating?: boolean; goalId?: string; activityId?: string }) => {
     const q = new URLSearchParams()
     if (params?.status) q.set('status', params.status)
     if (params?.startFrom) q.set('startFrom', params.startFrom)
     if (params?.endBefore) q.set('endBefore', params.endBefore)
     if (params?.floating) q.set('floating', 'true')
     if (params?.goalId) q.set('goalId', params.goalId)
+    if (params?.activityId) q.set('activityId', params.activityId)
     return request<Occurrence[]>(`/api/occurrences${q.size ? `?${q}` : ''}`)
   },
 
@@ -121,6 +121,9 @@ export const occurrencesApi = {
 
   setStatus: (id: string, status: import('./types').EventStatus) =>
     request<Occurrence>(`/api/occurrences/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+
+  toggleSubtask: (id: string, subtaskId: string) =>
+    request<Occurrence>(`/api/occurrences/${id}/subtasks/${subtaskId}/toggle`, { method: 'POST' }),
 
   createEvent: (body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
     request<Occurrence>('/api/occurrences/event', { method: 'POST', body: JSON.stringify(body) }),

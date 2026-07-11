@@ -9,6 +9,18 @@ namespace Stryde.Core.Services;
 
 public class ActivityService(StrydeDbContext db)
 {
+    public async Task<Result<ActivityDto>> GetAsync(Guid id, Guid userId)
+    {
+        var a = await db.Activities
+            .Include(a => a.Category)
+            .Include(a => a.Goal)
+            .Include(a => a.Subtasks)
+            .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);
+        return a is null
+            ? Result<ActivityDto>.Fail(new Error(ErrorType.NotFound, "Activity not found."))
+            : Result<ActivityDto>.Success(ActivityDto.FromEntity(a));
+    }
+
     public async Task<List<ActivityDto>> ListAsync(Guid userId, Guid? goalId = null)
     {
         var query = db.Activities

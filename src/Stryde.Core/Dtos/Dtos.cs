@@ -50,9 +50,9 @@ public sealed record CreateActivityRequest(string Title, Guid? CategoryId, Guid?
 public sealed record UpdateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
 
 // Activity subtasks
-public sealed record ActivitySubtaskDto(Guid Id, Guid ActivityId, string Title, bool IsDone, DateTimeOffset CreatedAt)
+public sealed record ActivitySubtaskDto(Guid Id, Guid ActivityId, string Title, DateTimeOffset CreatedAt)
 {
-    public static ActivitySubtaskDto FromEntity(ActivitySubtask s) => new(s.Id, s.ActivityId, s.Title, s.IsDone, s.CreatedAt);
+    public static ActivitySubtaskDto FromEntity(ActivitySubtask s) => new(s.Id, s.ActivityId, s.Title, s.CreatedAt);
 }
 
 public sealed record CreateActivitySubtaskRequest(string Title);
@@ -97,6 +97,7 @@ public sealed record OccurrenceDto(
     DateTimeOffset? WindowStart,
     DateTimeOffset? WindowEnd,
     int? WindowDurationMinutes,
+    List<Guid> CompletedSubtaskIds,
     ActivityDto Activity)
 {
     public static OccurrenceDto FromEntity(Occurrence o, DayContext ctx, DateTimeOffset nowUtc) => new(
@@ -108,6 +109,7 @@ public sealed record OccurrenceDto(
         o.IsAllDay,
         o.IsPlanned, o.DurationMinutes,
         o.WindowStart, o.WindowEnd, o.WindowDurationMinutes,
+        o.SubtaskCompletions.Select(c => c.SubtaskId).ToList(),
         ActivityDto.FromEntity(o.Activity));
 }
 

@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, X, Pencil, Trash2, Clock, CalendarPlus, Copy } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
@@ -70,6 +71,30 @@ interface EventDetailModalProps {
 
 export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onSchedule, onDuplicate }: EventDetailModalProps) {
   const qc = useQueryClient()
+  const [completedSubtaskIds, setCompletedSubtaskIds] = useState(() => new Set(occurrence?.completedSubtaskIds ?? []))
+
+  useEffect(() => {
+    setCompletedSubtaskIds(new Set(occurrence?.completedSubtaskIds ?? []))
+  }, [occurrence?.completedSubtaskIds])
+
+  const subtaskToggleMutation = useMutation({
+    mutationFn: (subtaskId: string) => occurrencesApi.toggleSubtask(occurrence!.id, subtaskId),
+    onMutate: (subtaskId) => {
+      setCompletedSubtaskIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(subtaskId)) next.delete(subtaskId); else next.add(subtaskId)
+        return next
+      })
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['events'] }),
+    onError: (_, subtaskId) => {
+      setCompletedSubtaskIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(subtaskId)) next.delete(subtaskId); else next.add(subtaskId)
+        return next
+      })
+    },
+  })
 
   const statusMutation = useMutation({
     mutationFn: (status: EventStatus) => occurrencesApi.setStatus(occurrence!.id, status),
@@ -201,6 +226,36 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
             <Badge tone={occurrence.status === 'done' ? 'green' : 'neutral'}>
               {occurrence.status === 'done' ? 'Completed' : 'Skipped'}
             </Badge>
+          </div>
+        )}
+
+        {occurrence.activity.subtasks.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Subtasks ({completedSubtaskIds.size}/{occurrence.activity.subtasks.length})
+            </span>
+            <ul className="flex flex-col divide-y divide-border rounded-lg border border-border">
+              {occurrence.activity.subtasks.map((s) => {
+                const done = completedSubtaskIds.has(s.id)
+                return (
+                  <li key={s.id} className="flex items-center gap-3 px-3 py-2.5">
+                    <button
+                      onClick={() => subtaskToggleMutation.mutate(s.id)}
+                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors ${
+                        done
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-border bg-background hover:border-primary'
+                      }`}
+                    >
+                      {done && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+                    </button>
+                    <span className={`flex-1 text-sm ${done ? 'text-muted-foreground line-through' : 'text-foreground'}`}>
+                      {s.title}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
           </div>
         )}
       </div>

@@ -20,6 +20,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var activity = await db.Activities
             .Include(a => a.Category)
             .Include(a => a.Goal)
+            .Include(a => a.Subtasks)
             .FirstOrDefaultAsync(a => a.Id == req.ActivityId && a.UserId == userId);
         if (activity is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Activity not found."));
 
@@ -49,6 +50,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var o = await db.Occurrences
             .Include(o => o.Activity).ThenInclude(a => a.Category)
             .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
+            .Include(o => o.SubtaskCompletions)
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
@@ -60,16 +63,20 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         DateTimeOffset? startFrom = null,
         DateTimeOffset? endBefore = null,
         bool floatingOnly = false,
-        Guid? goalId = null)
+        Guid? goalId = null,
+        Guid? activityId = null)
     {
         var query = db.Occurrences
             .Include(o => o.Activity).ThenInclude(a => a.Category)
             .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
+            .Include(o => o.SubtaskCompletions)
             .Where(o => o.UserId == userId);
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
         if (floatingOnly) query = query.Where(o => o.StartAt == null && o.EndAt == null && o.WindowStart == null && !o.IsAllDay && !o.IsPlanned);
         if (goalId.HasValue) query = query.Where(o => o.Activity.GoalId == goalId.Value);
+        if (activityId.HasValue) query = query.Where(o => o.ActivityId == activityId.Value);
 
         var all = await query.ToListAsync();
 
@@ -117,6 +124,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var o = await db.Occurrences
             .Include(o => o.Activity).ThenInclude(a => a.Category)
             .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
+            .Include(o => o.SubtaskCompletions)
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
 
@@ -206,6 +215,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var o = await db.Occurrences
             .Include(o => o.Activity).ThenInclude(a => a.Category)
             .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
+            .Include(o => o.SubtaskCompletions)
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
         if (o.Activity.Kind != ActivityKind.@event)
@@ -254,9 +265,34 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var o = await db.Occurrences
             .Include(o => o.Activity).ThenInclude(a => a.Category)
             .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
+            .Include(o => o.SubtaskCompletions)
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
         o.Status = status;
+        await db.SaveChangesAsync();
+        return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
+    }
+
+    public async Task<Result<OccurrenceDto>> ToggleSubtaskAsync(Guid id, Guid subtaskId, Guid userId)
+    {
+        var o = await db.Occurrences
+            .Include(o => o.Activity).ThenInclude(a => a.Category)
+            .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
+            .Include(o => o.SubtaskCompletions)
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+        if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
+
+        var subtask = o.Activity.Subtasks.FirstOrDefault(s => s.Id == subtaskId);
+        if (subtask is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Subtask not found."));
+
+        var existing = o.SubtaskCompletions.FirstOrDefault(c => c.SubtaskId == subtaskId);
+        if (existing is not null)
+            db.OccurrenceSubtaskCompletions.Remove(existing);
+        else
+            db.OccurrenceSubtaskCompletions.Add(new OccurrenceSubtaskCompletion { OccurrenceId = id, SubtaskId = subtaskId });
+
         await db.SaveChangesAsync();
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
     }
@@ -266,6 +302,13 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var ctx = await settings.GetDayContextAsync(userId);
         return OccurrenceDto.FromEntity(o, ctx, DateTimeOffset.UtcNow);
     }
+
+    private IQueryable<Occurrence> WithFullIncludes() =>
+        db.Occurrences
+            .Include(o => o.Activity).ThenInclude(a => a.Category)
+            .Include(o => o.Activity).ThenInclude(a => a.Goal)
+            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
+            .Include(o => o.SubtaskCompletions);
 
     private static Error? ValidateWindowAndStartAt(DateTimeOffset? startAt, DateTimeOffset? windowStart) =>
         startAt.HasValue && windowStart.HasValue

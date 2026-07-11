@@ -13,7 +13,7 @@ public static class OccurrenceEndpoints
 
         group.MapGet("/", async (
             ClaimsPrincipal principal, OccurrenceService svc,
-            string? status, DateTimeOffset? startFrom, DateTimeOffset? endBefore, bool floating = false, Guid? goalId = null) =>
+            string? status, DateTimeOffset? startFrom, DateTimeOffset? endBefore, bool floating = false, Guid? goalId = null, Guid? activityId = null) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
@@ -22,7 +22,7 @@ public static class OccurrenceEndpoints
             if (status is not null && Enum.TryParse<EventStatus>(status, ignoreCase: true, out var parsed))
                 filter = parsed;
 
-            return Results.Ok(await svc.ListAsync(userId.Value, filter, startFrom, endBefore, floating, goalId));
+            return Results.Ok(await svc.ListAsync(userId.Value, filter, startFrom, endBefore, floating, goalId, activityId));
         });
 
         group.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal principal, OccurrenceService svc) =>
@@ -64,6 +64,14 @@ public static class OccurrenceEndpoints
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
             var result = await svc.SetStatusAsync(id, userId.Value, req.Status);
+            return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
+        });
+
+        group.MapPost("/{id:guid}/subtasks/{subtaskId:guid}/toggle", async (Guid id, Guid subtaskId, ClaimsPrincipal principal, OccurrenceService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var result = await svc.ToggleSubtaskAsync(id, subtaskId, userId.Value);
             return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
         });
 
