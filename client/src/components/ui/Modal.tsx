@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
@@ -11,8 +11,6 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, footer }: ModalProps) {
-  const [kbOffset, setKbOffset] = useState(0)
-
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -20,28 +18,11 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
     return () => document.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  // When the virtual keyboard opens the visual viewport shrinks; shift the modal
-  // up by the keyboard height so it stays fully visible above the keyboard.
-  useEffect(() => {
-    if (!open) return
-    const vv = window.visualViewport
-    if (!vv) return
-    const update = () => setKbOffset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
-    vv.addEventListener('resize', update)
-    vv.addEventListener('scroll', update)
-    return () => {
-      vv.removeEventListener('resize', update)
-      vv.removeEventListener('scroll', update)
-      setKbOffset(0)
-    }
-  }, [open])
-
   if (!open) return null
 
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex flex-col justify-end sm:items-center sm:justify-center sm:p-4"
-      style={{ paddingBottom: `${kbOffset}px`, transition: 'padding-bottom 0.25s ease-out' }}
       aria-modal="true"
       role="dialog"
       aria-labelledby="modal-title"
@@ -55,10 +36,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
         className="relative z-10 flex w-full flex-col overflow-hidden rounded-t-2xl border-t border-x border-border bg-background sm:rounded-xl sm:border sm:max-w-lg"
         style={{
           boxShadow: 'var(--shadow-pop-value)',
-          maxHeight: kbOffset > 0
-            ? `calc(100vh - ${kbOffset}px - 2.5rem)`
-            : 'min(90vh, calc(100vh - 2.5rem))',
-          transition: 'max-height 0.25s ease-out',
+          maxHeight: 'min(90vh, calc(100vh - 2.5rem))',
         }}
       >
         {/* Drag handle — mobile only */}

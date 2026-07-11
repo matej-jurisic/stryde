@@ -306,11 +306,6 @@ export function PlanPage() {
       occurrencesApi.list({ startFrom: dayStart.toISOString(), endBefore: dayEnd.toISOString() }),
   })
 
-  const { data: floatingOccurrences = [], isLoading: floatingLoading } = useQuery({
-    queryKey: ['events', 'floating'],
-    queryFn: () => occurrencesApi.list({ floating: true, status: 'pending' }),
-  })
-
   const { data: focusGoals = [] } = useQuery({
     queryKey: ['goals', { status: 'focus' }],
     queryFn: () => goalsApi.list({ status: 'focus' }),
@@ -329,7 +324,7 @@ export function PlanPage() {
     [occurrences],
   )
 
-  const isLoading = occurrencesLoading || floatingLoading
+  const isLoading = occurrencesLoading
 
   function prev() { setCurrent((d) => addDays(d, -1)) }
   function next() { setCurrent((d) => addDays(d, 1)) }
@@ -527,31 +522,6 @@ export function PlanPage() {
                   </div>
                 )}
 
-                {/* Floating */}
-                {floatingOccurrences.length > 0 && (
-                  <div>
-                    <div className="mb-2 flex items-center justify-between px-1">
-                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Floating
-                      </h2>
-                      <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
-                        {floatingOccurrences.length}
-                      </span>
-                    </div>
-                    <div className="rounded-lg border border-border">
-                      <ul>
-                        {floatingOccurrences.map((event) => (
-                          <AgendaRow
-                            key={event.id}
-                            event={event}
-                            onEdit={() => openEdit(event)}
-                            onSchedule={() => openSchedule(event)}
-                          />
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                )}
               </>
             )}
           </section>
