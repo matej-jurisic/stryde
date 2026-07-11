@@ -419,6 +419,7 @@ interface DayColumnProps {
   resizeOverlay: { topPx: number; heightPx: number } | null
   isToday: boolean
   borderLeft: boolean
+  borderRight: boolean
   onEventMoveStart: (e: React.PointerEvent, event: Occurrence, topPx: number) => void
   onEventResizeStart: (e: React.PointerEvent, event: Occurrence, side: 'top' | 'bottom') => void
   suppressClickRef: { current: boolean }
@@ -426,7 +427,7 @@ interface DayColumnProps {
   resizingEventId: string | null
 }
 
-function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId }: DayColumnProps) {
+function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
@@ -435,7 +436,9 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
       allEvents.filter((e) => {
         if (!e.startAt) return false
         const startMs = new Date(e.startAt).getTime()
-        const endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
+        // Events without endAt are point-in-time due pins — only show in the day their start falls in
+        if (!e.endAt) return startMs >= dayStart.getTime() && startMs < dayEnd.getTime()
+        const endMs = new Date(e.endAt).getTime()
         return startMs < dayEnd.getTime() && endMs > dayStart.getTime()
       }),
     [allEvents, dayStart.getTime(), dayEnd.getTime()],
@@ -448,11 +451,11 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
 
   return (
     <div
-      className={`relative flex-1 ${borderLeft ? 'border-l border-border' : ''}`}
+      className={`relative flex-1 ${borderLeft ? 'border-l border-border' : ''} ${borderRight ? 'border-r border-border' : ''}`}
       style={{ height: HOUR_PX * 24 }}
     >
-      {/* Hour lines */}
-      {Array.from({ length: 24 }, (_, h) => (
+      {/* Hour lines — skip h=0, sticky header border-b already provides that separator */}
+      {Array.from({ length: 24 }, (_, h) => h > 0 && (
         <div
           key={h}
           className="absolute inset-x-0 border-t border-border"
@@ -527,7 +530,11 @@ export function CalendarPage() {
   })
   const [viewDropOpen, setViewDropOpen] = useState(false)
   const viewDropRef = useRef<HTMLDivElement>(null)
-  const [current, setCurrent] = useState(() => new Date())
+  const [current, setCurrent] = useState(() => {
+    const saved = localStorage.getItem('stryde-calendar-view')
+    const d = new Date()
+    return saved === 'week' ? startOfWeek(d) : d
+  })
   const [modalOpen, setModalOpen] = useState(false)
   const [editingOccurrence, setEditingOccurrence] = useState<Occurrence | undefined>()
   const [defaultStartAt, setDefaultStartAt] = useState<string | undefined>()
@@ -537,6 +544,7 @@ export function CalendarPage() {
   const [scheduleMode, setScheduleMode] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailEvent, setDetailEvent] = useState<Occurrence | null>(null)
+  const [duplicateFromOccurrence, setDuplicateFromOccurrence] = useState<Occurrence | undefined>()
   const scrollRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
@@ -576,6 +584,7 @@ export function CalendarPage() {
     origEndMs: number
     side: 'top' | 'bottom'
   } | null>(null)
+  const swipeRef = useRef<{ direction: 'horizontal' | 'vertical'; startX: number } | null>(null)
 
   const queryClient = useQueryClient()
 
@@ -599,8 +608,7 @@ export function CalendarPage() {
   const days = useMemo<Date[]>(() => {
     if (view === 'day') return [sod(current)]
     if (view === '3day') return Array.from({ length: 3 }, (_, i) => addDays(sod(current), i))
-    const ws = startOfWeek(current)
-    return Array.from({ length: 7 }, (_, i) => addDays(ws, i))
+    return Array.from({ length: 7 }, (_, i) => addDays(sod(current), i))
   }, [view, current])
 
   const rangeStart = days[0]
@@ -653,10 +661,11 @@ export function CalendarPage() {
   }
 
   function goToday() {
-    setCurrent(effectiveToday)
+    setCurrent(view === 'week' ? startOfWeek(effectiveToday) : effectiveToday)
   }
 
   function openFromActivity(activity: Activity) {
+    setDuplicateFromOccurrence(undefined)
     setEditingOccurrence(undefined)
     setDefaultStartAt(undefined)
     setDefaultEndAt(undefined)
@@ -666,11 +675,25 @@ export function CalendarPage() {
   }
 
   function openCreate(startAt?: string, endAt?: string) {
+    setDuplicateFromOccurrence(undefined)
     setDefaultActivity(undefined)
     setEditingOccurrence(undefined)
     setDefaultStartAt(startAt)
     setDefaultEndAt(endAt)
     setFocusStartAt(false)
+    setModalOpen(true)
+  }
+
+  function openDuplicate(o: Occurrence) {
+    setDetailOpen(false)
+    setDetailEvent(null)
+    setEditingOccurrence(undefined)
+    setDefaultActivity(undefined)
+    setDefaultStartAt(undefined)
+    setDefaultEndAt(undefined)
+    setDuplicateFromOccurrence(o)
+    setFocusStartAt(false)
+    setScheduleMode(false)
     setModalOpen(true)
   }
 
@@ -680,6 +703,7 @@ export function CalendarPage() {
   }
 
   function openEdit(o: Occurrence) {
+    setDuplicateFromOccurrence(undefined)
     setDefaultActivity(undefined)
     setEditingOccurrence(o)
     setDefaultStartAt(undefined)
@@ -690,6 +714,7 @@ export function CalendarPage() {
   }
 
   function openSchedule(o: Occurrence) {
+    setDuplicateFromOccurrence(undefined)
     setDefaultActivity(undefined)
     setEditingOccurrence(o)
     setDefaultStartAt(undefined)
@@ -1090,7 +1115,7 @@ export function CalendarPage() {
   // touch handlers as passive, so this has to be a native listener.
   useEffect(() => {
     function onTouchMove(e: TouchEvent) {
-      if (dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current) e.preventDefault()
+      if (dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current || swipeRef.current?.direction === 'horizontal') e.preventDefault()
     }
     document.addEventListener('touchmove', onTouchMove, { passive: false })
     return () => document.removeEventListener('touchmove', onTouchMove)
@@ -1192,6 +1217,7 @@ export function CalendarPage() {
     const timer = setTimeout(() => {
       if (!pendingTouchRef.current) return
       pendingTouchRef.current = null
+      swipeRef.current = null
       try {
         gridRef.current?.setPointerCapture(pointerId)
       } catch {
@@ -1211,7 +1237,14 @@ export function CalendarPage() {
     if (pendingTouchRef.current && !dragRef.current) {
       const dx = e.clientX - pendingTouchRef.current.startClientX
       const dy = e.clientY - pendingTouchRef.current.startClientY
-      if (Math.sqrt(dx * dx + dy * dy) > 15) {
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (swipeRef.current === null && dist > 5) {
+        swipeRef.current = {
+          direction: Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical',
+          startX: pendingTouchRef.current.startClientX,
+        }
+      }
+      if (dist > 15) {
         clearTimeout(pendingTouchRef.current.timer)
         pendingTouchRef.current = null
       }
@@ -1254,13 +1287,21 @@ export function CalendarPage() {
     if (pendingTouchRef.current) {
       clearTimeout(pendingTouchRef.current.timer)
       pendingTouchRef.current = null
+    }
+    if (swipeRef.current?.direction === 'horizontal') {
+      const dx = e.clientX - swipeRef.current.startX
+      if (dx > 40) setCurrent((d) => addDays(d, -1))
+      else if (dx < -40) setCurrent((d) => addDays(d, 1))
+      swipeRef.current = null
       return
     }
+    swipeRef.current = null
     commitTouchDrag(e.clientX, e.clientY)
   }
 
   function handleGridPointerCancel(e: React.PointerEvent<HTMLDivElement>) {
     if (e.pointerType !== 'touch') return
+    swipeRef.current = null
     stopAutoScroll()
     if (pendingTouchRef.current) {
       clearTimeout(pendingTouchRef.current.timer)
@@ -1329,7 +1370,7 @@ export function CalendarPage() {
             value={formatDateInput(current)}
             onChange={(e) => {
               const d = new Date(e.target.value + 'T00:00:00')
-              if (!isNaN(d.getTime())) setCurrent(d)
+              if (!isNaN(d.getTime())) setCurrent(view === 'week' ? startOfWeek(d) : d)
             }}
             onKeyDown={(e) => {
               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
@@ -1350,7 +1391,7 @@ export function CalendarPage() {
                 {(['day', '3day', 'week'] as ViewMode[]).map((v) => (
                   <button
                     key={v}
-                    onClick={() => { setView(v); localStorage.setItem('stryde-calendar-view', v); setViewDropOpen(false) }}
+                    onClick={() => { setView(v); localStorage.setItem('stryde-calendar-view', v); if (v === 'week') setCurrent((d) => startOfWeek(d)); setViewDropOpen(false) }}
                     className={`w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted ${
                       view === v ? 'font-semibold text-foreground' : 'text-muted-foreground'
                     }`}
@@ -1384,10 +1425,10 @@ export function CalendarPage() {
             <div className="sticky top-0 z-40 bg-background">
               <div className="flex border-b border-border">
                 <div className="w-12 shrink-0" />
-                {days.map((day) => (
+                {days.map((day, dayIdx) => (
                   <div
                     key={day.toISOString()}
-                    className={`flex-1 border-l border-border py-2 text-center text-xs ${
+                    className={`flex-1 ${dayIdx === 0 ? 'border-l ' : ''}border-r border-border py-2 text-center text-xs ${
                       isSameDay(day, effectiveToday) ? 'font-semibold text-primary' : 'text-muted-foreground'
                     }`}
                   >
@@ -1403,7 +1444,7 @@ export function CalendarPage() {
                     const ds = sod(day); const de = addDays(ds, 1)
                     const dayAll = allDayEvents.filter((e) => { const t = new Date(e.startAt!).getTime(); return t >= ds.getTime() && t < de.getTime() })
                     return (
-                      <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-border' : 'border-l border-border'}`}>
+                      <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'}`}>
                         {dayAll.map((e) => (
                           <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e).className}`} style={eventAllDayColors(e).style}>
                             {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
@@ -1421,7 +1462,7 @@ export function CalendarPage() {
           {view === 'day' && allDayEvents.some((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 }) && (
             <div className="sticky top-0 z-40 flex border-b border-border bg-background">
               <div className="w-12 shrink-0" />
-              <div className="flex flex-1 flex-col gap-0.5 border-l border-border px-0.5 py-0.5">
+              <div className="flex flex-1 flex-col gap-0.5 border-l border-r border-border px-0.5 py-0.5">
                 {allDayEvents
                   .filter((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 })
                   .map((e) => (
@@ -1467,12 +1508,25 @@ export function CalendarPage() {
                   moveOverlay={moveOverlay?.dayIdx === idx ? { topPx: moveOverlay.topPx, heightPx: moveOverlay.heightPx } : null}
                   resizeOverlay={resizeOverlay.get(idx) ?? null}
                   isToday={isSameDay(day, effectiveToday)}
-                  borderLeft={idx === 0 || view !== 'day'}
+                  borderLeft={idx === 0}
+                  borderRight={true}
                   onEventMoveStart={handleEventMoveStart}
                   onEventResizeStart={handleResizeStart}
                   suppressClickRef={suppressClickRef}
                   movingEventId={movingEventId}
                   resizingEventId={resizingEventId}
+                />
+              ))}
+            </div>
+          </div>
+          {/* Overflow zone: vertical day separators continue below the 24h grid */}
+          <div className="flex border-t border-border" style={{ height: HOUR_PX / 4 }}>
+            <div className="w-12 shrink-0" />
+            <div className="flex flex-1 min-w-0">
+              {days.map((day, idx) => (
+                <div
+                  key={day.toISOString()}
+                  className={`flex-1 ${idx === 0 ? 'border-l border-border' : ''} border-r border-border`}
                 />
               ))}
             </div>
@@ -1488,13 +1542,15 @@ export function CalendarPage() {
         event={detailEvent}
         onEdit={(o) => { setDetailOpen(false); openEdit(o) }}
         onSchedule={(o) => { setDetailOpen(false); openSchedule(o) }}
+        onDuplicate={openDuplicate}
       />
 
       <EventModal
-        key={`${editingOccurrence?.id ?? defaultStartAt ?? defaultActivity?.id ?? 'new'}-${scheduleMode}-${editingOccurrence?.startAt ?? ''}`}
+        key={`${editingOccurrence?.id ?? duplicateFromOccurrence?.id ?? defaultStartAt ?? defaultActivity?.id ?? 'new'}-${scheduleMode}-${editingOccurrence?.startAt ?? ''}`}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         occurrence={editingOccurrence}
+        duplicateFrom={duplicateFromOccurrence}
         focusStartAt={focusStartAt}
         defaultStartAt={defaultStartAt}
         defaultEndAt={defaultEndAt}

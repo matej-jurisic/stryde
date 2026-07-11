@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, X, Pencil, Trash2, Clock, CalendarPlus } from 'lucide-react'
+import { Check, X, Pencil, Trash2, Clock, CalendarPlus, Copy } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -65,9 +65,10 @@ interface EventDetailModalProps {
   event: Occurrence | null
   onEdit: (o: Occurrence) => void
   onSchedule?: (o: Occurrence) => void
+  onDuplicate?: (o: Occurrence) => void
 }
 
-export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onSchedule }: EventDetailModalProps) {
+export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onSchedule, onDuplicate }: EventDetailModalProps) {
   const qc = useQueryClient()
 
   const statusMutation = useMutation({
@@ -125,6 +126,17 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
           >
             <Pencil className="h-4 w-4" strokeWidth={2} />
           </button>
+
+          {onDuplicate && (
+            <button
+              onClick={() => onDuplicate(occurrence)}
+              disabled={busy}
+              aria-label="Duplicate"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            >
+              <Copy className="h-4 w-4" strokeWidth={2} />
+            </button>
+          )}
 
           {isPending && occurrence.isPlanned && onSchedule && (
             <button

@@ -79,6 +79,7 @@ interface OccurrenceModalProps {
   open: boolean
   onClose: () => void
   occurrence?: Occurrence
+  duplicateFrom?: Occurrence
   focusStartAt?: boolean
   defaultStartAt?: string
   defaultEndAt?: string
@@ -86,38 +87,41 @@ interface OccurrenceModalProps {
   scheduleOnly?: boolean
 }
 
-export function EventModal({ open, onClose, occurrence, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, scheduleOnly }: OccurrenceModalProps) {
+export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, scheduleOnly }: OccurrenceModalProps) {
   const qc = useQueryClient()
   const isEdit = Boolean(occurrence)
 
-  const dur = durationToHM(occurrence?.durationMinutes ?? null)
-  const isEventKind = occurrence?.activity.kind === 'event'
+  // For duplicates, `source` provides initial values without enabling edit mode
+  const source = occurrence ?? duplicateFrom
+
+  const dur = durationToHM(source?.durationMinutes ?? null)
+  const isEventKind = source?.activity.kind === 'event'
 
   const [kind, setKind] = useState<ActivityKind>(() => isEventKind ? 'event' : 'activity')
 
   const [form, setForm] = useState<FormState>(() => ({
-    activityId: occurrence?.activityId ?? defaultActivity?.id ?? '',
-    title: isEventKind ? (occurrence?.activity.title ?? '') : (occurrence?.title ?? ''),
-    categoryId: occurrence?.activity.categoryId ?? '',
-    goalId: occurrence?.activity.goalId ?? '',
-    startAt: occurrence ? toInputValue(occurrence.startAt) : (defaultStartAt ?? todayLocal()),
-    endAt: occurrence ? toInputValue(occurrence.endAt) : (defaultEndAt ?? ''),
+    activityId: source?.activityId ?? defaultActivity?.id ?? '',
+    title: isEventKind ? (source?.activity.title ?? '') : (occurrence?.title ?? duplicateFrom?.title ?? ''),
+    categoryId: source?.activity.categoryId ?? '',
+    goalId: source?.activity.goalId ?? '',
+    startAt: occurrence ? toInputValue(occurrence.startAt) : (duplicateFrom ? toInputValue(duplicateFrom.startAt) : (defaultStartAt ?? todayLocal())),
+    endAt: occurrence ? toInputValue(occurrence.endAt) : (duplicateFrom ? toInputValue(duplicateFrom.endAt) : (defaultEndAt ?? '')),
     durationHours: dur.h,
     durationMins: dur.m,
   }))
 
   const [errors, setErrors] = useState<Errors>({})
-  const [isAllDay, setIsAllDay] = useState(() => occurrence?.isAllDay ?? false)
-  const [isPlanned, setIsPlanned] = useState(() => occurrence?.isPlanned ?? false)
+  const [isAllDay, setIsAllDay] = useState(() => source?.isAllDay ?? false)
+  const [isPlanned, setIsPlanned] = useState(() => source?.isPlanned ?? false)
   const [timeMode, setTimeMode] = useState<TimeMode>(() => {
     if (scheduleOnly) {
-      if (!occurrence.startAt && !occurrence.endAt && !occurrence.isAllDay) return 'floating'
-      if (occurrence.startAt && occurrence.endAt) return 'scheduled'
+      if (!occurrence!.startAt && !occurrence!.endAt && !occurrence!.isAllDay) return 'floating'
+      if (occurrence!.startAt && occurrence!.endAt) return 'scheduled'
       return 'due'
     }
-    if (occurrence) {
-      if (!occurrence.startAt && !occurrence.endAt && !occurrence.isAllDay && !occurrence.isPlanned) return 'floating'
-      if (occurrence.startAt && occurrence.endAt) return 'scheduled'
+    if (source) {
+      if (!source.startAt && !source.endAt && !source.isAllDay && !source.isPlanned) return 'floating'
+      if (source.startAt && source.endAt) return 'scheduled'
       return 'due'
     }
     return defaultEndAt ? 'scheduled' : 'due'
@@ -240,7 +244,7 @@ export function EventModal({ open, onClose, occurrence, focusStartAt, defaultSta
     setIsAllDay((v) => !v)
   }
 
-  const selectedActivity = activities.find((a) => a.id === form.activityId) ?? defaultActivity ?? null
+  const selectedActivity = activities.find((a) => a.id === form.activityId) ?? defaultActivity ?? duplicateFrom?.activity ?? null
 
   const segmentClass = (active: boolean) =>
     `flex-1 rounded-md py-2 text-xs font-medium transition-colors ${
