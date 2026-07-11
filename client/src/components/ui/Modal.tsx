@@ -27,7 +27,6 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
     const vv = window.visualViewport
     if (!vv) return
     const update = () => setKbOffset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
-    update()
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
     return () => {
