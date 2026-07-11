@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Zap } from 'lucide-react'
 import { authApi, ApiError } from '@/lib/api'
 import { useAuthStore } from '@/store/auth'
-import { isNative, getServerUrl, setServerUrl } from '@/lib/server-config'
+import { isNative, getServerUrl, setServerUrl, setNativeRefreshToken } from '@/lib/server-config'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 
@@ -24,6 +24,7 @@ export function RegisterPage() {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
       const data = await authApi.register(username, password, timezone)
       setAuth(data.accessToken, data.user)
+      if (isNative() && data.refreshToken) setNativeRefreshToken(data.refreshToken)
       navigate('/plan', { replace: true })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong.')

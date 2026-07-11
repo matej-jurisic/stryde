@@ -7,6 +7,7 @@ export interface User {
 export interface AuthResponse {
   accessToken: string
   user: User
+  refreshToken?: string
 }
 
 export type EventStatus = 'pending' | 'done' | 'skipped'

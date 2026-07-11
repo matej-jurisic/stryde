@@ -1,5 +1,5 @@
 import { useAuthStore } from '@/store/auth'
-import { getServerUrl } from './server-config'
+import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
 import type { AuthResponse, User, Goal, GoalStatus, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, Occurrence } from './types'
 
 export class ApiError extends Error {
@@ -17,10 +17,17 @@ export async function tryRefresh(): Promise<boolean> {
   if (refreshPromise) return refreshPromise
   refreshPromise = (async () => {
     try {
-      const res = await fetch(getServerUrl() + '/api/auth/refresh', { method: 'POST', credentials: 'include' })
+      const headers: Record<string, string> = {}
+      if (isNative()) {
+        const stored = getNativeRefreshToken()
+        if (!stored) return false
+        headers['X-Refresh-Token'] = stored
+      }
+      const res = await fetch(getServerUrl() + '/api/auth/refresh', { method: 'POST', credentials: 'include', headers })
       if (!res.ok) return false
       const data = (await res.json()) as AuthResponse
       useAuthStore.getState().setAuth(data.accessToken, data.user)
+      if (isNative() && data.refreshToken) setNativeRefreshToken(data.refreshToken)
       return true
     } catch {
       return false
@@ -42,6 +49,7 @@ export async function request<T>(path: string, init: RequestInit = {}, retry = t
   if (res.status === 401 && retry) {
     const ok = await tryRefresh()
     if (ok) return request<T>(path, init, false)
+    if (isNative()) setNativeRefreshToken(null)
     useAuthStore.getState().clear()
     throw new ApiError(401, 'Session expired')
   }
@@ -180,8 +188,15 @@ export const authApi = {
   refresh: () =>
     request<AuthResponse>('/api/auth/refresh', { method: 'POST' }, false),
 
-  logout: () =>
-    request<void>('/api/auth/logout', { method: 'POST' }),
+  logout: () => {
+    const headers: Record<string, string> = {}
+    if (isNative()) {
+      const stored = getNativeRefreshToken()
+      if (stored) headers['X-Refresh-Token'] = stored
+      setNativeRefreshToken(null)
+    }
+    return request<void>('/api/auth/logout', { method: 'POST', headers })
+  },
 
   me: () =>
     request<User>('/api/auth/me'),

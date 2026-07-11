@@ -17,7 +17,7 @@ public static class AuthEndpoints
             var result = await auth.RegisterAsync(req.Username, req.Password, req.Timezone);
             if (!result.IsSuccess) return result.Error!.ToProblem();
             cookies.SetToken(ctx, result.Value!.RefreshToken, result.Value.RefreshTokenExpiry);
-            return Results.Ok(new { accessToken = result.Value.AccessToken, user = result.Value.User });
+            return Results.Ok(new { accessToken = result.Value.AccessToken, user = result.Value.User, refreshToken = result.Value.RefreshToken });
         });
 
         group.MapPost("/login", async (LoginRequest req, AuthService auth, RefreshCookieManager cookies, HttpContext ctx) =>
@@ -25,7 +25,7 @@ public static class AuthEndpoints
             var result = await auth.LoginAsync(req.Username, req.Password);
             if (!result.IsSuccess) return result.Error!.ToProblem();
             cookies.SetToken(ctx, result.Value!.RefreshToken, result.Value.RefreshTokenExpiry);
-            return Results.Ok(new { accessToken = result.Value.AccessToken, user = result.Value.User });
+            return Results.Ok(new { accessToken = result.Value.AccessToken, user = result.Value.User, refreshToken = result.Value.RefreshToken });
         });
 
         group.MapPost("/refresh", async (AuthService auth, RefreshCookieManager cookies, HttpContext ctx) =>
@@ -36,7 +36,7 @@ public static class AuthEndpoints
             var result = await auth.RefreshAsync(raw);
             if (!result.IsSuccess) return result.Error!.ToProblem();
             cookies.SetToken(ctx, result.Value!.RefreshToken, result.Value.RefreshTokenExpiry);
-            return Results.Ok(new { accessToken = result.Value.AccessToken, user = result.Value.User });
+            return Results.Ok(new { accessToken = result.Value.AccessToken, user = result.Value.User, refreshToken = result.Value.RefreshToken });
         });
 
         group.MapPost("/logout", async (AuthService auth, RefreshCookieManager cookies, HttpContext ctx) =>
