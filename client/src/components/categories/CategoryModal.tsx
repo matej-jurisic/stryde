@@ -7,9 +7,10 @@ import type { Category } from '@/lib/types'
 import { ApiError } from '@/lib/api'
 
 export const PALETTE = [
-  '#8499B1', '#ef4444', '#f97316', '#f59e0b',
-  '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6',
-  '#ec4899', '#64748b',
+  '#8499B1', '#ef4444', '#f97316', '#f59e0b', '#fbbf24',
+  '#84cc16', '#22c55e', '#10b981', '#14b8a6', '#06b6d4',
+  '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7',
+  '#ec4899', '#f43f5e', '#78716c', '#64748b',
 ]
 
 export function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
