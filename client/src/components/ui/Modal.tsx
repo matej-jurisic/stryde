@@ -28,12 +28,12 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
       aria-labelledby="modal-title"
     >
       <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-modal-overlay"
         onClick={onClose}
         aria-hidden="true"
       />
       <div
-        className="relative z-10 flex w-full flex-col overflow-hidden rounded-t-2xl border-t border-x border-border bg-background sm:rounded-xl sm:border sm:max-w-lg"
+        className="relative z-10 flex w-full flex-col overflow-hidden rounded-t-2xl border-t border-x border-border bg-background animate-modal-panel-up sm:rounded-xl sm:border sm:max-w-lg sm:animate-modal-panel"
         style={{
           boxShadow: 'var(--shadow-pop-value)',
           maxHeight: 'min(90vh, calc(100vh - 2.5rem))',

@@ -12,6 +12,7 @@ export interface AuthResponse {
 
 export type EventStatus = 'pending' | 'done' | 'skipped'
 export type GoalStatus = 'focus' | 'active' | 'bench' | 'closed'
+export type GoalKind = 'milestone' | 'ongoing'
 export type CheckpointStatus = 'pending' | 'reached'
 export type CheckpointSize = 'tiny' | 'small' | 'normal' | 'big' | 'huge'
 export type ActivityKind = 'activity' | 'event'
@@ -20,6 +21,7 @@ export interface GoalSummary {
   id: string
   title: string
   status: GoalStatus
+  kind: GoalKind
 }
 
 export interface Checkpoint {
@@ -38,6 +40,7 @@ export interface Goal {
   title: string
   description: string | null
   status: GoalStatus
+  kind: GoalKind
   createdAt: string
   checkpoints: Checkpoint[]
 }

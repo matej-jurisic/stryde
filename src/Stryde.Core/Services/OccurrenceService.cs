@@ -59,7 +59,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         EventStatus? status = null,
         DateTimeOffset? startFrom = null,
         DateTimeOffset? endBefore = null,
-        bool floatingOnly = false)
+        bool floatingOnly = false,
+        Guid? goalId = null)
     {
         var query = db.Occurrences
             .Include(o => o.Activity).ThenInclude(a => a.Category)
@@ -68,6 +69,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
         if (floatingOnly) query = query.Where(o => o.StartAt == null && o.EndAt == null && o.WindowStart == null && !o.IsAllDay && !o.IsPlanned);
+        if (goalId.HasValue) query = query.Where(o => o.Activity.GoalId == goalId.Value);
 
         var all = await query.ToListAsync();
 

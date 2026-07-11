@@ -7,6 +7,7 @@ import type { Goal, GoalStatus, Checkpoint, CheckpointSize } from '@/lib/types'
 import { Badge } from '@/components/ui/Badge'
 import { GoalModal } from '@/components/goals/GoalModal'
 import { CheckpointModal } from '@/components/goals/CheckpointModal'
+import { GoalDetailModal } from '@/components/goals/GoalDetailModal'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ function CheckpointRow({ checkpoint, goalId, isLast, onEdit }: CheckpointRowProp
 function GoalMenu({
   transitions,
   isPending,
+  isMilestone,
   onEdit,
   onDelete,
   onStatusSelect,
@@ -120,6 +122,7 @@ function GoalMenu({
 }: {
   transitions: { label: string; value: GoalStatus }[]
   isPending: boolean
+  isMilestone: boolean
   onEdit: () => void
   onDelete: () => void
   onStatusSelect: (value: GoalStatus) => void
@@ -155,13 +158,15 @@ function GoalMenu({
             <Pencil className="h-3 w-3" strokeWidth={2} />
             Edit goal
           </button>
-          <button
-            onClick={() => { onAddCheckpoint(); setOpen(false) }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-          >
-            <Plus className="h-3 w-3" strokeWidth={2} />
-            Add checkpoint
-          </button>
+          {isMilestone && (
+            <button
+              onClick={() => { onAddCheckpoint(); setOpen(false) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+            >
+              <Plus className="h-3 w-3" strokeWidth={2} />
+              Add checkpoint
+            </button>
+          )}
           {transitions.length > 0 && <div className="my-1 border-t border-border" />}
           {transitions.map((t) => (
             <button
@@ -188,16 +193,18 @@ function GoalMenu({
 
 interface GoalRowProps {
   goal: Goal
+  onView: (g: Goal) => void
   onEdit: (g: Goal) => void
   onAddCheckpoint: (goalId: string) => void
   onEditCheckpoint: (goalId: string, cp: Checkpoint) => void
 }
 
-function GoalRow({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalRowProps) {
+function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalRowProps) {
   const qc = useQueryClient()
   const [statusError, setStatusError] = useState('')
   const [expanded, setExpanded] = useState(false)
   const tier = (goal.status === 'closed' ? 'bench' : goal.status) as Tier
+  const isMilestone = goal.kind === 'milestone'
   const believed = believedProgress(goal.checkpoints)
   const transitions = STATUS_TRANSITIONS[goal.status]
   const hasCheckpoints = goal.checkpoints.length > 0
@@ -227,8 +234,8 @@ function GoalRow({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalRowPro
   return (
     <li className="flex flex-col">
       <div className="flex items-center gap-2 px-3 py-2.5 transition-colors hover:bg-muted/40">
-        {/* Expand chevron (when checkpoints exist) */}
-        {hasCheckpoints ? (
+        {/* Expand chevron (milestone goals with checkpoints only) */}
+        {isMilestone && hasCheckpoints ? (
           <button
             onClick={() => setExpanded((e) => !e)}
             className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
@@ -243,15 +250,18 @@ function GoalRow({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalRowPro
         )}
 
         {/* Title + description */}
-        <div className="min-w-0 flex-1">
+        <button
+          onClick={() => onView(goal)}
+          className="min-w-0 flex-1 text-left hover:underline"
+        >
           <span className="text-sm text-foreground">{goal.title}</span>
           {goal.description && (
             <p className="truncate text-xs text-muted-foreground">{goal.description}</p>
           )}
-        </div>
+        </button>
 
         {/* Compact inline progress */}
-        {goal.status !== 'closed' && hasCheckpoints && (
+        {isMilestone && goal.status !== 'closed' && hasCheckpoints && (
           <div className="flex w-20 shrink-0 items-center gap-1.5">
             <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-muted">
               <div
@@ -275,6 +285,7 @@ function GoalRow({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalRowPro
         <GoalMenu
           transitions={transitions}
           isPending={statusMutation.isPending}
+          isMilestone={isMilestone}
           onEdit={() => onEdit(goal)}
           onDelete={() => deleteMutation.mutate()}
           onStatusSelect={(s) => statusMutation.mutate(s)}
@@ -283,7 +294,7 @@ function GoalRow({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalRowPro
       </div>
 
       {/* Expanded checkpoint list */}
-      {expanded && hasCheckpoints && (
+      {isMilestone && expanded && hasCheckpoints && (
         <div className="border-t border-border px-3 pb-3 pt-3">
           <ul className="flex flex-col">
             {goal.checkpoints.map((cp, i) => (
@@ -315,6 +326,7 @@ function GoalRow({ goal, onEdit, onAddCheckpoint, onEditCheckpoint }: GoalRowPro
 
 export function GoalsPage() {
   const [goalModal, setGoalModal] = useState<{ open: boolean; goal?: Goal }>({ open: false })
+  const [detailModal, setDetailModal] = useState<{ open: boolean; goal: Goal | null }>({ open: false, goal: null })
   const [cpModal, setCpModal] = useState<{ open: boolean; goalId: string; checkpoint?: Checkpoint }>({
     open: false, goalId: '',
   })
@@ -392,6 +404,7 @@ export function GoalsPage() {
                           <GoalRow
                             key={g.id}
                             goal={g}
+                            onView={(g) => setDetailModal({ open: true, goal: g })}
                             onEdit={(g) => setGoalModal({ open: true, goal: g })}
                             onAddCheckpoint={(goalId) => setCpModal({ open: true, goalId })}
                             onEditCheckpoint={(goalId, cp) => setCpModal({ open: true, goalId, checkpoint: cp })}
@@ -407,6 +420,11 @@ export function GoalsPage() {
         </div>
       </div>
 
+      <GoalDetailModal
+        open={detailModal.open}
+        onClose={() => setDetailModal({ open: false, goal: null })}
+        goal={detailModal.goal}
+      />
       <GoalModal
         open={goalModal.open}
         onClose={() => setGoalModal({ open: false })}

@@ -55,6 +55,10 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .Property(g => g.Status)
             .HasConversion<string>();
 
+        modelBuilder.Entity<Goal>()
+            .Property(g => g.Kind)
+            .HasConversion<string>();
+
         modelBuilder.Entity<Checkpoint>()
             .Property(c => c.Status)
             .HasConversion<string>();

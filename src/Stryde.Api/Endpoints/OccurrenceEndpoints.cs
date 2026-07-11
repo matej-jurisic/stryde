@@ -13,7 +13,7 @@ public static class OccurrenceEndpoints
 
         group.MapGet("/", async (
             ClaimsPrincipal principal, OccurrenceService svc,
-            string? status, DateTimeOffset? startFrom, DateTimeOffset? endBefore, bool floating = false) =>
+            string? status, DateTimeOffset? startFrom, DateTimeOffset? endBefore, bool floating = false, Guid? goalId = null) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
@@ -22,7 +22,7 @@ public static class OccurrenceEndpoints
             if (status is not null && Enum.TryParse<EventStatus>(status, ignoreCase: true, out var parsed))
                 filter = parsed;
 
-            return Results.Ok(await svc.ListAsync(userId.Value, filter, startFrom, endBefore, floating));
+            return Results.Ok(await svc.ListAsync(userId.Value, filter, startFrom, endBefore, floating, goalId));
         });
 
         group.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal principal, OccurrenceService svc) =>

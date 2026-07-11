@@ -19,6 +19,7 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
             UserId = userId,
             Title = req.Title.Trim(),
             Description = req.Description?.Trim(),
+            Kind = req.Kind,
         };
         db.Goals.Add(goal);
         await db.SaveChangesAsync();
@@ -63,6 +64,7 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
 
         goal.Title = req.Title.Trim();
         goal.Description = req.Description?.Trim();
+        goal.Kind = req.Kind;
         await db.SaveChangesAsync();
         return Result<GoalDto>.Success(GoalDto.FromEntity(goal));
     }

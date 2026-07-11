@@ -21,9 +21,9 @@ public sealed record CategorySummaryDto(Guid Id, string Name, string Color, stri
     public static CategorySummaryDto FromEntity(Entities.Category c) => new(c.Id, c.Name, c.Color, c.Icon);
 }
 
-public sealed record GoalSummaryDto(Guid Id, string Title, string Status)
+public sealed record GoalSummaryDto(Guid Id, string Title, string Status, string Kind)
 {
-    public static GoalSummaryDto FromEntity(Goal g) => new(g.Id, g.Title, g.Status.ToString());
+    public static GoalSummaryDto FromEntity(Goal g) => new(g.Id, g.Title, g.Status.ToString(), g.Kind.ToString());
 }
 
 // Activities
@@ -140,17 +140,18 @@ public sealed record GoalDto(
     string Title,
     string? Description,
     string Status,
+    string Kind,
     DateTimeOffset CreatedAt,
     List<CheckpointDto> Checkpoints)
 {
     public static GoalDto FromEntity(Goal g) => new(
         g.Id, g.UserId, g.Title, g.Description,
-        g.Status.ToString(), g.CreatedAt,
+        g.Status.ToString(), g.Kind.ToString(), g.CreatedAt,
         g.Checkpoints.Select(CheckpointDto.FromEntity).ToList());
 }
 
-public sealed record CreateGoalRequest(string Title, string? Description);
-public sealed record UpdateGoalRequest(string Title, string? Description);
+public sealed record CreateGoalRequest(string Title, string? Description, GoalKind Kind = GoalKind.milestone);
+public sealed record UpdateGoalRequest(string Title, string? Description, GoalKind Kind = GoalKind.milestone);
 public sealed record SetGoalStatusRequest(GoalStatus Status);
 
 // Checkpoints

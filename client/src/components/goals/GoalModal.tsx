@@ -4,11 +4,12 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { goalsApi, ApiError } from '@/lib/api'
-import type { Goal } from '@/lib/types'
+import type { Goal, GoalKind } from '@/lib/types'
 
 interface FormState {
   title: string
   description: string
+  kind: GoalKind
 }
 
 interface Errors {
@@ -32,7 +33,7 @@ export function GoalModal({ open, onClose, goal }: GoalModalProps) {
   const qc = useQueryClient()
   const isEdit = Boolean(goal)
 
-  const [form, setForm] = useState<FormState>({ title: '', description: '' })
+  const [form, setForm] = useState<FormState>({ title: '', description: '', kind: 'milestone' })
   const [errors, setErrors] = useState<Errors>({})
   const [apiError, setApiError] = useState('')
 
@@ -41,6 +42,7 @@ export function GoalModal({ open, onClose, goal }: GoalModalProps) {
       setForm({
         title: goal?.title ?? '',
         description: goal?.description ?? '',
+        kind: goal?.kind ?? 'milestone',
       })
       setErrors({})
       setApiError('')
@@ -52,6 +54,7 @@ export function GoalModal({ open, onClose, goal }: GoalModalProps) {
       const payload = {
         title: form.title.trim(),
         description: form.description.trim() || null,
+        kind: form.kind,
       }
       return isEdit ? goalsApi.update(goal!.id, payload) : goalsApi.create(payload)
     },
@@ -95,6 +98,25 @@ export function GoalModal({ open, onClose, goal }: GoalModalProps) {
         error={errors.title}
         autoFocus
       />
+      <div className="flex flex-col gap-1.5">
+        <label className="text-sm font-medium text-foreground">Type</label>
+        <div className="grid grid-cols-2 rounded-lg border border-input overflow-hidden">
+          {(['milestone', 'ongoing'] as GoalKind[]).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, kind: k }))}
+              className={`py-1.5 text-sm capitalize transition-colors ${
+                form.kind === k
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              {k}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-foreground">Description</label>
         <textarea
