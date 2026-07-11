@@ -58,6 +58,14 @@ export interface Category {
   createdAt: string
 }
 
+export interface ActivitySubtask {
+  id: string
+  activityId: string
+  title: string
+  isDone: boolean
+  createdAt: string
+}
+
 export interface Activity {
   id: string
   userId: string
@@ -68,6 +76,7 @@ export interface Activity {
   createdAt: string
   category: CategorySummary | null
   goal: GoalSummary | null
+  subtasks: ActivitySubtask[]
 }
 
 export interface Occurrence {

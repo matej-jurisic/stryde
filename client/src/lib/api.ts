@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
-import type { AuthResponse, User, Goal, GoalStatus, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, Occurrence } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivitySubtask, Occurrence } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -82,6 +82,20 @@ export const activitiesApi = {
     request<Activity>(`/api/activities/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (id: string) => request<void>(`/api/activities/${id}`, { method: 'DELETE' }),
+}
+
+export const activitySubtasksApi = {
+  create: (activityId: string, body: { title: string }) =>
+    request<ActivitySubtask>(`/api/activities/${activityId}/subtasks`, { method: 'POST', body: JSON.stringify(body) }),
+
+  update: (activityId: string, id: string, body: { title: string }) =>
+    request<ActivitySubtask>(`/api/activities/${activityId}/subtasks/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  delete: (activityId: string, id: string) =>
+    request<void>(`/api/activities/${activityId}/subtasks/${id}`, { method: 'DELETE' }),
+
+  toggle: (activityId: string, id: string) =>
+    request<ActivitySubtask>(`/api/activities/${activityId}/subtasks/${id}/toggle`, { method: 'POST' }),
 }
 
 export const occurrencesApi = {

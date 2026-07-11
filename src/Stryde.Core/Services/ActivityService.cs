@@ -14,6 +14,7 @@ public class ActivityService(StrydeDbContext db)
         var query = db.Activities
             .Include(a => a.Category)
             .Include(a => a.Goal)
+            .Include(a => a.Subtasks)
             .Where(a => a.UserId == userId && a.Kind == ActivityKind.activity);
 
         if (goalId.HasValue)

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Stryde.Core.Data;
 
@@ -10,9 +11,11 @@ using Stryde.Core.Data;
 namespace Stryde.Core.Migrations
 {
     [DbContext(typeof(StrydeDbContext))]
-    partial class StrydeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260711105057_AddActivitySubtasks")]
+    partial class AddActivitySubtasks
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
@@ -210,15 +213,6 @@ namespace Stryde.Core.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("WindowDurationMinutes")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTimeOffset?>("WindowEnd")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("WindowStart")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");

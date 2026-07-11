@@ -67,7 +67,6 @@ function CategoryCard({ category }: { category: Category }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -75,7 +74,6 @@ function CategoryCard({ category }: { category: Category }) {
     function onPointerDown(e: PointerEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false)
-        setConfirmDelete(false)
       }
     }
     document.addEventListener('pointerdown', onPointerDown)
@@ -109,7 +107,7 @@ function CategoryCard({ category }: { category: Category }) {
   }
 
   return (
-    <article className="relative group flex items-center gap-4 rounded-xl border border-border bg-card p-4">
+    <article className={`relative group flex items-center gap-4 rounded-xl border border-border bg-card p-4${menuOpen ? ' z-10' : ''}`}>
       <div
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
         style={{ backgroundColor: category.color + '22' }}
@@ -126,42 +124,21 @@ function CategoryCard({ category }: { category: Category }) {
         </button>
         {menuOpen && (
           <div className="absolute right-3 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
-            {confirmDelete ? (
-              <>
-                <p className="px-3 py-1.5 text-xs text-foreground">Delete &ldquo;{category.name}&rdquo;?</p>
-                <button
-                  onClick={() => { deleteMutation.mutate(); setMenuOpen(false); setConfirmDelete(false) }}
-                  disabled={deleteMutation.isPending}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
-                >
-                  <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                  Confirm delete
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => { setEditing(true); setMenuOpen(false) }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-                >
-                  <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
-                  Edit
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
-                >
-                  <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                  Delete
-                </button>
-              </>
-            )}
+            <button
+              onClick={() => { setEditing(true); setMenuOpen(false) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+            >
+              <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+              Edit
+            </button>
+            <button
+              onClick={() => { deleteMutation.mutate(); setMenuOpen(false) }}
+              disabled={deleteMutation.isPending}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              Delete
+            </button>
           </div>
         )}
       </div>

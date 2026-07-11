@@ -36,16 +36,27 @@ public sealed record ActivityDto(
     string Kind,
     DateTimeOffset CreatedAt,
     CategorySummaryDto? Category,
-    GoalSummaryDto? Goal)
+    GoalSummaryDto? Goal,
+    List<ActivitySubtaskDto> Subtasks)
 {
     public static ActivityDto FromEntity(Activity a) => new(
         a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.Kind.ToString(), a.CreatedAt,
         a.Category is not null ? CategorySummaryDto.FromEntity(a.Category) : null,
-        a.Goal is not null ? GoalSummaryDto.FromEntity(a.Goal) : null);
+        a.Goal is not null ? GoalSummaryDto.FromEntity(a.Goal) : null,
+        a.Subtasks.OrderBy(s => s.CreatedAt).Select(ActivitySubtaskDto.FromEntity).ToList());
 }
 
 public sealed record CreateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
 public sealed record UpdateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
+
+// Activity subtasks
+public sealed record ActivitySubtaskDto(Guid Id, Guid ActivityId, string Title, bool IsDone, DateTimeOffset CreatedAt)
+{
+    public static ActivitySubtaskDto FromEntity(ActivitySubtask s) => new(s.Id, s.ActivityId, s.Title, s.IsDone, s.CreatedAt);
+}
+
+public sealed record CreateActivitySubtaskRequest(string Title);
+public sealed record UpdateActivitySubtaskRequest(string Title);
 
 public sealed record CreateEventRequest(
     string Title,
@@ -83,6 +94,9 @@ public sealed record OccurrenceDto(
     bool IsAllDay,
     bool IsPlanned,
     int? DurationMinutes,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes,
     ActivityDto Activity)
 {
     public static OccurrenceDto FromEntity(Occurrence o, DayContext ctx, DateTimeOffset nowUtc) => new(
@@ -93,6 +107,7 @@ public sealed record OccurrenceDto(
         DayMath.IsOverdue(o, ctx, nowUtc),
         o.IsAllDay,
         o.IsPlanned, o.DurationMinutes,
+        o.WindowStart, o.WindowEnd, o.WindowDurationMinutes,
         ActivityDto.FromEntity(o.Activity));
 }
 
@@ -103,7 +118,10 @@ public sealed record CreateOccurrenceRequest(
     DateTimeOffset? EndAt,
     bool IsAllDay,
     bool IsPlanned,
-    int? DurationMinutes);
+    int? DurationMinutes,
+    DateTimeOffset? WindowStart,
+    DateTimeOffset? WindowEnd,
+    int? WindowDurationMinutes);
 
 public sealed record UpdateOccurrenceRequest(
     string? Title,

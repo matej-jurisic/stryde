@@ -14,6 +14,9 @@ public class Occurrence
     public bool IsAllDay { get; set; } = false;
     public bool IsPlanned { get; set; } = false;
     public int? DurationMinutes { get; set; }
+    public DateTimeOffset? WindowStart { get; set; }
+    public DateTimeOffset? WindowEnd { get; set; }
+    public int? WindowDurationMinutes { get; set; }
     public Guid? RepeatRuleId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 

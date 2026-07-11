@@ -12,6 +12,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
     public async Task<Result<OccurrenceDto>> CreateAsync(Guid userId, CreateOccurrenceRequest req)
     {
         var err = ValidateOptionalTitle(req.Title)
+            ?? ValidateWindowAndStartAt(req.StartAt, req.WindowStart)
             ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
             ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes);
         if (err is not null) return Result<OccurrenceDto>.Fail(err);
@@ -33,6 +34,9 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             IsAllDay = req.IsAllDay,
             IsPlanned = req.IsPlanned,
             DurationMinutes = req.DurationMinutes,
+            WindowStart = req.WindowStart,
+            WindowEnd = req.WindowEnd,
+            WindowDurationMinutes = req.WindowDurationMinutes,
         };
 
         db.Occurrences.Add(o);
@@ -63,7 +67,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             .Where(o => o.UserId == userId);
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
-        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.EndAt == null && !o.IsAllDay && !o.IsPlanned);
+        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.EndAt == null && o.WindowStart == null && !o.IsAllDay && !o.IsPlanned);
 
         var all = await query.ToListAsync();
 
@@ -72,6 +76,13 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         {
             occurrences = occurrences.Where(o =>
             {
+                if (o.WindowStart is not null)
+                {
+                    var wStart = o.WindowStart.Value;
+                    var wEnd = o.WindowEnd ?? o.WindowStart.Value;
+                    return (!endBefore.HasValue || wStart < endBefore.Value)
+                        && (!startFrom.HasValue || wEnd > startFrom.Value);
+                }
                 if (o.StartAt is not null && o.EndAt is not null)
                     return (!endBefore.HasValue || o.StartAt < endBefore.Value)
                         && (!startFrom.HasValue || o.EndAt > startFrom.Value);
@@ -253,6 +264,11 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var ctx = await settings.GetDayContextAsync(userId);
         return OccurrenceDto.FromEntity(o, ctx, DateTimeOffset.UtcNow);
     }
+
+    private static Error? ValidateWindowAndStartAt(DateTimeOffset? startAt, DateTimeOffset? windowStart) =>
+        startAt.HasValue && windowStart.HasValue
+            ? new Error(ErrorType.Validation, "StartAt and WindowStart cannot both be set.")
+            : null;
 
     private static Error? ValidateOptionalTitle(string? title) =>
         !string.IsNullOrWhiteSpace(title) && title.Length > 255

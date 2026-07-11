@@ -16,6 +16,7 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
     public DbSet<RepeatRule> RepeatRules => Set<RepeatRule>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
     public DbSet<Category> Categories => Set<Category>();
+    public DbSet<ActivitySubtask> ActivitySubtasks => Set<ActivitySubtask>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -80,6 +81,12 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .HasOne(c => c.Goal)
             .WithMany(g => g.Checkpoints)
             .HasForeignKey(c => c.GoalId);
+
+        modelBuilder.Entity<ActivitySubtask>()
+            .HasOne(s => s.Activity)
+            .WithMany(a => a.Subtasks)
+            .HasForeignKey(s => s.ActivityId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 

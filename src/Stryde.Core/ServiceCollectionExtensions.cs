@@ -22,6 +22,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<UserSettingsService>();
         services.AddScoped<GoalService>();
         services.AddScoped<ActivityService>();
+        services.AddScoped<ActivitySubtaskService>();
         services.AddScoped<OccurrenceService>();
         services.AddScoped<CheckpointService>();
         services.AddScoped<RecommendationService>();

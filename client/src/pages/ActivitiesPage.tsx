@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, Layers } from "lucide-react";
-import { activitiesApi, goalsApi, categoriesApi } from "@/lib/api";
-import type { Activity, Goal, Category } from "@/lib/types";
+import { Plus, Pencil, Trash2, Layers, X } from "lucide-react";
+import { activitiesApi, goalsApi, categoriesApi, activitySubtasksApi } from "@/lib/api";
+import type { Activity, ActivitySubtask, Goal, Category } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
@@ -39,6 +39,11 @@ function ActivityModal({
   const [goalId, setGoalId] = useState(activity?.goalId ?? "");
   const [categoryId, setCategoryId] = useState(activity?.categoryId ?? "");
   const [titleError, setTitleError] = useState("");
+  const [subtasks, setSubtasks] = useState<ActivitySubtask[]>(
+    activity?.subtasks ?? []
+  );
+  const [newSubtask, setNewSubtask] = useState("");
+  const newSubtaskRef = useRef<HTMLInputElement>(null);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -57,6 +62,38 @@ function ActivityModal({
     },
   });
 
+  const addSubtaskMutation = useMutation({
+    mutationFn: (subtaskTitle: string) =>
+      activitySubtasksApi.create(activity!.id, { title: subtaskTitle }),
+    onSuccess: (created) => {
+      setSubtasks((prev) => [...prev, created]);
+      setNewSubtask("");
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: (id: string) =>
+      activitySubtasksApi.toggle(activity!.id, id),
+    onMutate: (id) => {
+      setSubtasks((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, isDone: !s.isDone } : s))
+      );
+    },
+    onError: (_, id) => {
+      setSubtasks((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, isDone: !s.isDone } : s))
+      );
+    },
+  });
+
+  const deleteSubtaskMutation = useMutation({
+    mutationFn: (id: string) =>
+      activitySubtasksApi.delete(activity!.id, id),
+    onSuccess: (_, id) => {
+      setSubtasks((prev) => prev.filter((s) => s.id !== id));
+    },
+  });
+
   function handleSubmit() {
     if (!title.trim()) {
       setTitleError("Title is required.");
@@ -68,6 +105,12 @@ function ActivityModal({
     }
     setTitleError("");
     mutation.mutate();
+  }
+
+  function handleAddSubtask() {
+    const t = newSubtask.trim();
+    if (!t) return;
+    addSubtaskMutation.mutate(t);
   }
 
   const activeGoals = goals.filter((g) => g.status !== "closed");
@@ -156,6 +199,68 @@ function ActivityModal({
         </div>
       )}
 
+      {isEdit && (
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-foreground">
+            Subtasks
+          </label>
+
+          {subtasks.length > 0 && (
+            <ul className="flex flex-col divide-y divide-border rounded-lg border border-border">
+              {subtasks.map((s) => (
+                <li key={s.id} className="flex items-center gap-2 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={s.isDone}
+                    onChange={() => toggleMutation.mutate(s.id)}
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-primary"
+                  />
+                  <span
+                    className={`flex-1 text-sm ${
+                      s.isDone
+                        ? "text-muted-foreground line-through"
+                        : "text-foreground"
+                    }`}
+                  >
+                    {s.title}
+                  </span>
+                  <button
+                    onClick={() => deleteSubtaskMutation.mutate(s.id)}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="h-3.5 w-3.5" strokeWidth={2} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              ref={newSubtaskRef}
+              type="text"
+              placeholder="Add a subtask..."
+              value={newSubtask}
+              onChange={(e) => setNewSubtask(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAddSubtask();
+                }
+              }}
+              className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <Button
+              variant="ghost"
+              onClick={handleAddSubtask}
+              disabled={!newSubtask.trim() || addSubtaskMutation.isPending}
+            >
+              Add
+            </Button>
+          </div>
+        </div>
+      )}
+
       {mutation.error instanceof Error && (
         <p className="text-sm text-destructive">{mutation.error.message}</p>
       )}
@@ -194,6 +299,12 @@ function ActivityRow({
             <Badge tone={GOAL_TONE[activity.goal.status] ?? "neutral"}>
               {activity.goal.title}
             </Badge>
+          )}
+          {activity.subtasks.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {activity.subtasks.filter((s) => s.isDone).length}/
+              {activity.subtasks.length} subtasks
+            </span>
           )}
         </div>
       </div>
