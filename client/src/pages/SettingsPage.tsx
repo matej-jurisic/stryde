@@ -135,10 +135,7 @@ export function SettingsPage() {
             <div className="flex flex-col gap-6">
 
               <SettingSection label="Planning">
-                <SettingRow
-                  label="Timezone"
-                  hint="Used to decide which day an event belongs to."
-                >
+                <SettingRow label="Timezone">
                   <select
                     value={form.timezone}
                     onChange={(e) => { setSaved(false); setForm((f) => ({ ...f, timezone: e.target.value })) }}
@@ -150,10 +147,7 @@ export function SettingsPage() {
                   </select>
                 </SettingRow>
 
-                <SettingRow
-                  label="Day boundary"
-                  hint="Before this time still counts as the previous day."
-                >
+                <SettingRow label="Day start">
                   <input
                     type="time"
                     value={form.dayBoundaryTime}
@@ -162,10 +156,7 @@ export function SettingsPage() {
                   />
                 </SettingRow>
 
-                <SettingRow
-                  label="Max focus goals"
-                  hint="Hard limit on how many goals can be in Focus at once."
-                >
+                <SettingRow label="Max focus goals">
                   <input
                     type="number"
                     min={1}
@@ -185,7 +176,7 @@ export function SettingsPage() {
               </SettingSection>
 
               <SettingSection label="Appearance">
-                <SettingRow label="Theme" hint="Applies immediately across the app.">
+                <SettingRow label="Theme">
                   <div className="flex overflow-hidden rounded-md border border-border">
                     {THEME_OPTIONS.map(({ value, label, Icon }) => (
                       <button
@@ -207,10 +198,7 @@ export function SettingsPage() {
 
               {isNative() && (
                 <SettingSection label="Connection">
-                  <SettingRow
-                    label="Server URL"
-                    hint="Address of your Stryde backend server."
-                  >
+                  <SettingRow label="Server URL">
                     <input
                       type="url"
                       placeholder="http://192.168.1.100:8080"

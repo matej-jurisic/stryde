@@ -243,24 +243,25 @@ Unplanned correctness and polish work done after Phase 8:
 
 ---
 
-## Windowed Events (July 2026) ✅
+## Planned Events (July 2026) ✅
 
-Unplanned addition after Phase 9. Adds a third event scheduling state between floating and fully scheduled.
+Adds a third occurrence scheduling state — "planned" — between fully scheduled (pinned time) and floating (no time).
 
-**Problem:** Users often know an event will take a specific amount of time but haven't decided exactly when it will occur within a window (e.g., "this 2-hour workout will happen somewhere on Sunday" or "anytime between Friday 15:00 and Saturday 22:00"). The existing model forced a choice between no time at all (floating, inbox only) or a pinned start time.
+**Problem:** Users often know an occurrence will take a specific amount of time but haven't decided exactly when it will occur within a window. The existing model forced a choice between no time at all (floating) or a pinned start time.
+
+**Note:** An earlier iteration of this feature stored separate `WindowStart`/`WindowEnd`/`WindowDurationMinutes` fields on the entity. That approach was superseded; the final implementation reuses `StartAt`/`EndAt` as window bounds when `IsPlanned = true`.
 
 **Backend**
-- `Event` entity: `WindowStart DateTimeOffset?`, `WindowEnd DateTimeOffset?`, `WindowDurationMinutes int?`
-- Migration: `AddWindowedEventFields`
-- `EventService.ValidateWindow`: all three fields must be provided together, cannot combine with `StartAt`, end > start, duration > 0, duration ≤ window length
-- `EventService.ListAsync`: `floatingOnly` now excludes windowed events; calendar range queries include windowed events whose window overlaps the requested range
+- `Occurrence` entity: `IsPlanned bool` (migration: `AddIsPlanned`)
+- When `IsPlanned = true`, `StartAt`/`EndAt` act as window bounds (not pinned start/end); `IsAllDay` marks a flexible all-day occurrence
+- `DurationMinutes` on `Occurrence` stores estimated duration; it is not exclusive to planned occurrences
+- `DayMath.IsOverdue`: planned occurrences always return false
+- `OccurrenceService.ListAsync`: `floatingOnly` excludes planned occurrences; calendar range queries include planned occurrences whose window overlaps the range
 
 **Frontend**
-- `Event` type extended with `windowStart`, `windowEnd`, `windowDurationMinutes`
-- `EventModal`: third scheduling mode "Flexible window" — window start/end pickers plus h/min duration inputs; reachable via "+ Set flexible window" from due-date or start/end modes
-- `CalendarPage`: `WindowedEventBlock` renders windowed events as dashed, diagonally striped blocks spanning their window within each day column; multi-day windows clip correctly per column; colored by first linked goal status or category
-
-**Done when:** A windowed event appears on the calendar spanning its window as a dashed block, is excluded from the Inbox, and can be created/edited via the flexible window mode in the event modal.
+- `Occurrence` / `OccurrenceDto` extended with `isPlanned`, `durationMinutes`
+- `EventModal`: planned mode — window start/end pickers plus h/min duration inputs
+- `CalendarPage`: planned occurrences render as dashed, diagonally striped blocks spanning their window; excluded from Inbox
 
 ---
 
@@ -327,6 +328,40 @@ Unplanned addition after Phase 9. Adds a third event scheduling state between fl
 - Updated: `types.ts`, `api.ts`, `InboxPage`, `CalendarPage`, `PlanPage`, `GoalsPage`, `EventModal`, `EventDetailModal`, `RecommendationStrip`, `Sidebar`, `BottomNav`, `useInboxCount`.
 - GoalsPage no longer hosts template management (that moved to ActivitiesPage).
 - Route `/activities` added; Sidebar and BottomNav updated with Activities link.
+
+---
+
+## Categories (July 2026) ✅
+
+User-defined labels for grouping activities that aren't tied to a goal.
+
+**Backend**
+- `Category` entity: `Id, UserId, Name, Color, Icon?, CreatedAt`
+- `CategoryService.cs`, `CategoryEndpoints.cs` (`/api/categories`) — full CRUD
+- `Activity.CategoryId?` FK set-null on category delete
+- `CategorySummaryDto` embedded in `ActivityDto` and `OccurrenceDto`
+
+**Frontend**
+- Categories listed in the sidebar below the Inbox as filterable nav items (`/inbox?category={id}`)
+- Add/edit/delete via a `CategoryModal` opened from the sidebar (inline, not a dedicated page)
+- `CategoriesPage.tsx` exists as an alternative standalone page but is not currently routed
+- Color picker (palette of hex swatches) + icon picker in the category modal
+
+---
+
+## ActivityKind (July 2026) ✅
+
+`Activity.Kind` stores `ActivityKind` enum (`activity` | `event`). Distinguishes reusable activity templates from one-off event-style activities. Exposed as `kind: string` on `ActivityDto`. Used in the Activities page grouping/display.
+
+---
+
+## Occurrence Duplication (July 2026) ✅
+
+Users can duplicate any occurrence directly from the calendar or the `EventDetailModal`.
+
+- "Duplicate" action in `EventDetailModal` opens `EventModal` pre-filled with the occurrence's fields (title, activity, start/end, planned flag, duration)
+- Calendar context menu / action buttons include a duplicate shortcut
+- No backend changes — duplication is a create with copied fields
 
 ---
 

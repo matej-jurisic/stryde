@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { CalendarRange, CalendarDays, Inbox, Target, Settings, Zap, Pencil, Trash2, Plus, Layers } from 'lucide-react'
+import { CalendarRange, CalendarDays, Inbox, Target, Settings, Zap, Pencil, Trash2, Plus, Layers, MoreHorizontal } from 'lucide-react'
 import { useInboxCount } from './useInboxCount'
 import { categoriesApi } from '@/lib/api'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
@@ -88,12 +88,27 @@ function CategoryItem({
   const location = useLocation()
   const params = new URLSearchParams(location.search)
   const active = location.pathname === '/inbox' && params.get('category') === id
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onPointerDown(e: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+        setConfirmDelete(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [menuOpen])
 
   return (
-    <div className="group relative">
+    <div className="relative">
       <NavLink to={`/inbox?category=${id}`} className="block">
         <span
-          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 pr-14 text-sm transition-colors ${
+          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 pr-10 text-sm transition-colors ${
             active
               ? 'bg-muted font-semibold text-foreground'
               : 'font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground'
@@ -105,19 +120,52 @@ function CategoryItem({
           <span className="truncate">{name}</span>
         </span>
       </NavLink>
-      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+      <div ref={menuRef} className="absolute right-1 top-1/2 -translate-y-1/2">
         <button
-          onClick={onEdit}
-          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={(e) => { e.preventDefault(); setMenuOpen((o) => !o); setConfirmDelete(false) }}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         >
-          <Pencil className="h-3 w-3" strokeWidth={2} />
+          <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
         </button>
-        <button
-          onClick={onDelete}
-          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
-        >
-          <Trash2 className="h-3 w-3" strokeWidth={2} />
-        </button>
+        {menuOpen && (
+          <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+            {confirmDelete ? (
+              <>
+                <p className="px-3 py-1.5 text-xs text-foreground">Delete &ldquo;{name}&rdquo;?</p>
+                <button
+                  onClick={() => { onDelete(); setMenuOpen(false); setConfirmDelete(false) }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                  Confirm delete
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => { onEdit(); setMenuOpen(false) }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+                >
+                  <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                  Edit
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -173,7 +221,7 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-1">
+      <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-1">
         <ul className="flex flex-col gap-0.5">
           <li><NavItem to="/plan"       label="Daily Plan"  Icon={CalendarRange} /></li>
           <li><NavItem to="/calendar"   label="Calendar"    Icon={CalendarDays} /></li>

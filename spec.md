@@ -58,6 +58,7 @@ The scheduling primitive is split into two layers:
 | Title | Required |
 | Goal | Optional — links to one goal |
 | Category | Optional |
+| Kind | `activity` (default) or `event` |
 
 **Occurrence** — a scheduled (or floating) instance of an Activity.
 
@@ -132,6 +133,20 @@ Occurrences are created via a modal. Creating an occurrence requires selecting a
 
 ---
 
+## Categories
+
+A category is a user-defined label with a color and an optional icon, used to group activities that aren't tied to a goal (e.g. "Health", "Admin").
+
+| Field | Notes |
+|---|---|
+| Name | Required |
+| Color | Required — hex color string |
+| Icon | Optional — icon key |
+
+Categories appear in the sidebar below the Inbox as filterable nav items (`/inbox?category={id}`). They are managed directly in the sidebar (no dedicated page). Activities carry an optional `CategoryId`.
+
+---
+
 ## Goals
 
 A goal represents a sustained intention with measurable progress.
@@ -161,21 +176,19 @@ Checkpoints are self-defined milestones that indicate planned progress.
 | Field | Notes |
 |---|---|
 | Title | Required |
-| Planned progress | A numeric value representing what fraction of the goal this checkpoint represents (e.g. 25%) |
+| Size | `tiny`, `small`, `normal`, `big`, `huge` — relative weight of this checkpoint's contribution |
 | Target date | Optional |
 | Status | `pending`, `reached` |
 
 Checkpoints have no required order — they can be reached in any sequence.
 
-The planned progress of a goal's checkpoints may not total more than 100%. Creating or editing a checkpoint that would push the total past 100% is rejected with a validation error.
-
 ### Progress Model
 
 Progress has two tracks:
 
-**Believed progress** — the sum of planned progress amounts of all reached checkpoints.
+**Believed progress** — proportional: `(sum_weights_reached / sum_weights_total) × 100`. Size weights: tiny=1, small=2, normal=3, big=5, huge=8. Returns 0 when no checkpoints exist.
 
-**Actual progress** — derived from completed events linked to this goal. Attribution model is TBD (Open Decision #1).
+**Actual progress** — derived from completed occurrences linked to this goal. Attribution model is TBD (Open Decision #1).
 
 **Insight** — the delta between believed and actual progress, surfaced as a simple diff and trend.
 

@@ -62,7 +62,7 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   timezone offset by `DayBoundaryTime`. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
   Key methods: `OccurrenceDay(Occurrence, DayContext)`, `IsOverdue(Occurrence, DayContext, DateTimeOffset)`.
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
-  Key DTOs: `ActivityDto`, `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`), `RecommendationDto` (discriminated: `type: 'occurrence' | 'activity'`).
+  Key DTOs: `ActivityDto` (has `Kind`), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (discriminated: `type: 'occurrence' | 'activity'`), `CategoryDto`/`CategorySummaryDto`, `CheckpointDto` (has `Size` enum — not numeric progress).
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
 - ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
 
@@ -78,7 +78,7 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 **Frontend (`client/src`)**
 - `App.tsx` — auth-gated routing; index → `/plan`.
 - `pages/` — `PlanPage`, `InboxPage`, `CalendarPage`, `GoalsPage`, `ActivitiesPage`, `SettingsPage`.
-- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`.
+- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`.
 - `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Recommendation` (discriminated union).
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
