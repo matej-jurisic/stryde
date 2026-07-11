@@ -15,7 +15,7 @@ export function Field({ label, error, id, className = '', ...props }: FieldProps
       <input
         id={inputId}
         {...props}
-        className={`h-9 rounded-lg border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 ${error ? 'border-destructive' : 'border-input'} ${className}`}
+        className={`h-9 w-full rounded-lg border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 ${error ? 'border-destructive' : 'border-input'} ${className}`}
       />
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

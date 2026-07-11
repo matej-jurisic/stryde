@@ -221,17 +221,17 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-1">
-        <ul className="flex flex-col gap-0.5">
+      <nav className="flex-1 min-h-0 flex flex-col px-3 py-1">
+        <ul className="flex flex-col gap-0.5 shrink-0">
           <li><NavItem to="/plan"       label="Daily Plan"  Icon={CalendarRange} /></li>
           <li><NavItem to="/calendar"   label="Calendar"    Icon={CalendarDays} /></li>
           <li><NavItem to="/goals"      label="Goals"       Icon={Target} /></li>
           <li><NavItem to="/activities" label="Activities"  Icon={Layers} /></li>
         </ul>
 
-        <div className="my-2 border-t border-border" />
+        <div className="my-2 border-t border-border shrink-0" />
 
-        <ul className="flex flex-col gap-0.5">
+        <ul className="flex flex-col gap-0.5 min-h-0 overflow-y-auto">
           <li><InboxItem count={inboxCount} /></li>
           {categories.map((cat) => (
             <li key={cat.id}>

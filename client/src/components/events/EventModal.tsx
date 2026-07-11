@@ -535,26 +535,22 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
           {/* Non-scheduleOnly: time mode + planned + extras */}
           {!scheduleOnly && (
             <>
-              <div className="flex items-center gap-2">
-                <div className="grid flex-1 grid-cols-3 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
-                  <button type="button" onClick={() => switchMode('due')} className={segmentClass(timeMode === 'due')}>Due</button>
-                  <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(timeMode === 'scheduled')}>Scheduled</button>
-                  <button type="button" onClick={() => switchMode('floating')} className={segmentClass(timeMode === 'floating')}>Floating</button>
-                </div>
-                {timeMode !== 'floating' && (
-                  <button
-                    type="button"
-                    onClick={() => setIsPlanned((v) => !v)}
-                    className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-                      isPlanned
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border bg-transparent text-muted-foreground hover:border-foreground/30 hover:text-foreground'
-                    }`}
-                  >
-                    Planned
-                  </button>
-                )}
+              <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+                <button type="button" onClick={() => switchMode('due')} className={segmentClass(timeMode === 'due')}>Due</button>
+                <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(timeMode === 'scheduled')}>Scheduled</button>
+                <button type="button" onClick={() => switchMode('floating')} className={segmentClass(timeMode === 'floating')}>Floating</button>
               </div>
+              {timeMode !== 'floating' && (
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={isPlanned}
+                    onChange={(e) => setIsPlanned(e.target.checked)}
+                    className="h-4 w-4 rounded border-input accent-primary"
+                  />
+                  Planned
+                </label>
+              )}
 
               {/* Scheduled: end time */}
               {timeMode === 'scheduled' && (
