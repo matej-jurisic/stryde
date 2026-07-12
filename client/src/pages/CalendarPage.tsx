@@ -458,7 +458,7 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
 
   return (
     <div
-      className={`relative flex-1 ${borderLeft ? 'border-l border-border' : ''} ${borderRight ? 'border-r border-border' : ''}`}
+      className={`relative flex-1 overflow-hidden ${borderLeft ? 'border-l border-border' : ''} ${borderRight ? 'border-r border-border' : ''}`}
       style={{ height: HOUR_PX * 24 }}
     >
       {/* Hour lines — skip h=0, sticky header border-b already provides that separator */}
@@ -833,10 +833,19 @@ export function CalendarPage() {
 
       function onPointerCancel(pc: PointerEvent) {
         if (isTouch && pc.pointerId !== pointerId) return
+        // Capture isDragging before nulling the ref — Capacitor/Android can fire
+        // pointercancel after the 500ms timer (late native gesture recognition).
+        // If no movement occurred, treat it the same as onEarlyCancel: enter resize mode.
+        const wasDragging = eventMoveRef.current?.isDragging ?? false
         cleanup()
         eventMoveRef.current = null
         setMoveOverlay(null)
         setMovingEventId(null)
+        if (isTouch && !wasDragging) {
+          suppressClickRef.current = true
+          setTimeout(() => { suppressClickRef.current = false }, 0)
+          setResizingEventId(event.id)
+        }
       }
 
       window.addEventListener('pointermove', onPointerMove)
@@ -913,6 +922,9 @@ export function CalendarPage() {
 
   function rescheduleEvent(ev: Occurrence, newStart: Date, newEnd: Date) {
     const newEndAt = ev.endAt ? newEnd.toISOString() : null
+    // Cancel any in-flight refetch so it doesn't overwrite the optimistic update
+    // when the user drags multiple times quickly.
+    queryClient.cancelQueries({ queryKey: ['events'] })
     queryClient.setQueryData<Occurrence[]>(
       ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
       (old) => old?.map((o) => {
