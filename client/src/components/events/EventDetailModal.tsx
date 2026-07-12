@@ -134,7 +134,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
     mutationFn: () => {
       const d = new Date(occurrence!.startAt!)
       d.setHours(0, 0, 0, 0)
-      return occurrencesApi.update(occurrence!.id, { startAt: d.toISOString(), endAt: null, isAllDay: true, isPlanned: true })
+      return occurrencesApi.update(occurrence!.id, { title: occurrence!.title, startAt: d.toISOString(), endAt: null, isAllDay: true, isPlanned: true })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
@@ -144,7 +144,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
   })
 
   const floatMutation = useMutation({
-    mutationFn: () => occurrencesApi.update(occurrence!.id, { startAt: null, endAt: null, isAllDay: false, isPlanned: false }),
+    mutationFn: () => occurrencesApi.update(occurrence!.id, { title: occurrence!.title, startAt: null, endAt: null, isAllDay: false, isPlanned: false }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
