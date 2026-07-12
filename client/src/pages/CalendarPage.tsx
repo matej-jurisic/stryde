@@ -7,9 +7,9 @@ import { EventModal } from '@/components/events/EventModal'
 import { EventDetailModal } from '@/components/events/EventDetailModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 
-// ── Constants ──────────────────────────────────────────────────────────────
-
-const HOUR_PX = 64
+const DEFAULT_HOUR_PX = 64
+const MIN_HOUR_PX = 32
+const MAX_HOUR_PX = 128
 
 // ── Date utilities ─────────────────────────────────────────────────────────
 
@@ -111,7 +111,7 @@ interface LayoutEvent {
   trueEndPx: number
 }
 
-function layoutDay(events: Occurrence[], day: Date): LayoutEvent[] {
+function layoutDay(events: Occurrence[], day: Date, hourPx: number): LayoutEvent[] {
   const dayStartMs = sod(day).getTime()
 
   const items = events
@@ -154,9 +154,9 @@ function layoutDay(events: Occurrence[], day: Date): LayoutEvent[] {
       event,
       col: colIdx[i],
       totalCols: maxC + 1,
-      topPx: (s / 60) * HOUR_PX,
-      heightPx: Math.max(((end - s) / 60) * HOUR_PX, 28),
-      trueEndPx: (end / 60) * HOUR_PX,
+      topPx: (s / 60) * hourPx,
+      heightPx: Math.max(((end - s) / 60) * hourPx, 28),
+      trueEndPx: (end / 60) * hourPx,
     }
   })
 }
@@ -382,8 +382,8 @@ function EventBlock({
 
 // ── snapToGrid ──────────────────────────────────────────────────────────────
 
-function snapToGrid(day: Date, yPx: number): Date {
-  const totalMin = (yPx / HOUR_PX) * 60
+function snapToGrid(day: Date, yPx: number, hourPx: number): Date {
+  const totalMin = (yPx / hourPx) * 60
   const hrs = Math.floor(totalMin / 60)
   const snapMins = Math.round((totalMin % 60) / 15) * 15
   const d = new Date(day)
@@ -401,8 +401,8 @@ function snapToGrid(day: Date, yPx: number): Date {
   return d
 }
 
-function snapToGridDue(day: Date, yPx: number): Date {
-  const totalMin = (yPx / HOUR_PX) * 60
+function snapToGridDue(day: Date, yPx: number, hourPx: number): Date {
+  const totalMin = (yPx / hourPx) * 60
   const hrs = Math.floor(totalMin / 60)
   const snapMins = Math.round((totalMin % 60) / 15) * 15
   const d = new Date(day)
@@ -432,9 +432,10 @@ interface DayColumnProps {
   suppressClickRef: { current: boolean }
   movingEventId: string | null
   resizingEventId: string | null
+  hourPx: number
 }
 
-function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId }: DayColumnProps) {
+function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
@@ -451,22 +452,22 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
     [allEvents, dayStart.getTime(), dayEnd.getTime()],
   )
 
-  const layout = useMemo(() => layoutDay(dayEvents, day), [dayEvents, day])
+  const layout = useMemo(() => layoutDay(dayEvents, day, hourPx), [dayEvents, day, hourPx])
 
   const now = new Date()
-  const nowPx = ((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_PX
+  const nowPx = ((now.getHours() * 60 + now.getMinutes()) / 60) * hourPx
 
   return (
     <div
-      className={`relative flex-1 overflow-hidden ${borderLeft ? 'border-l border-border' : ''} ${borderRight ? 'border-r border-border' : ''}`}
-      style={{ height: HOUR_PX * 24 }}
+      className={`relative flex-1 ${borderLeft ? 'border-l border-border' : ''} ${borderRight ? 'border-r border-border' : ''}`}
+      style={{ minHeight: hourPx * 24 }}
     >
       {/* Hour lines — skip h=0, sticky header border-b already provides that separator */}
       {Array.from({ length: 24 }, (_, h) => h > 0 && (
         <div
           key={h}
           className="absolute inset-x-0 border-t border-border"
-          style={{ top: h * HOUR_PX }}
+          style={{ top: h * hourPx }}
         />
       ))}
       {/* Half-hour lines */}
@@ -474,7 +475,7 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
         <div
           key={`hh${h}`}
           className="absolute inset-x-0 border-t border-border/40"
-          style={{ top: h * HOUR_PX + HOUR_PX / 2 }}
+          style={{ top: h * hourPx + hourPx / 2 }}
         />
       ))}
       {/* Current time indicator */}
@@ -596,6 +597,15 @@ export function CalendarPage() {
   const allDayDragStateRef = useRef<{ durationMinutes: number; curDayIdx: number } | null>(null)
   const allDayDragActiveRef = useRef(false)
 
+  const [hourPx, setHourPx] = useState(() => {
+    const saved = localStorage.getItem('stryde-calendar-zoom')
+    const n = saved ? parseInt(saved, 10) : DEFAULT_HOUR_PX
+    return isNaN(n) ? DEFAULT_HOUR_PX : Math.min(MAX_HOUR_PX, Math.max(MIN_HOUR_PX, n))
+  })
+  const hourPxRef = useRef(hourPx)
+  hourPxRef.current = hourPx
+  const pinchActiveRef = useRef(false)
+
   const queryClient = useQueryClient()
 
   const { data: settings } = useQuery({
@@ -641,7 +651,7 @@ export function CalendarPage() {
   useEffect(() => {
     if (hasScrolledToNowRef.current || isLoading || !scrollRef.current) return
     const now = new Date()
-    const px = ((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_PX
+    const px = ((now.getHours() * 60 + now.getMinutes()) / 60) * hourPxRef.current
     scrollRef.current.scrollTop = Math.max(0, px - 200)
     hasScrolledToNowRef.current = true
   }, [isLoading])
@@ -675,6 +685,91 @@ export function CalendarPage() {
     return () => document.removeEventListener('contextmenu', onContextMenu)
   }, [])
 
+  // Ctrl+wheel zoom (desktop)
+  useEffect(() => {
+    function onWheel(e: WheelEvent) {
+      if (!e.ctrlKey) return
+      if (!scrollRef.current?.contains(e.target as Node)) return
+      e.preventDefault()
+      const old = hourPxRef.current
+      const delta = e.deltaY > 0 ? -8 : 8
+      const next = Math.min(MAX_HOUR_PX, Math.max(MIN_HOUR_PX, old + delta))
+      if (next === old) return
+      const rect = scrollRef.current!.getBoundingClientRect()
+      const relY = e.clientY - rect.top
+      const timePos = (scrollRef.current!.scrollTop + relY) / old
+      hourPxRef.current = next
+      setHourPx(next)
+      localStorage.setItem('stryde-calendar-zoom', String(next))
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = Math.max(0, timePos * next - relY)
+      })
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    return () => window.removeEventListener('wheel', onWheel)
+  }, [])
+
+  // Pinch-to-zoom (mobile)
+  useEffect(() => {
+    const ptrs = new Map<number, { x: number; y: number }>()
+    let lastDist = 0
+
+    function onDown(e: PointerEvent) {
+      if (!scrollRef.current?.contains(e.target as Node)) return
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (ptrs.size === 2) {
+        const [a, b] = [...ptrs.values()]
+        lastDist = Math.hypot(a.x - b.x, a.y - b.y)
+        pinchActiveRef.current = true
+        if (pendingTouchRef.current) {
+          clearTimeout(pendingTouchRef.current.timer)
+          pendingTouchRef.current = null
+        }
+      }
+    }
+
+    function onMove(e: PointerEvent) {
+      if (!ptrs.has(e.pointerId)) return
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (ptrs.size !== 2 || lastDist === 0) return
+      const [a, b] = [...ptrs.values()]
+      const newDist = Math.hypot(a.x - b.x, a.y - b.y)
+      const ratio = newDist / lastDist
+      lastDist = newDist
+      if (Math.abs(ratio - 1) < 0.005) return
+      const old = hourPxRef.current
+      const next = Math.min(MAX_HOUR_PX, Math.max(MIN_HOUR_PX, Math.round(old * ratio)))
+      if (next === old) return
+      const pts = [...ptrs.values()]
+      const midY = (pts[0].y + pts[1].y) / 2
+      const rect = scrollRef.current!.getBoundingClientRect()
+      const relY = midY - rect.top
+      const timePos = (scrollRef.current!.scrollTop + relY) / old
+      hourPxRef.current = next
+      setHourPx(next)
+      localStorage.setItem('stryde-calendar-zoom', String(next))
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = Math.max(0, timePos * next - relY)
+      })
+    }
+
+    function onUp(e: PointerEvent) {
+      ptrs.delete(e.pointerId)
+      if (ptrs.size < 2) lastDist = 0
+      if (ptrs.size === 0) pinchActiveRef.current = false
+    }
+
+    window.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [])
 
   function prev() {
     const step = view === 'day' ? -1 : view === '3day' ? -3 : -7
@@ -756,6 +851,7 @@ export function CalendarPage() {
   function handleEventMoveStart(e: React.PointerEvent, event: Occurrence, topPx: number) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     if (!event.startAt) return
+    if (pinchActiveRef.current) return
     // Click suppression lasts until the next pointerdown: in the WebView the
     // click can arrive long after the gesture that set the flag (e.g. the finger
     // lifts well after a pointercancel), so a same-tick setTimeout(0) reset
@@ -807,13 +903,13 @@ export function CalendarPage() {
         // Due pins are a single point in time — snap directly to cursor, no grab-offset
         const anchorY = isDue ? curY : Math.max(0, curY - eventMoveRef.current.offsetPx)
         const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
-        const startSnapped = isDue ? snapToGridDue(days[curDayIdx], anchorY) : snapToGrid(days[curDayIdx], anchorY)
+        const startSnapped = isDue ? snapToGridDue(days[curDayIdx], anchorY, hourPxRef.current) : snapToGrid(days[curDayIdx], anchorY, hourPxRef.current)
         const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
         const durationMin = eventMoveRef.current.durationMs / 60000
         setMoveOverlay({
           dayIdx: curDayIdx,
-          topPx: (startMin / 60) * HOUR_PX,
-          heightPx: isDue ? DUE_PIN_HEIGHT : Math.max((durationMin / 60) * HOUR_PX, 20),
+          topPx: (startMin / 60) * hourPxRef.current,
+          heightPx: isDue ? DUE_PIN_HEIGHT : Math.max((durationMin / 60) * hourPxRef.current, 20),
         })
         startAutoScroll(mv.clientX, mv.clientY)
       }
@@ -846,7 +942,7 @@ export function CalendarPage() {
         const curY = getYInGrid(mu.clientY)
         const anchorY = isDue ? curY : Math.max(0, curY - off)
         const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
-        const newStart = isDue ? snapToGridDue(days[curDayIdx], anchorY) : snapToGrid(days[curDayIdx], anchorY)
+        const newStart = isDue ? snapToGridDue(days[curDayIdx], anchorY, hourPxRef.current) : snapToGrid(days[curDayIdx], anchorY, hourPxRef.current)
         const newEnd = new Date(newStart.getTime() + dur)
         const origStartMs = new Date(ev.startAt!).getTime()
         if (newStart.getTime() === origStartMs) return
@@ -998,7 +1094,7 @@ export function CalendarPage() {
 
     const durationMinutes = event.durationMinutes ?? 60
     const durationMs = durationMinutes * 60 * 1000
-    const heightPx = Math.max((durationMinutes / 60) * HOUR_PX, 20)
+    const heightPx = Math.max((durationMinutes / 60) * hourPxRef.current, 20)
     const pointerId = e.pointerId
     const isTouch = e.pointerType === 'touch'
     const startClientX = e.clientX
@@ -1028,9 +1124,9 @@ export function CalendarPage() {
 
       if (isInGrid(mv.clientY)) {
         const curY = getYInGrid(mv.clientY)
-        const startSnapped = snapToGrid(days[curDayIdx], curY)
+        const startSnapped = snapToGrid(days[curDayIdx], curY, hourPxRef.current)
         const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
-        setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * HOUR_PX, heightPx })
+        setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * hourPxRef.current, heightPx })
       } else {
         setMoveOverlay(null)
       }
@@ -1058,7 +1154,7 @@ export function CalendarPage() {
       suppressClickRef.current = true
       if (!isInGrid(mu.clientY)) return
       const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
-      const newStart = snapToGrid(days[curDayIdx], getYInGrid(mu.clientY))
+      const newStart = snapToGrid(days[curDayIdx], getYInGrid(mu.clientY), hourPxRef.current)
       const newEnd = new Date(newStart.getTime() + durationMs)
       rescheduleFromAllDay(event, newStart, newEnd)
     }
@@ -1090,7 +1186,7 @@ export function CalendarPage() {
 
     function overlayForPointer(clientX: number, clientY: number): Map<number, { topPx: number; heightPx: number }> {
       const curDay = days[Math.max(0, Math.min(getDayIdxFromX(clientX), days.length - 1))]
-      const snappedMs = snapToGrid(curDay, Math.max(0, Math.min(getYInGrid(clientY), HOUR_PX * 24 - 1))).getTime()
+      const snappedMs = snapToGrid(curDay, Math.max(0, Math.min(getYInGrid(clientY), hourPxRef.current * 24 - 1)), hourPxRef.current).getTime()
       if (side === 'top') {
         return computeResizeOverlays(Math.min(snappedMs, origEndMs - 15 * 60 * 1000), origEndMs)
       } else {
@@ -1120,7 +1216,7 @@ export function CalendarPage() {
       const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
       const curDay = days[curDayIdx]
       const curY = getYInGrid(mu.clientY)
-      const snappedMs = snapToGrid(curDay, Math.max(0, Math.min(curY, HOUR_PX * 24 - 1))).getTime()
+      const snappedMs = snapToGrid(curDay, Math.max(0, Math.min(curY, hourPxRef.current * 24 - 1)), hourPxRef.current).getTime()
 
       let newStart: Date
       let newEnd: Date
@@ -1160,7 +1256,7 @@ export function CalendarPage() {
   function getYInGrid(clientY: number): number {
     if (!gridRef.current) return 0
     const rect = gridRef.current.getBoundingClientRect()
-    return Math.max(0, Math.min(clientY - rect.top, HOUR_PX * 24 - 1))
+    return Math.max(0, Math.min(clientY - rect.top, hourPxRef.current * 24 - 1))
   }
 
   function computeOverlays(
@@ -1176,24 +1272,27 @@ export function CalendarPage() {
       if (startDayIdx === endDayIdx) {
         const topY = Math.min(startY, endY)
         const botY = Math.max(startY, endY)
-        const s = snapToGrid(days[i], topY)
-        const en = snapToGrid(days[i], botY)
+        const s = snapToGrid(days[i], topY, hourPxRef.current)
+        const en = snapToGrid(days[i], botY, hourPxRef.current)
         const dayStartMs = sod(days[i]).getTime()
-        const topPx = (s.getTime() - dayStartMs) / 3600000 * HOUR_PX
-        const endPx = Math.min((en.getTime() - dayStartMs) / 3600000 * HOUR_PX, HOUR_PX * 24)
-        result.set(i, { topPx, heightPx: Math.max(endPx - topPx, HOUR_PX / 4) })
+        const hp = hourPxRef.current
+        const topPx = (s.getTime() - dayStartMs) / 3600000 * hp
+        const endPx = Math.min((en.getTime() - dayStartMs) / 3600000 * hp, hp * 24)
+        result.set(i, { topPx, heightPx: Math.max(endPx - topPx, hp / 4) })
       } else if (i === minIdx) {
         const anchorY = startDayIdx < endDayIdx ? startY : endY
-        const s = snapToGrid(days[i], anchorY)
-        const topPx = (s.getHours() * 60 + s.getMinutes()) / 60 * HOUR_PX
-        result.set(i, { topPx, heightPx: HOUR_PX * 24 - topPx })
+        const s = snapToGrid(days[i], anchorY, hourPxRef.current)
+        const hp = hourPxRef.current
+        const topPx = (s.getHours() * 60 + s.getMinutes()) / 60 * hp
+        result.set(i, { topPx, heightPx: hp * 24 - topPx })
       } else if (i === maxIdx) {
         const anchorY = startDayIdx > endDayIdx ? startY : endY
-        const en = snapToGrid(days[i], anchorY)
-        const endPx = (en.getHours() * 60 + en.getMinutes()) / 60 * HOUR_PX
-        result.set(i, { topPx: 0, heightPx: Math.max(endPx, HOUR_PX / 4) })
+        const en = snapToGrid(days[i], anchorY, hourPxRef.current)
+        const hp = hourPxRef.current
+        const endPx = (en.getHours() * 60 + en.getMinutes()) / 60 * hp
+        result.set(i, { topPx: 0, heightPx: Math.max(endPx, hp / 4) })
       } else {
-        result.set(i, { topPx: 0, heightPx: HOUR_PX * 24 })
+        result.set(i, { topPx: 0, heightPx: hourPxRef.current * 24 })
       }
     }
     return result
@@ -1210,8 +1309,8 @@ export function CalendarPage() {
       const startMin = (segStartMs - dayStartMs) / 60000
       const endMin = (segEndMs - dayStartMs) / 60000
       result.set(i, {
-        topPx: (startMin / 60) * HOUR_PX,
-        heightPx: Math.max(((endMin - startMin) / 60) * HOUR_PX, 20),
+        topPx: (startMin / 60) * hourPxRef.current,
+        heightPx: Math.max(((endMin - startMin) / 60) * hourPxRef.current, 20),
       })
     }
     return result
@@ -1256,14 +1355,14 @@ export function CalendarPage() {
       let startDate: Date
       let endDate: Date
       if (startDayIdx < endDayIdx) {
-        startDate = snapToGrid(days[startDayIdx], startY)
-        endDate = snapToGrid(days[endDayIdx], endY)
+        startDate = snapToGrid(days[startDayIdx], startY, hourPxRef.current)
+        endDate = snapToGrid(days[endDayIdx], endY, hourPxRef.current)
       } else if (startDayIdx > endDayIdx) {
-        startDate = snapToGrid(days[endDayIdx], endY)
-        endDate = snapToGrid(days[startDayIdx], startY)
+        startDate = snapToGrid(days[endDayIdx], endY, hourPxRef.current)
+        endDate = snapToGrid(days[startDayIdx], startY, hourPxRef.current)
       } else {
-        startDate = snapToGrid(days[startDayIdx], Math.min(startY, endY))
-        endDate = snapToGrid(days[startDayIdx], Math.max(startY, endY))
+        startDate = snapToGrid(days[startDayIdx], Math.min(startY, endY), hourPxRef.current)
+        endDate = snapToGrid(days[startDayIdx], Math.max(startY, endY), hourPxRef.current)
       }
       if (endDate <= startDate) endDate.setMinutes(endDate.getMinutes() + 15)
       openCreate(formatDatetimeLocal(startDate), formatDatetimeLocal(endDate))
@@ -1283,7 +1382,7 @@ export function CalendarPage() {
   // touch handlers as passive, so this has to be a native listener.
   useEffect(() => {
     function onTouchMove(e: TouchEvent) {
-      if (dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current || allDayDragActiveRef.current || swipeRef.current?.direction === 'horizontal') e.preventDefault()
+      if (dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current || allDayDragActiveRef.current || swipeRef.current?.direction === 'horizontal' || pinchActiveRef.current) e.preventDefault()
     }
     document.addEventListener('touchmove', onTouchMove, { passive: false })
     return () => document.removeEventListener('touchmove', onTouchMove)
@@ -1343,18 +1442,19 @@ export function CalendarPage() {
           const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(state.clientX), days.length - 1))
           const isEvDue = isDueOccurrence(eventMoveRef.current.event)
           const autoAnchorY = isEvDue ? curY : anchorY
-          const startSnapped = isEvDue ? snapToGridDue(days[curDayIdx], autoAnchorY) : snapToGrid(days[curDayIdx], anchorY)
+          const startSnapped = isEvDue ? snapToGridDue(days[curDayIdx], autoAnchorY, hourPxRef.current) : snapToGrid(days[curDayIdx], anchorY, hourPxRef.current)
           const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
           const durationMin = eventMoveRef.current.durationMs / 60000
+          const hp = hourPxRef.current
           setMoveOverlay({
             dayIdx: curDayIdx,
-            topPx: (startMin / 60) * HOUR_PX,
-            heightPx: isEvDue ? DUE_PIN_HEIGHT : Math.max((durationMin / 60) * HOUR_PX, 20),
+            topPx: (startMin / 60) * hp,
+            heightPx: isEvDue ? DUE_PIN_HEIGHT : Math.max((durationMin / 60) * hp, 20),
           })
         } else if (resizeDragActiveRef.current && resizeStateRef.current) {
           const rs = resizeStateRef.current
           const curDay = days[Math.max(0, Math.min(getDayIdxFromX(state.clientX), days.length - 1))]
-          const snappedMs = snapToGrid(curDay, Math.max(0, Math.min(getYInGrid(state.clientY), HOUR_PX * 24 - 1))).getTime()
+          const snappedMs = snapToGrid(curDay, Math.max(0, Math.min(getYInGrid(state.clientY), hourPxRef.current * 24 - 1)), hourPxRef.current).getTime()
           if (rs.side === 'top') {
             setResizeOverlay(computeResizeOverlays(Math.min(snappedMs, rs.origEndMs - 15 * 60 * 1000), rs.origEndMs))
           } else {
@@ -1364,9 +1464,10 @@ export function CalendarPage() {
           const { durationMinutes: dur, curDayIdx } = allDayDragStateRef.current
           if (gridRef.current && state.clientY >= gridRef.current.getBoundingClientRect().top) {
             const curY = getYInGrid(state.clientY)
-            const startSnapped = snapToGrid(days[curDayIdx], curY)
+            const startSnapped = snapToGrid(days[curDayIdx], curY, hourPxRef.current)
             const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
-            setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * HOUR_PX, heightPx: Math.max((dur / 60) * HOUR_PX, 20) })
+            const hp = hourPxRef.current
+            setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * hp, heightPx: Math.max((dur / 60) * hp, 20) })
           }
         }
       }
@@ -1377,6 +1478,7 @@ export function CalendarPage() {
 
   function handleGridPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (e.pointerType !== 'touch') return
+    if (pinchActiveRef.current) return
     const startClientX = e.clientX
     const startClientY = e.clientY
     const startDayIdx = getDayIdxFromX(startClientX)
@@ -1445,14 +1547,14 @@ export function CalendarPage() {
     let startDate: Date
     let endDate: Date
     if (startDayIdx < endDayIdx) {
-      startDate = snapToGrid(days[startDayIdx], startY)
-      endDate = snapToGrid(days[endDayIdx], endY)
+      startDate = snapToGrid(days[startDayIdx], startY, hourPxRef.current)
+      endDate = snapToGrid(days[endDayIdx], endY, hourPxRef.current)
     } else if (startDayIdx > endDayIdx) {
-      startDate = snapToGrid(days[endDayIdx], endY)
-      endDate = snapToGrid(days[startDayIdx], startY)
+      startDate = snapToGrid(days[endDayIdx], endY, hourPxRef.current)
+      endDate = snapToGrid(days[startDayIdx], startY, hourPxRef.current)
     } else {
-      startDate = snapToGrid(days[startDayIdx], Math.min(startY, endY))
-      endDate = snapToGrid(days[startDayIdx], Math.max(startY, endY))
+      startDate = snapToGrid(days[startDayIdx], Math.min(startY, endY), hourPxRef.current)
+      endDate = snapToGrid(days[startDayIdx], Math.max(startY, endY), hourPxRef.current)
     }
     if (endDate <= startDate) endDate.setMinutes(endDate.getMinutes() + 15)
     openCreate(formatDatetimeLocal(startDate), formatDatetimeLocal(endDate))
@@ -1595,7 +1697,7 @@ export function CalendarPage() {
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       ) : (
-        <div ref={scrollRef} className="flex-1 overflow-y-auto" style={{ WebkitTouchCallout: 'none' }}>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto flex flex-col" style={{ WebkitTouchCallout: 'none' }}>
           {/* Multi-day headers + all-day row — sticky, inside scroll container to share column widths */}
           {view !== 'day' && (
             <div className="sticky top-0 z-40 bg-background">
@@ -1650,14 +1752,14 @@ export function CalendarPage() {
             </div>
           )}
 
-          <div className="flex" style={{ height: HOUR_PX * 24 }}>
+          <div className="flex flex-1" style={{ minHeight: hourPx * 24 }}>
             {/* Hour labels */}
             <div className="relative w-12 shrink-0">
               {Array.from({ length: 24 }, (_, h) => (
                 <div
                   key={h}
                   className="absolute right-2 select-none text-[10px] leading-none text-muted-foreground"
-                  style={{ top: h * HOUR_PX - 6 }}
+                  style={{ top: h * hourPx - 6 }}
                 >
                   {h > 0 ? hourLabel(h) : ''}
                 </div>
@@ -1691,18 +1793,7 @@ export function CalendarPage() {
                   suppressClickRef={suppressClickRef}
                   movingEventId={movingEventId}
                   resizingEventId={resizingEventId}
-                />
-              ))}
-            </div>
-          </div>
-          {/* Overflow zone: vertical day separators continue below the 24h grid */}
-          <div className="flex border-t border-border" style={{ height: HOUR_PX / 4 }}>
-            <div className="w-12 shrink-0" />
-            <div className="flex flex-1 min-w-0">
-              {days.map((day, idx) => (
-                <div
-                  key={day.toISOString()}
-                  className={`flex-1 ${idx === 0 ? 'border-l border-border' : ''} border-r border-border`}
+                  hourPx={hourPx}
                 />
               ))}
             </div>
