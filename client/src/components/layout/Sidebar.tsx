@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { CalendarRange, CalendarDays, Inbox, Target, Settings, Zap, Pencil, Trash2, Plus, Layers, MoreHorizontal } from 'lucide-react'
@@ -90,12 +91,17 @@ function CategoryItem({
   const active = location.pathname === '/inbox' && params.get('category') === id
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null)
 
   useEffect(() => {
     if (!menuOpen) return
     function onPointerDown(e: PointerEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const inTrigger = triggerRef.current?.contains(e.target as Node)
+      const inDropdown = dropdownRef.current?.contains(e.target as Node)
+      if (!inTrigger && !inDropdown) {
         setMenuOpen(false)
         setConfirmDelete(false)
       }
@@ -103,6 +109,16 @@ function CategoryItem({
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [menuOpen])
+
+  function handleMenuToggle(e: React.MouseEvent) {
+    e.preventDefault()
+    if (!menuOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+    }
+    setMenuOpen((o) => !o)
+    setConfirmDelete(false)
+  }
 
   return (
     <div className="relative">
@@ -120,53 +136,59 @@ function CategoryItem({
           <span className="truncate">{name}</span>
         </span>
       </NavLink>
-      <div ref={menuRef} className="absolute right-1 top-1/2 -translate-y-1/2">
+      <div ref={triggerRef} className="absolute right-1 top-1/2 -translate-y-1/2">
         <button
-          onClick={(e) => { e.preventDefault(); setMenuOpen((o) => !o); setConfirmDelete(false) }}
+          ref={buttonRef}
+          onClick={handleMenuToggle}
           className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         >
           <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
         </button>
-        {menuOpen && (
-          <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
-            {confirmDelete ? (
-              <>
-                <p className="px-3 py-1.5 text-xs text-foreground">Delete &ldquo;{name}&rdquo;?</p>
-                <button
-                  onClick={() => { onDelete(); setMenuOpen(false); setConfirmDelete(false) }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
-                >
-                  <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                  Confirm delete
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(false)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => { onEdit(); setMenuOpen(false) }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-                >
-                  <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
-                  Edit
-                </button>
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
-                >
-                  <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                  Delete
-                </button>
-              </>
-            )}
-          </div>
-        )}
       </div>
+      {menuOpen && menuPos && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-50 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop"
+          style={{ top: menuPos.top, right: menuPos.right }}
+        >
+          {confirmDelete ? (
+            <>
+              <p className="px-3 py-1.5 text-xs text-foreground">Delete &ldquo;{name}&rdquo;?</p>
+              <button
+                onClick={() => { onDelete(); setMenuOpen(false); setConfirmDelete(false) }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                Confirm delete
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => { onEdit(); setMenuOpen(false) }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+              >
+                <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                Edit
+              </button>
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                Delete
+              </button>
+            </>
+          )}
+        </div>,
+        document.body
+      )}
     </div>
   )
 }

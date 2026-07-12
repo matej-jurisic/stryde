@@ -215,7 +215,8 @@ function EventBlock({
 }) {
   const { event, col, totalCols, topPx, heightPx, trueEndPx } = layout
   const { bgClass, bgHex, leftColor, textClass } = eventColors(event)
-  const isDone = event.status !== 'pending'
+  const isDone = event.status === 'done'
+  const isSkipped = event.status === 'skipped'
   const isPlanned = event.isPlanned
   const isDue = isDueOccurrence(event)
   const accentColor = event.activity.category ? event.activity.category.color : 'var(--color-primary)'
@@ -273,7 +274,7 @@ function EventBlock({
       {isDue ? (
         /* Due pin — flat deadline marker, no resize handles */
         <button
-          className={`absolute inset-0 flex items-center overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : ''}`}
+          className={`absolute inset-0 flex items-center overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : isSkipped ? 'opacity-25' : ''}`}
           style={{
             border: isPlanned ? `1.5px dashed ${accentColor}` : `1px solid ${accentColor}`,
             backgroundColor: `${accentColor}18`,
@@ -285,8 +286,8 @@ function EventBlock({
           <div style={{ width: 3, minWidth: 3, alignSelf: 'stretch', background: leftColor }} className="shrink-0" />
           <div className="flex min-w-0 flex-1 items-center gap-1 px-1.5">
             <p
-              className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] font-medium leading-none ${isDone ? 'line-through text-muted-foreground' : ''}`}
-              style={isDone ? undefined : { color: accentColor }}
+              className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] font-medium leading-none ${isDone ? 'line-through text-muted-foreground' : isSkipped ? 'text-muted-foreground' : ''}`}
+              style={isDone || isSkipped ? undefined : { color: accentColor }}
             >
               {event.effectiveTitle}{durationLabel ? ` ${durationLabel}` : ''}
             </p>
@@ -312,7 +313,7 @@ function EventBlock({
           {/* Event body */}
           {isPlanned ? (
             <button
-              className={`absolute inset-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : 'opacity-70'}`}
+              className={`absolute inset-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : isSkipped ? 'opacity-25' : 'opacity-70'}`}
               style={{
                 background: `repeating-linear-gradient(135deg, transparent, transparent 4px, ${accentFaded} 4px, ${accentFaded} 8px)`,
                 border: `1.5px dashed ${accentMid}`,
@@ -331,7 +332,7 @@ function EventBlock({
             </button>
           ) : (
             <button
-              className={`absolute inset-0 overflow-hidden rounded-[4px] border bg-card text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-50' : ''} ${isResizing ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border/50'}`}
+              className={`absolute inset-0 overflow-hidden rounded-[4px] border bg-card text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-50' : isSkipped ? 'opacity-30' : ''} ${isResizing ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border/50'}`}
               {...bodyPointerProps}
             >
               <div
@@ -344,7 +345,7 @@ function EventBlock({
                   {heightPx >= 20 && (
                     <p
                       className={`@max-[10px]:hidden break-all overflow-hidden text-[11px] font-medium leading-tight ${
-                        isDone ? 'line-through text-muted-foreground' : textClass
+                        isDone ? 'line-through text-muted-foreground' : isSkipped ? 'text-muted-foreground/60' : textClass
                       }`}
                     >
                       {event.effectiveTitle}
@@ -387,7 +388,13 @@ function snapToGrid(day: Date, yPx: number): Date {
   const snapMins = Math.round((totalMin % 60) / 15) * 15
   const d = new Date(day)
   if (snapMins >= 60) {
-    d.setHours(Math.min(hrs + 1, 23), 0, 0, 0)
+    if (hrs >= 23) {
+      // Past 23:52.5 → snap to midnight (start of next day)
+      d.setDate(d.getDate() + 1)
+      d.setHours(0, 0, 0, 0)
+    } else {
+      d.setHours(hrs + 1, 0, 0, 0)
+    }
   } else {
     d.setHours(Math.min(hrs, 23), snapMins, 0, 0)
   }
@@ -681,6 +688,7 @@ export function CalendarPage() {
     setDefaultStartAt(startAt)
     setDefaultEndAt(endAt)
     setFocusStartAt(false)
+    setScheduleMode(false)
     setModalOpen(true)
   }
 
@@ -841,7 +849,11 @@ export function CalendarPage() {
       // touch-action:pan-y on the event body means the browser only claims the touch when
       // it detects actual vertical movement (firing pointercancel then), so a stationary
       // hold never gets cancelled and the timer always reaches 500ms.
+      // Exception: Capacitor's Android WebView fires pointercancel on a stationary long-press
+      // (Android's native gesture recognizer kicks in before our 500ms). We detect this by
+      // checking whether any movement occurred — if not, we enter resize mode directly.
       let cancelled = false
+      let hasMoved = false
       let timer: ReturnType<typeof setTimeout>
 
       function cancelEarly() {
@@ -856,7 +868,13 @@ export function CalendarPage() {
         if (mv.pointerId !== pointerId) return
         const dx = mv.clientX - startClientX
         const dy = mv.clientY - startClientY
-        if (Math.sqrt(dx * dx + dy * dy) > 10) cancelEarly()
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+          hasMoved = true
+          cancelEarly()
+          if (Math.abs(dx) > Math.abs(dy)) {
+            swipeRef.current = { direction: 'horizontal', startX: startClientX }
+          }
+        }
       }
 
       function onEarlyUp(up: PointerEvent) {
@@ -866,7 +884,14 @@ export function CalendarPage() {
 
       function onEarlyCancel(pc: PointerEvent) {
         if (pc.pointerId !== pointerId) return
+        if (hasMoved) { cancelEarly(); return }
+        // Stationary cancel: Capacitor/Android fires pointercancel on long-press instead of
+        // letting our timer reach 500ms. Treat it the same as a successful long-press.
         cancelEarly()
+        if (navigator.vibrate) navigator.vibrate(30)
+        suppressClickRef.current = true
+        setTimeout(() => { suppressClickRef.current = false }, 0)
+        setResizingEventId(event.id)
       }
 
       window.addEventListener('pointermove', onEarlyMove)
@@ -1011,8 +1036,9 @@ export function CalendarPage() {
         const botY = Math.max(startY, endY)
         const s = snapToGrid(days[i], topY)
         const en = snapToGrid(days[i], botY)
-        const topPx = (s.getHours() * 60 + s.getMinutes()) / 60 * HOUR_PX
-        const endPx = (en.getHours() * 60 + en.getMinutes()) / 60 * HOUR_PX
+        const dayStartMs = sod(days[i]).getTime()
+        const topPx = (s.getTime() - dayStartMs) / 3600000 * HOUR_PX
+        const endPx = Math.min((en.getTime() - dayStartMs) / 3600000 * HOUR_PX, HOUR_PX * 24)
         result.set(i, { topPx, heightPx: Math.max(endPx - topPx, HOUR_PX / 4) })
       } else if (i === minIdx) {
         const anchorY = startDayIdx < endDayIdx ? startY : endY
@@ -1446,7 +1472,7 @@ export function CalendarPage() {
                     return (
                       <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'}`}>
                         {dayAll.map((e) => (
-                          <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e).className}`} style={eventAllDayColors(e).style}>
+                          <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status === 'done' ? 'opacity-50 line-through' : e.status === 'skipped' ? 'opacity-30' : ''} ${eventAllDayColors(e).className}`} style={{ ...eventAllDayColors(e).style, ...(e.isPlanned ? { border: `1px dashed ${e.activity.category?.color ?? 'var(--color-primary)'}` } : undefined) }}>
                             {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
                           </button>
                         ))}

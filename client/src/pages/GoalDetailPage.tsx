@@ -360,35 +360,33 @@ export function GoalDetailPage() {
           </div>
 
           {/* Checkpoints */}
-          {isMilestone && (
-            <div className="flex flex-col gap-3">
-              <SectionHeading label="Checkpoints" count={goal.checkpoints.length} />
-              {hasCheckpoints ? (
-                <div className="rounded-lg border border-border px-3 py-3">
-                  <ul className="flex flex-col">
-                    {goal.checkpoints.map((cp, i) => (
-                      <CheckpointRow
-                        key={cp.id}
-                        checkpoint={cp}
-                        goalId={goal.id}
-                        isLast={i === goal.checkpoints.length - 1}
-                        onEdit={(cp) => setCpModal({ open: true, checkpoint: cp })}
-                      />
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">No checkpoints yet.</p>
-              )}
-              <button
-                onClick={() => setCpModal({ open: true })}
-                className="flex w-fit items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
-              >
-                <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-                Add checkpoint
-              </button>
-            </div>
-          )}
+          <div className="flex flex-col gap-3">
+            <SectionHeading label="Checkpoints" count={goal.checkpoints.length} />
+            {hasCheckpoints ? (
+              <div className="rounded-lg border border-border px-3 py-3">
+                <ul className="flex flex-col">
+                  {goal.checkpoints.map((cp, i) => (
+                    <CheckpointRow
+                      key={cp.id}
+                      checkpoint={cp}
+                      goalId={goal.id}
+                      isLast={i === goal.checkpoints.length - 1}
+                      onEdit={(cp) => setCpModal({ open: true, checkpoint: cp })}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">No checkpoints yet.</p>
+            )}
+            <button
+              onClick={() => setCpModal({ open: true })}
+              className="flex w-fit items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+              Add checkpoint
+            </button>
+          </div>
 
           {/* Activities */}
           <div className="flex flex-col gap-3">

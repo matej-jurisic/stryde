@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, X, Pencil, Trash2, Clock, CalendarPlus, Copy } from 'lucide-react'
+import { Check, X, Pencil, Trash2, Clock, CalendarPlus, CalendarX, Copy, MoreHorizontal } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -71,11 +71,22 @@ interface EventDetailModalProps {
 
 export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onSchedule, onDuplicate }: EventDetailModalProps) {
   const qc = useQueryClient()
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreRef = useRef<HTMLDivElement>(null)
   const [completedSubtaskIds, setCompletedSubtaskIds] = useState(() => new Set(occurrence?.completedSubtaskIds ?? []))
 
   useEffect(() => {
     setCompletedSubtaskIds(new Set(occurrence?.completedSubtaskIds ?? []))
   }, [occurrence?.completedSubtaskIds])
+
+  useEffect(() => {
+    if (!moreOpen) return
+    function close(e: MouseEvent) {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [moreOpen])
 
   const subtaskToggleMutation = useMutation({
     mutationFn: (subtaskId: string) => occurrencesApi.toggleSubtask(occurrence!.id, subtaskId),
@@ -105,6 +116,15 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
     },
   })
 
+  const unscheduleMutation = useMutation({
+    mutationFn: () => occurrencesApi.update(occurrence!.id, { startAt: null, endAt: null, isAllDay: false }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+      onClose()
+    },
+  })
+
   const deleteMutation = useMutation({
     mutationFn: () => occurrencesApi.delete(occurrence!.id),
     onSuccess: () => {
@@ -120,7 +140,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
   if (!occurrence) return null
 
   const isPending = occurrence.status === 'pending'
-  const busy = statusMutation.isPending || deleteMutation.isPending
+  const busy = statusMutation.isPending || deleteMutation.isPending || unscheduleMutation.isPending
   const timeLabel = formatOccurrenceTime(occurrence)
   const category = occurrence.activity.category
   const goal = occurrence.activity.goal
@@ -152,41 +172,61 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
             <Pencil className="h-4 w-4" strokeWidth={2} />
           </button>
 
-          {onDuplicate && (
-            <button
-              onClick={() => onDuplicate(occurrence)}
-              disabled={busy}
-              aria-label="Duplicate"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-            >
-              <Copy className="h-4 w-4" strokeWidth={2} />
-            </button>
-          )}
-
-          {isPending && occurrence.isPlanned && onSchedule && (
-            <button
-              onClick={() => { onClose(); onSchedule(occurrence) }}
-              disabled={busy}
-              aria-label="Schedule"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-            >
-              <CalendarPlus className="h-4 w-4" strokeWidth={2} />
-            </button>
-          )}
-
-          {isPending && (
-            <>
+          {(isPending || onDuplicate || (isPending && occurrence.isPlanned && onSchedule) || (isPending && occurrence.startAt)) && (
+            <div ref={moreRef} className="relative">
               <button
-                onClick={() => statusMutation.mutate('skipped')}
+                onClick={() => setMoreOpen((o) => !o)}
                 disabled={busy}
-                aria-label="Skip"
+                aria-label="More actions"
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
               >
-                {statusMutation.isPending && statusMutation.variables === 'skipped'
-                  ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  : <X className="h-4 w-4" strokeWidth={2.5} />}
+                <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
               </button>
+              {moreOpen && (
+                <div className="absolute bottom-full right-0 mb-1 z-10 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+                  {onDuplicate && (
+                    <button
+                      onClick={() => { setMoreOpen(false); onDuplicate(occurrence) }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <Copy className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                      Duplicate
+                    </button>
+                  )}
+                  {isPending && occurrence.isPlanned && onSchedule && (
+                    <button
+                      onClick={() => { setMoreOpen(false); onClose(); onSchedule(occurrence) }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <CalendarPlus className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                      Schedule
+                    </button>
+                  )}
+                  {isPending && occurrence.startAt && (
+                    <button
+                      onClick={() => { setMoreOpen(false); unscheduleMutation.mutate() }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <CalendarX className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                      Unschedule
+                    </button>
+                  )}
+                  {isPending && (
+                    <button
+                      onClick={() => { setMoreOpen(false); statusMutation.mutate('skipped') }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <X className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2.5} />
+                      Skip
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
+          {isPending ? (
+            <>
               <Button
                 onClick={() => statusMutation.mutate('done')}
                 loading={statusMutation.isPending && statusMutation.variables === 'done'}
@@ -196,6 +236,15 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
                 Done
               </Button>
             </>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => statusMutation.mutate('pending')}
+              loading={statusMutation.isPending}
+              disabled={deleteMutation.isPending}
+            >
+              Reactivate
+            </Button>
           )}
         </>
       }

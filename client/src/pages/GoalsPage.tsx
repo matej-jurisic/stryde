@@ -5,7 +5,6 @@ import { Plus, Pencil, Trash2, Check, MoreHorizontal, ChevronRight } from 'lucid
 import { PageHeader } from '@/components/layout/PageHeader'
 import { goalsApi, checkpointsApi, ApiError } from '@/lib/api'
 import type { Goal, GoalStatus, Checkpoint, CheckpointSize } from '@/lib/types'
-import { Badge } from '@/components/ui/Badge'
 import { GoalModal } from '@/components/goals/GoalModal'
 import { CheckpointModal } from '@/components/goals/CheckpointModal'
 
@@ -114,7 +113,6 @@ function CheckpointRow({ checkpoint, goalId, isLast, onEdit }: CheckpointRowProp
 function GoalMenu({
   transitions,
   isPending,
-  isMilestone,
   onEdit,
   onDelete,
   onStatusSelect,
@@ -122,7 +120,6 @@ function GoalMenu({
 }: {
   transitions: { label: string; value: GoalStatus }[]
   isPending: boolean
-  isMilestone: boolean
   onEdit: () => void
   onDelete: () => void
   onStatusSelect: (value: GoalStatus) => void
@@ -158,15 +155,13 @@ function GoalMenu({
             <Pencil className="h-3 w-3" strokeWidth={2} />
             Edit goal
           </button>
-          {isMilestone && (
-            <button
-              onClick={() => { onAddCheckpoint(); setOpen(false) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-            >
-              <Plus className="h-3 w-3" strokeWidth={2} />
-              Add checkpoint
-            </button>
-          )}
+          <button
+            onClick={() => { onAddCheckpoint(); setOpen(false) }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
+          >
+            <Plus className="h-3 w-3" strokeWidth={2} />
+            Add checkpoint
+          </button>
           {transitions.length > 0 && <div className="my-1 border-t border-border" />}
           {transitions.map((t) => (
             <button
@@ -234,8 +229,8 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
   return (
     <li className="flex flex-col">
       <div className="flex items-center gap-2 px-3 py-2.5 transition-colors hover:bg-muted/40">
-        {/* Expand chevron (milestone goals with checkpoints only) */}
-        {isMilestone && hasCheckpoints ? (
+        {/* Expand chevron (goals with checkpoints) */}
+        {hasCheckpoints ? (
           <button
             onClick={() => setExpanded((e) => !e)}
             className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
@@ -275,17 +270,9 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
           </div>
         )}
 
-        {/* Status badge */}
-        {goal.status !== 'closed' ? (
-          <Badge tone={TIER_META[tier].badge}>{TIER_META[tier].label}</Badge>
-        ) : (
-          <Badge tone="neutral">Closed</Badge>
-        )}
-
         <GoalMenu
           transitions={transitions}
           isPending={statusMutation.isPending}
-          isMilestone={isMilestone}
           onEdit={() => onEdit(goal)}
           onDelete={() => deleteMutation.mutate()}
           onStatusSelect={(s) => statusMutation.mutate(s)}
@@ -294,7 +281,7 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
       </div>
 
       {/* Expanded checkpoint list */}
-      {isMilestone && expanded && hasCheckpoints && (
+      {expanded && hasCheckpoints && (
         <div className="border-t border-border px-3 pb-3 pt-3">
           <ul className="flex flex-col">
             {goal.checkpoints.map((cp, i) => (

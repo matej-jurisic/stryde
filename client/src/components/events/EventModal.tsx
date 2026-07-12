@@ -111,7 +111,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
 
   const [errors, setErrors] = useState<Errors>({})
   const [isAllDay, setIsAllDay] = useState(() => source?.isAllDay ?? false)
-  const [isPlanned, setIsPlanned] = useState(() => source?.isPlanned ?? false)
+  const [isPlanned, setIsPlanned] = useState(() => scheduleOnly ? false : (source?.isPlanned ?? false))
   const [timeMode, setTimeMode] = useState<TimeMode>(() => {
     if (scheduleOnly) {
       if (!occurrence!.startAt && !occurrence!.endAt && !occurrence!.isAllDay) return 'floating'
@@ -185,7 +185,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
         startAt: timeMode === 'floating' ? null : toIso(form.startAt),
         endAt: timeMode !== 'scheduled' || isAllDay ? null : toIso(form.endAt),
         isAllDay: timeMode === 'floating' ? false : isAllDay,
-        isPlanned: scheduleOnly ? false : timeMode === 'floating' ? false : isPlanned,
+        isPlanned: timeMode === 'floating' ? false : isPlanned,
         durationMinutes,
       }
 
@@ -528,6 +528,18 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                     error={errors.endAt}
                   />
                 </div>
+              )}
+
+              {timeMode !== 'floating' && (
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={isPlanned}
+                    onChange={(e) => setIsPlanned(e.target.checked)}
+                    className="h-4 w-4 rounded border-input accent-primary"
+                  />
+                  Keep as planned
+                </label>
               )}
             </>
           )}
