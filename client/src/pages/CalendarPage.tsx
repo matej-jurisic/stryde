@@ -592,6 +592,8 @@ export function CalendarPage() {
     side: 'top' | 'bottom'
   } | null>(null)
   const swipeRef = useRef<{ direction: 'horizontal' | 'vertical'; startX: number } | null>(null)
+  const allDayDragStateRef = useRef<{ durationMinutes: number; curDayIdx: number } | null>(null)
+  const allDayDragActiveRef = useRef(false)
 
   const queryClient = useQueryClient()
 
@@ -962,6 +964,110 @@ export function CalendarPage() {
     })
   }
 
+  function rescheduleFromAllDay(ev: Occurrence, newStart: Date, newEnd: Date) {
+    queryClient.cancelQueries({ queryKey: ['events'] })
+    queryClient.setQueryData<Occurrence[]>(
+      ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
+      (old) => old?.map((o) => {
+        if (o.id !== ev.id) return o
+        return { ...o, startAt: newStart.toISOString(), endAt: newEnd.toISOString(), isAllDay: false }
+      }),
+    )
+    occurrencesApi.update(ev.id, {
+      title: ev.title,
+      startAt: newStart.toISOString(),
+      endAt: newEnd.toISOString(),
+      isAllDay: false,
+      isPlanned: ev.isPlanned,
+      durationMinutes: ev.durationMinutes,
+    }).finally(() => {
+      queryClient.invalidateQueries({ queryKey: ['events'] })
+      queryClient.invalidateQueries({ queryKey: ['recommendations'] })
+    })
+  }
+
+  function handleAllDayPillMoveStart(e: React.PointerEvent, event: Occurrence) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    e.stopPropagation()
+    suppressClickRef.current = false
+
+    const durationMinutes = event.durationMinutes ?? 60
+    const durationMs = durationMinutes * 60 * 1000
+    const heightPx = Math.max((durationMinutes / 60) * HOUR_PX, 20)
+    const pointerId = e.pointerId
+    const isTouch = e.pointerType === 'touch'
+    const startClientX = e.clientX
+    const startClientY = e.clientY
+    let isDragging = false
+
+    function isInGrid(clientY: number) {
+      if (!gridRef.current) return false
+      return clientY >= gridRef.current.getBoundingClientRect().top
+    }
+
+    function onPointerMove(mv: PointerEvent) {
+      if (isTouch && mv.pointerId !== pointerId) return
+      if (!isDragging) {
+        const dx = mv.clientX - startClientX
+        const dy = mv.clientY - startClientY
+        if (Math.abs(dx) + Math.abs(dy) < 8) return
+        isDragging = true
+        allDayDragActiveRef.current = true
+        setMovingEventId(event.id)
+        if (!isTouch) document.body.style.cursor = 'grabbing'
+      }
+
+      const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
+      allDayDragStateRef.current = { durationMinutes, curDayIdx }
+
+      if (isInGrid(mv.clientY)) {
+        const curY = getYInGrid(mv.clientY)
+        const startSnapped = snapToGrid(days[curDayIdx], curY)
+        const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
+        setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * HOUR_PX, heightPx })
+      } else {
+        setMoveOverlay(null)
+      }
+
+      startAutoScroll(mv.clientX, mv.clientY)
+    }
+
+    function cleanup() {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
+      allDayDragActiveRef.current = false
+      allDayDragStateRef.current = null
+      document.body.style.cursor = ''
+      stopAutoScroll()
+    }
+
+    function onPointerUp(mu: PointerEvent) {
+      if (isTouch && mu.pointerId !== pointerId) return
+      cleanup()
+      setMoveOverlay(null)
+      setMovingEventId(null)
+      if (!isDragging) return
+      suppressClickRef.current = true
+      if (!isInGrid(mu.clientY)) return
+      const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
+      const newStart = snapToGrid(days[curDayIdx], getYInGrid(mu.clientY))
+      const newEnd = new Date(newStart.getTime() + durationMs)
+      rescheduleFromAllDay(event, newStart, newEnd)
+    }
+
+    function onPointerCancel(pc: PointerEvent) {
+      if (isTouch && pc.pointerId !== pointerId) return
+      cleanup()
+      setMoveOverlay(null)
+      setMovingEventId(null)
+    }
+
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerCancel)
+  }
+
   // ── Event resize drag ──────────────────────────────────────────────────────
 
   function handleResizeStart(e: React.PointerEvent, event: Occurrence, side: 'top' | 'bottom') {
@@ -1170,7 +1276,7 @@ export function CalendarPage() {
   // touch handlers as passive, so this has to be a native listener.
   useEffect(() => {
     function onTouchMove(e: TouchEvent) {
-      if (dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current || swipeRef.current?.direction === 'horizontal') e.preventDefault()
+      if (dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current || allDayDragActiveRef.current || swipeRef.current?.direction === 'horizontal') e.preventDefault()
     }
     document.addEventListener('touchmove', onTouchMove, { passive: false })
     return () => document.removeEventListener('touchmove', onTouchMove)
@@ -1210,7 +1316,7 @@ export function CalendarPage() {
     const MAX_SPEED = 12
     function tick() {
       if (!autoScrollRef.current || autoScrollRef.current !== state) return
-      const anyDragActive = dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current
+      const anyDragActive = dragRef.current?.isDrag || eventMoveRef.current?.isDragging || resizeDragActiveRef.current || allDayDragActiveRef.current
       if (!anyDragActive || !scrollRef.current) { autoScrollRef.current = null; return }
       const rect = scrollRef.current.getBoundingClientRect()
       const distTop = state.clientY - rect.top
@@ -1246,6 +1352,14 @@ export function CalendarPage() {
             setResizeOverlay(computeResizeOverlays(Math.min(snappedMs, rs.origEndMs - 15 * 60 * 1000), rs.origEndMs))
           } else {
             setResizeOverlay(computeResizeOverlays(rs.origStartMs, Math.max(snappedMs, rs.origStartMs + 15 * 60 * 1000)))
+          }
+        } else if (allDayDragActiveRef.current && allDayDragStateRef.current) {
+          const { durationMinutes: dur, curDayIdx } = allDayDragStateRef.current
+          if (gridRef.current && state.clientY >= gridRef.current.getBoundingClientRect().top) {
+            const curY = getYInGrid(state.clientY)
+            const startSnapped = snapToGrid(days[curDayIdx], curY)
+            const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
+            setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * HOUR_PX, heightPx: Math.max((dur / 60) * HOUR_PX, 20) })
           }
         }
       }
@@ -1374,7 +1488,7 @@ export function CalendarPage() {
     <div className="flex flex-1 overflow-hidden">
       <RecommendationPanel
         date={formatDateInput(effectiveToday)}
-        onOccurrenceClick={openEdit}
+        onOccurrenceClick={openSchedule}
         onActivityClick={openFromActivity}
         mobileOpen={drawerOpen}
         onMobileClose={() => setDrawerOpen(false)}
@@ -1501,7 +1615,7 @@ export function CalendarPage() {
                     return (
                       <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'}`}>
                         {dayAll.map((e) => (
-                          <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status === 'done' ? 'opacity-50 line-through' : e.status === 'skipped' ? 'opacity-30' : ''} ${eventAllDayColors(e).className}`} style={{ ...eventAllDayColors(e).style, ...(e.isPlanned ? { border: `1px dashed ${e.activity.category?.color ?? 'var(--color-primary)'}` } : undefined) }}>
+                          <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${e.status === 'done' ? 'opacity-50 line-through' : e.status === 'skipped' ? 'opacity-30' : movingEventId === e.id ? 'opacity-20' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style, ...(e.isPlanned ? { border: `1px dashed ${e.activity.category?.color ?? 'var(--color-primary)'}` } : undefined) }}>
                             {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
                           </button>
                         ))}
@@ -1521,7 +1635,7 @@ export function CalendarPage() {
                 {allDayEvents
                   .filter((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 })
                   .map((e) => (
-                    <button key={e.id} onClick={() => openDetail(e)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${e.status !== 'pending' ? 'opacity-50 line-through' : ''} ${eventAllDayColors(e).className}`} style={eventAllDayColors(e).style}>
+                    <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${e.status !== 'pending' ? 'opacity-50 line-through' : movingEventId === e.id ? 'opacity-20' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style }}>
                       {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
                     </button>
                   ))}

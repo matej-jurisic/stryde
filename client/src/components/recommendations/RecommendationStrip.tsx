@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { CalendarPlus, Sparkles, X } from 'lucide-react'
-import { recommendationsApi } from '@/lib/api'
+import { occurrencesApi, recommendationsApi } from '@/lib/api'
 import type { Activity, GoalStatus, Occurrence, Recommendation } from '@/lib/types'
 import { Badge } from '@/components/ui/Badge'
 
@@ -27,10 +27,14 @@ function goalTone(status: GoalStatus): 'focus' | 'active' | 'bench' {
 }
 
 function formatDuration(o: Occurrence): string | null {
-  if (!o.startAt || !o.endAt) return null
-  const mins = Math.round(
-    (new Date(o.endAt).getTime() - new Date(o.startAt).getTime()) / 60000,
-  )
+  let mins: number
+  if (o.startAt && o.endAt) {
+    mins = Math.round((new Date(o.endAt).getTime() - new Date(o.startAt).getTime()) / 60000)
+  } else if (o.durationMinutes) {
+    mins = o.durationMinutes
+  } else {
+    return null
+  }
   if (mins <= 0) return null
   if (mins < 60) return `${mins}m`
   const h = Math.floor(mins / 60)
@@ -101,6 +105,12 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
     staleTime: 30 * 1000,
   })
 
+  const { data: allFloating = [], isLoading: isLoadingFloating } = useQuery({
+    queryKey: ['events', 'floating'],
+    queryFn: () => occurrencesApi.list({ floating: true, status: 'pending' }),
+    staleTime: 30 * 1000,
+  })
+
   const groups = useMemo(() => {
     const map = new Map<string, Recommendation[]>()
     const order: string[] = []
@@ -115,51 +125,88 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
     return order.map((label) => ({ label, items: map.get(label)! }))
   }, [recommendations])
 
+  const floatingOnly = useMemo(() => {
+    const recIds = new Set(
+      recommendations.flatMap((r) => (r.type === 'occurrence' ? [r.occurrence.id] : [])),
+    )
+    return allFloating.filter((o) => !recIds.has(o.id))
+  }, [allFloating, recommendations])
+
   function renderBody() {
-    if (isLoading) {
+    if (isLoading || isLoadingFloating) {
       return (
         <div className="flex items-center justify-center py-8">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       )
     }
-    if (groups.length === 0) {
+
+    const hasRecs = groups.length > 0
+    const hasFloating = floatingOnly.length > 0
+
+    if (!hasRecs && !hasFloating) {
       return <p className="px-2 py-4 text-sm text-muted-foreground">Nothing to suggest right now.</p>
     }
-    return groups.map((group) => (
-      <div key={group.label} className="mb-4">
-        <div className="flex items-center justify-between px-2 py-2">
-          <div className="flex items-center gap-1.5">
-            {group.label === 'Based on Your Habits' && (
-              <Sparkles className="h-3 w-3 text-muted-foreground" />
-            )}
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {group.label}
-            </h2>
+
+    return (
+      <>
+        {hasRecs && groups.map((group) => (
+          <div key={group.label} className="mb-4">
+            <div className="flex items-center justify-between px-2 py-2">
+              <div className="flex items-center gap-1.5">
+                {group.label === 'Based on Your Habits' && (
+                  <Sparkles className="h-3 w-3 text-muted-foreground" />
+                )}
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {group.label}
+                </h2>
+              </div>
+              <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
+                {group.items.length}
+              </span>
+            </div>
+            <ul className="flex flex-col gap-0.5">
+              {group.items.map((rec, i) =>
+                rec.type === 'occurrence' ? (
+                  <OccurrenceRecItem
+                    key={rec.occurrence.id}
+                    occurrence={rec.occurrence}
+                    onSchedule={() => onOccurrenceClick(rec.occurrence)}
+                  />
+                ) : (
+                  <ActivityRecItem
+                    key={rec.activity.id + i}
+                    activity={rec.activity}
+                    onCreate={() => onActivityClick(rec.activity)}
+                  />
+                )
+              )}
+            </ul>
           </div>
-          <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
-            {group.items.length}
-          </span>
-        </div>
-        <ul className="flex flex-col gap-0.5">
-          {group.items.map((rec, i) =>
-            rec.type === 'occurrence' ? (
-              <OccurrenceRecItem
-                key={rec.occurrence.id}
-                occurrence={rec.occurrence}
-                onSchedule={() => onOccurrenceClick(rec.occurrence)}
-              />
-            ) : (
-              <ActivityRecItem
-                key={rec.activity.id + i}
-                activity={rec.activity}
-                onCreate={() => onActivityClick(rec.activity)}
-              />
-            )
-          )}
-        </ul>
-      </div>
-    ))
+        ))}
+        {hasFloating && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between px-2 py-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Floating
+              </h2>
+              <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
+                {floatingOnly.length}
+              </span>
+            </div>
+            <ul className="flex flex-col gap-0.5">
+              {floatingOnly.map((o) => (
+                <OccurrenceRecItem
+                  key={o.id}
+                  occurrence={o}
+                  onSchedule={() => onOccurrenceClick(o)}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
+      </>
+    )
   }
 
   return (

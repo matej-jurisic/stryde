@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, X, Pencil, Trash2, Clock, CalendarPlus, CalendarX, Copy, MoreHorizontal } from 'lucide-react'
+import { Check, X, Pencil, Trash2, Clock, CalendarPlus, Copy, MoreHorizontal, Pin, PinOff } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -116,8 +116,17 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
     },
   })
 
-  const unscheduleMutation = useMutation({
-    mutationFn: () => occurrencesApi.update(occurrence!.id, { startAt: null, endAt: null, isAllDay: false }),
+  const planMutation = useMutation({
+    mutationFn: () => occurrencesApi.update(occurrence!.id, { startAt: null, endAt: null, isAllDay: false, isPlanned: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+      onClose()
+    },
+  })
+
+  const floatMutation = useMutation({
+    mutationFn: () => occurrencesApi.update(occurrence!.id, { startAt: null, endAt: null, isAllDay: false, isPlanned: false }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
@@ -140,7 +149,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
   if (!occurrence) return null
 
   const isPending = occurrence.status === 'pending'
-  const busy = statusMutation.isPending || deleteMutation.isPending || unscheduleMutation.isPending
+  const busy = statusMutation.isPending || deleteMutation.isPending || planMutation.isPending || floatMutation.isPending
   const timeLabel = formatOccurrenceTime(occurrence)
   const category = occurrence.activity.category
   const goal = occurrence.activity.goal
@@ -163,17 +172,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
               : <Trash2 className="h-4 w-4" strokeWidth={2} />}
           </button>
 
-          <button
-            onClick={() => { onClose(); onEdit(occurrence) }}
-            disabled={busy}
-            aria-label="Edit"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-          >
-            <Pencil className="h-4 w-4" strokeWidth={2} />
-          </button>
-
-          {(isPending || onDuplicate || (isPending && occurrence.isPlanned && onSchedule) || (isPending && occurrence.startAt)) && (
-            <div ref={moreRef} className="relative">
+          <div ref={moreRef} className="relative">
               <button
                 onClick={() => setMoreOpen((o) => !o)}
                 disabled={busy}
@@ -184,6 +183,13 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
               </button>
               {moreOpen && (
                 <div className="absolute bottom-full right-0 mb-1 z-10 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+                  <button
+                    onClick={() => { setMoreOpen(false); onClose(); onEdit(occurrence) }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                  >
+                    <Pencil className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                    Edit
+                  </button>
                   {onDuplicate && (
                     <button
                       onClick={() => { setMoreOpen(false); onDuplicate(occurrence) }}
@@ -203,13 +209,22 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
                     </button>
                   )}
                   {isPending && occurrence.startAt && (
-                    <button
-                      onClick={() => { setMoreOpen(false); unscheduleMutation.mutate() }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                    >
-                      <CalendarX className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
-                      Unschedule
-                    </button>
+                    <>
+                      <button
+                        onClick={() => { setMoreOpen(false); planMutation.mutate() }}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                      >
+                        <Pin className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                        Plan
+                      </button>
+                      <button
+                        onClick={() => { setMoreOpen(false); floatMutation.mutate() }}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                      >
+                        <PinOff className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                        Float
+                      </button>
+                    </>
                   )}
                   {isPending && (
                     <button
@@ -223,7 +238,6 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
                 </div>
               )}
             </div>
-          )}
 
           {isPending ? (
             <>

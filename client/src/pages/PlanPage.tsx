@@ -395,13 +395,14 @@ export function PlanPage() {
     setModalOpen(false)
     setEditingOccurrence(undefined)
     setDefaultActivity(undefined)
+    setScheduleMode(false)
   }
 
   return (
     <div className="flex flex-1 overflow-hidden">
       <RecommendationPanel
         date={dateStr}
-        onOccurrenceClick={openEdit}
+        onOccurrenceClick={openSchedule}
         onActivityClick={openFromActivity}
         mobileOpen={drawerOpen}
         onMobileClose={() => setDrawerOpen(false)}

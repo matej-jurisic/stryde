@@ -114,7 +114,6 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
   const [isPlanned, setIsPlanned] = useState(() => scheduleOnly ? false : (source?.isPlanned ?? false))
   const [timeMode, setTimeMode] = useState<TimeMode>(() => {
     if (scheduleOnly) {
-      if (!occurrence!.startAt && !occurrence!.endAt && !occurrence!.isAllDay) return 'floating'
       if (occurrence!.startAt && occurrence!.endAt) return 'scheduled'
       return 'due'
     }
@@ -484,8 +483,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
           {/* scheduleOnly: full scheduling controls */}
           {scheduleOnly && (
             <>
-              <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
-                <button type="button" onClick={() => switchMode('floating')} className={segmentClass(timeMode === 'floating')}>Floating</button>
+              <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
                 <button type="button" onClick={() => switchMode('due')} className={segmentClass(timeMode === 'due')}>Due</button>
                 <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(timeMode === 'scheduled')}>Scheduled</button>
               </div>
