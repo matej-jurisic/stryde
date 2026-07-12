@@ -3,8 +3,10 @@ import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, Calend
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, goalsApi, settingsApi } from '@/lib/api'
 import type { Activity, Checkpoint, CheckpointSize, Occurrence, EventStatus, Goal } from '@/lib/types'
+import { OccurrenceBar } from '@/components/goals/OccurrenceBar'
 import { EventModal } from '@/components/events/EventModal'
 import { OccurrenceSubtasksModal } from '@/components/events/OccurrenceSubtasksModal'
+import { SkipRescheduleModal } from '@/components/events/SkipRescheduleModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 import { Badge } from '@/components/ui/Badge'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
@@ -94,12 +96,12 @@ function believedProgress(checkpoints: Checkpoint[]): number {
 
 function GoalHealthRow({ goal }: { goal: Goal }) {
   const progress = believedProgress(goal.checkpoints)
-  const showProgress = goal.kind === 'milestone'
+  const isMilestone = goal.kind === 'milestone'
   return (
     <div className="flex items-center gap-3 py-1.5">
       <div className="h-2 w-2 shrink-0 rounded-full bg-goal-focus" />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{goal.title}</span>
-      {showProgress && (
+      {isMilestone ? (
         <>
           <div className="w-28 shrink-0">
             <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -113,7 +115,9 @@ function GoalHealthRow({ goal }: { goal: Goal }) {
             {Math.round(progress)}%
           </span>
         </>
-      )}
+      ) : goal.occurrenceStats ? (
+        <OccurrenceBar stats={goal.occurrenceStats} barClassName="w-28" labelClassName="w-9" />
+      ) : null}
     </div>
   )
 }
@@ -140,6 +144,7 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
   const isSkipped = event.status === 'skipped'
   const [menuOpen, setMenuOpen] = useState(false)
   const [subtasksOpen, setSubtasksOpen] = useState(false)
+  const [skipOpen, setSkipOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const hasSubtasks = event.activity.subtasks.length > 0
   const completedCount = event.completedSubtaskIds.length
@@ -244,7 +249,7 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
             )}
             {isPending && (
               <button
-                onClick={() => { statusMutation.mutate('skipped'); setMenuOpen(false) }}
+                onClick={() => { setMenuOpen(false); setSkipOpen(true) }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
               >
                 <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2.5} />
@@ -285,6 +290,12 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
           occurrence={event}
         />
       )}
+      <SkipRescheduleModal
+        open={skipOpen}
+        onClose={() => setSkipOpen(false)}
+        occurrence={event}
+        onDone={() => setSkipOpen(false)}
+      />
     </li>
   )
 }

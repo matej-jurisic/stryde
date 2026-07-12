@@ -32,7 +32,8 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
             .Include(g => g.Checkpoints)
             .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
         if (goal is null) return Result<GoalDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
-        return Result<GoalDto>.Success(GoalDto.FromEntity(goal));
+        var stats = goal.Kind == GoalKind.ongoing ? await GetOccurrenceStatsAsync([goal.Id], userId) : [];
+        return Result<GoalDto>.Success(GoalDto.FromEntity(goal, stats.GetValueOrDefault(goal.Id)));
     }
 
     public async Task<List<GoalDto>> ListAsync(Guid userId, GoalStatus? status = null)
@@ -45,11 +46,52 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
             query = query.Where(g => g.Status == status.Value);
 
         var goals = await query.ToListAsync();
+
+        var ongoingIds = goals.Where(g => g.Kind == GoalKind.ongoing).Select(g => g.Id).ToList();
+        var stats = ongoingIds.Count > 0 ? await GetOccurrenceStatsAsync(ongoingIds, userId) : [];
+
         return goals
             .OrderBy(g => g.Status)
             .ThenBy(g => g.CreatedAt)
-            .Select(GoalDto.FromEntity)
+            .Select(g => GoalDto.FromEntity(g, stats.GetValueOrDefault(g.Id)))
             .ToList();
+    }
+
+    private async Task<Dictionary<Guid, GoalOccurrenceStats>> GetOccurrenceStatsAsync(List<Guid> goalIds, Guid userId)
+    {
+        var activityGoalMap = await db.Activities
+            .Where(a => a.UserId == userId && a.GoalId != null && goalIds.Contains(a.GoalId.Value))
+            .Select(a => new { a.Id, GoalId = a.GoalId!.Value })
+            .ToListAsync();
+
+        if (activityGoalMap.Count == 0) return [];
+
+        var activityIds = activityGoalMap.Select(a => a.Id).ToList();
+        var counts = await db.Occurrences
+            .Where(o => activityIds.Contains(o.ActivityId))
+            .GroupBy(o => new { o.ActivityId, o.Status })
+            .Select(g => new { g.Key.ActivityId, g.Key.Status, Count = g.Count() })
+            .ToListAsync();
+
+        var lookup = activityGoalMap.ToDictionary(a => a.Id, a => a.GoalId);
+        var result = new Dictionary<Guid, (int Done, int Skipped, int Pending)>();
+
+        foreach (var row in counts)
+        {
+            var goalId = lookup[row.ActivityId];
+            result.TryAdd(goalId, (0, 0, 0));
+            var cur = result[goalId];
+            result[goalId] = row.Status switch
+            {
+                EventStatus.done    => cur with { Done    = cur.Done    + row.Count },
+                EventStatus.skipped => cur with { Skipped = cur.Skipped + row.Count },
+                _                   => cur with { Pending = cur.Pending + row.Count },
+            };
+        }
+
+        return result.ToDictionary(
+            kv => kv.Key,
+            kv => new GoalOccurrenceStats(kv.Value.Done, kv.Value.Skipped, kv.Value.Pending));
     }
 
     public async Task<Result<GoalDto>> UpdateAsync(Guid id, Guid userId, UpdateGoalRequest req)

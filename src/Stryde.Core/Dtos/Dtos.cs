@@ -136,6 +136,8 @@ public sealed record UpdateOccurrenceRequest(
 public sealed record SetOccurrenceStatusRequest(EventStatus Status);
 
 // Goals
+public sealed record GoalOccurrenceStats(int Done, int Skipped, int Pending);
+
 public sealed record GoalDto(
     Guid Id,
     Guid UserId,
@@ -144,12 +146,14 @@ public sealed record GoalDto(
     string Status,
     string Kind,
     DateTimeOffset CreatedAt,
-    List<CheckpointDto> Checkpoints)
+    List<CheckpointDto> Checkpoints,
+    GoalOccurrenceStats? OccurrenceStats = null)
 {
-    public static GoalDto FromEntity(Goal g) => new(
+    public static GoalDto FromEntity(Goal g, GoalOccurrenceStats? stats = null) => new(
         g.Id, g.UserId, g.Title, g.Description,
         g.Status.ToString(), g.Kind.ToString(), g.CreatedAt,
-        g.Checkpoints.Select(CheckpointDto.FromEntity).ToList());
+        g.Checkpoints.Select(CheckpointDto.FromEntity).ToList(),
+        stats);
 }
 
 public sealed record CreateGoalRequest(string Title, string? Description, GoalKind Kind = GoalKind.milestone);

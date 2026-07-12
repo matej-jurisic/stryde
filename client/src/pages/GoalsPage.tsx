@@ -5,6 +5,7 @@ import { Plus, Pencil, Trash2, Check, MoreHorizontal, ChevronRight } from 'lucid
 import { PageHeader } from '@/components/layout/PageHeader'
 import { goalsApi, checkpointsApi, ApiError } from '@/lib/api'
 import type { Goal, GoalStatus, Checkpoint, CheckpointSize } from '@/lib/types'
+import { OccurrenceBar } from '@/components/goals/OccurrenceBar'
 import { GoalModal } from '@/components/goals/GoalModal'
 import { CheckpointModal } from '@/components/goals/CheckpointModal'
 
@@ -28,6 +29,7 @@ const BAR_COLORS: Record<Tier, string> = {
 const SIZE_WEIGHT: Record<CheckpointSize, number> = {
   tiny: 1, small: 2, normal: 3, big: 5, huge: 8,
 }
+
 
 function believedProgress(checkpoints: Checkpoint[]): number {
   const total = checkpoints.reduce((sum, c) => sum + SIZE_WEIGHT[c.size], 0)
@@ -256,18 +258,24 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
         </button>
 
         {/* Compact inline progress */}
-        {isMilestone && goal.status !== 'closed' && hasCheckpoints && (
-          <div className="flex w-20 shrink-0 items-center gap-1.5">
-            <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-muted">
-              <div
-                className={`absolute inset-y-0 left-0 rounded-full ${BAR_COLORS[tier]} transition-all`}
-                style={{ width: `${Math.min(believed, 100)}%` }}
-              />
+        {goal.status !== 'closed' && (
+          isMilestone && hasCheckpoints ? (
+            <div className="flex w-20 shrink-0 items-center gap-1.5">
+              <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`absolute inset-y-0 left-0 rounded-full ${BAR_COLORS[tier]} transition-all`}
+                  style={{ width: `${Math.min(believed, 100)}%` }}
+                />
+              </div>
+              <span className="w-7 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
+                {Math.round(believed)}%
+              </span>
             </div>
-            <span className="w-7 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
-              {Math.round(believed)}%
-            </span>
-          </div>
+          ) : !isMilestone && goal.occurrenceStats ? (
+            <div className="flex w-20 shrink-0 items-center gap-1.5">
+              <OccurrenceBar stats={goal.occurrenceStats} />
+            </div>
+          ) : null
         )}
 
         <GoalMenu

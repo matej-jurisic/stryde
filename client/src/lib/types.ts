@@ -34,6 +34,12 @@ export interface Checkpoint {
   createdAt: string
 }
 
+export interface GoalOccurrenceStats {
+  done: number
+  skipped: number
+  pending: number
+}
+
 export interface Goal {
   id: string
   userId: string
@@ -43,6 +49,7 @@ export interface Goal {
   kind: GoalKind
   createdAt: string
   checkpoints: Checkpoint[]
+  occurrenceStats: GoalOccurrenceStats | null
 }
 
 export interface CategorySummary {

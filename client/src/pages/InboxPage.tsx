@@ -8,6 +8,7 @@ import { CategoryIcon } from '@/components/categories/categoryIcons'
 import { Badge } from '@/components/ui/Badge'
 import { EventModal } from '@/components/events/EventModal'
 import { OccurrenceSubtasksModal } from '@/components/events/OccurrenceSubtasksModal'
+import { SkipRescheduleModal } from '@/components/events/SkipRescheduleModal'
 import { CategoryModal } from '@/components/categories/CategoryModal'
 import { PageHeader } from '@/components/layout/PageHeader'
 
@@ -99,6 +100,7 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
   const qc = useQueryClient()
   const [menuOpen, setMenuOpen] = useState(false)
   const [subtasksOpen, setSubtasksOpen] = useState(false)
+  const [skipOpen, setSkipOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const hasSubtasks = occurrence.activity.subtasks.length > 0
   const completedCount = occurrence.completedSubtaskIds.length
@@ -202,7 +204,7 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
             )}
             {isPending && (
               <button
-                onClick={() => { statusMutation.mutate('skipped'); setMenuOpen(false) }}
+                onClick={() => { setMenuOpen(false); setSkipOpen(true) }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
               >
                 <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2.5} />
@@ -243,6 +245,12 @@ function InboxRow({ occurrence, onEdit, onSchedule }: InboxRowProps) {
           occurrence={occurrence}
         />
       )}
+      <SkipRescheduleModal
+        open={skipOpen}
+        onClose={() => setSkipOpen(false)}
+        occurrence={occurrence}
+        onDone={() => setSkipOpen(false)}
+      />
     </li>
   )
 }

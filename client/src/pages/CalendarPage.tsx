@@ -633,14 +633,18 @@ export function CalendarPage() {
       }),
   })
 
-  // Scroll to current time on mount
+  // Scroll to current time once the grid first becomes visible. Gated on
+  // isLoading rather than mount: on a true first load the scroll container
+  // doesn't exist yet (the spinner renders in its place), so a mount-only
+  // effect silently no-ops until a later, cache-warm visit.
+  const hasScrolledToNowRef = useRef(false)
   useEffect(() => {
-    if (scrollRef.current) {
-      const now = new Date()
-      const px = ((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_PX
-      scrollRef.current.scrollTop = Math.max(0, px - 200)
-    }
-  }, [])
+    if (hasScrolledToNowRef.current || isLoading || !scrollRef.current) return
+    const now = new Date()
+    const px = ((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_PX
+    scrollRef.current.scrollTop = Math.max(0, px - 200)
+    hasScrolledToNowRef.current = true
+  }, [isLoading])
 
   useEffect(() => {
     const el = dateInputRef.current
@@ -1484,8 +1488,8 @@ export function CalendarPage() {
     if (scrollRef.current) scrollRef.current.style.overflowY = ''
   }
 
-  const allDayEvents = events.filter((e) => e.isAllDay && e.startAt)
-  const calendarEvents = events.filter((e) => !e.isAllDay)
+  const allDayEvents = events.filter((e) => e.isAllDay && e.startAt && e.status !== 'skipped')
+  const calendarEvents = events.filter((e) => !e.isAllDay && e.status !== 'skipped')
 
   return (
     <div className="flex flex-1 overflow-hidden">

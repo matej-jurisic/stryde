@@ -6,6 +6,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
+import { SkipRescheduleModal } from '@/components/events/SkipRescheduleModal'
 import { occurrencesApi } from '@/lib/api'
 import type { Occurrence, EventStatus } from '@/lib/types'
 
@@ -73,6 +74,7 @@ interface EventDetailModalProps {
 export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onSchedule, onDuplicate }: EventDetailModalProps) {
   const qc = useQueryClient()
   const [moreOpen, setMoreOpen] = useState(false)
+  const [skipOpen, setSkipOpen] = useState(false)
   const [menuPos, setMenuPos] = useState<{ bottom: number; right: number }>({ bottom: 0, right: 0 })
   const moreButtonRef = useRef<HTMLButtonElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
@@ -167,6 +169,15 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
   if (!occurrence) return null
 
   const isPending = occurrence.status === 'pending'
+  // SkipRescheduleModal rendered outside the main Modal so it layers on top
+  if (skipOpen) return (
+    <SkipRescheduleModal
+      open={skipOpen}
+      onClose={() => setSkipOpen(false)}
+      occurrence={occurrence}
+      onDone={() => { setSkipOpen(false); onClose() }}
+    />
+  )
   const busy = statusMutation.isPending || deleteMutation.isPending || planMutation.isPending || floatMutation.isPending
   const timeLabel = formatOccurrenceTime(occurrence)
   const category = occurrence.activity.category
@@ -250,7 +261,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
               )}
               {isPending && (
                 <button
-                  onClick={() => { setMoreOpen(false); statusMutation.mutate('skipped') }}
+                  onClick={() => { setMoreOpen(false); setSkipOpen(true) }}
                   className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
                 >
                   <X className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2.5} />
