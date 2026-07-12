@@ -656,6 +656,18 @@ export function CalendarPage() {
     return () => document.removeEventListener('mousedown', close)
   }, [viewDropOpen])
 
+  // A long-press in the Android WebView triggers the native context-menu /
+  // text-selection gesture, which steals the pointer (pointercancel) before our
+  // long-press timer fires. Suppressing contextmenu inside the calendar area
+  // keeps the pointer stream alive so hold-to-resize and hold-to-drag work.
+  useEffect(() => {
+    function onContextMenu(e: Event) {
+      if (scrollRef.current?.contains(e.target as Node)) e.preventDefault()
+    }
+    document.addEventListener('contextmenu', onContextMenu)
+    return () => document.removeEventListener('contextmenu', onContextMenu)
+  }, [])
+
 
   function prev() {
     const step = view === 'day' ? -1 : view === '3day' ? -3 : -7
@@ -737,13 +749,17 @@ export function CalendarPage() {
   function handleEventMoveStart(e: React.PointerEvent, event: Occurrence, topPx: number) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     if (!event.startAt) return
+    // Click suppression lasts until the next pointerdown: in the WebView the
+    // click can arrive long after the gesture that set the flag (e.g. the finger
+    // lifts well after a pointercancel), so a same-tick setTimeout(0) reset
+    // would expire before the click it is meant to block.
+    suppressClickRef.current = false
     const isDue = isDueOccurrence(event)
     // Dismiss any active touch resize mode when interacting with an event body
     if (resizingEventId) {
       setResizingEventId(null)
       if (resizingEventId === event.id) {
         suppressClickRef.current = true
-        setTimeout(() => { suppressClickRef.current = false }, 0)
         return
       }
     }
@@ -759,7 +775,7 @@ export function CalendarPage() {
     const gridY = getYInGrid(startClientY)
     const offsetPx = gridY - topPx
 
-    function startDragging() {
+    function startDragging(armClientX: number, armClientY: number) {
       eventMoveRef.current = { event, durationMs, offsetPx, isDragging: false }
       // Dim the event immediately on touch to confirm long-press registered
       if (isTouch) setMovingEventId(event.id)
@@ -769,13 +785,14 @@ export function CalendarPage() {
         if (isTouch && mv.pointerId !== pointerId) return
         if (!eventMoveRef.current) return
         if (!eventMoveRef.current.isDragging) {
-          if (!isTouch) {
-            // Mouse needs a small movement threshold to distinguish click from drag
-            const dx = mv.clientX - startClientX
-            const dy = mv.clientY - startClientY
-            if (Math.abs(dx) + Math.abs(dy) < 8) return
-            document.body.style.cursor = 'grabbing'
-          }
+          // Movement threshold distinguishes click/hold-and-release from a drag.
+          // Touch measures from the arm position: fingers jitter a few px during
+          // a hold, and without the threshold that jitter marked the gesture as
+          // a drag, so releasing never entered resize mode.
+          const dx = mv.clientX - armClientX
+          const dy = mv.clientY - armClientY
+          if (Math.abs(dx) + Math.abs(dy) < 8) return
+          if (!isTouch) document.body.style.cursor = 'grabbing'
           eventMoveRef.current.isDragging = true
           setMovingEventId(event.id)
         }
@@ -814,13 +831,11 @@ export function CalendarPage() {
           // Hold-and-release without drag: enter resize mode (touch only; mouse uses hover handles)
           if (isTouch) {
             suppressClickRef.current = true
-            setTimeout(() => { suppressClickRef.current = false }, 0)
             setResizingEventId(ev.id)
           }
           return
         }
         suppressClickRef.current = true
-        setTimeout(() => { suppressClickRef.current = false }, 0)
         const curY = getYInGrid(mu.clientY)
         const anchorY = isDue ? curY : Math.max(0, curY - off)
         const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
@@ -834,7 +849,7 @@ export function CalendarPage() {
       function onPointerCancel(pc: PointerEvent) {
         if (isTouch && pc.pointerId !== pointerId) return
         // Capture isDragging before nulling the ref — Capacitor/Android can fire
-        // pointercancel after the 500ms timer (late native gesture recognition).
+        // pointercancel after the long-press timer (late native gesture recognition).
         // If no movement occurred, treat it the same as onEarlyCancel: enter resize mode.
         const wasDragging = eventMoveRef.current?.isDragging ?? false
         cleanup()
@@ -843,7 +858,6 @@ export function CalendarPage() {
         setMovingEventId(null)
         if (isTouch && !wasDragging) {
           suppressClickRef.current = true
-          setTimeout(() => { suppressClickRef.current = false }, 0)
           setResizingEventId(event.id)
         }
       }
@@ -854,19 +868,18 @@ export function CalendarPage() {
     }
 
     if (isTouch) {
-      // Long-press (500ms) before drag activates, so normal taps/scrolls still work.
-      // touch-action:pan-y on the event body means the browser only claims the touch when
-      // it detects actual vertical movement (firing pointercancel then), so a stationary
-      // hold never gets cancelled and the timer always reaches 500ms.
-      // Exception: Capacitor's Android WebView fires pointercancel on a stationary long-press
-      // (Android's native gesture recognizer kicks in before our 500ms). We detect this by
-      // checking whether any movement occurred — if not, we enter resize mode directly.
-      let cancelled = false
-      let hasMoved = false
+      // Long-press (350ms) before drag activates, so normal taps/scrolls still work.
+      // 350ms deliberately undercuts the Android WebView's ~400ms native long-press
+      // recognizer: in the Capacitor app the native gesture would otherwise steal
+      // the pointer (pointercancel) before the timer fires. The grid-level
+      // contextmenu suppression (see effect above) blocks most of those takeovers;
+      // onEarlyCancel below is the fallback for the ones that still get through.
+      let lastClientX = startClientX
+      let lastClientY = startClientY
+      const pressedAt = Date.now()
       let timer: ReturnType<typeof setTimeout>
 
       function cancelEarly() {
-        cancelled = true
         clearTimeout(timer)
         window.removeEventListener('pointermove', onEarlyMove)
         window.removeEventListener('pointerup', onEarlyUp)
@@ -875,10 +888,13 @@ export function CalendarPage() {
 
       function onEarlyMove(mv: PointerEvent) {
         if (mv.pointerId !== pointerId) return
+        lastClientX = mv.clientX
+        lastClientY = mv.clientY
         const dx = mv.clientX - startClientX
         const dy = mv.clientY - startClientY
-        if (Math.sqrt(dx * dx + dy * dy) > 10) {
-          hasMoved = true
+        // Fingers drift during a hold on a real touchscreen; only movement past
+        // 15px counts as scroll/swipe intent and kills the long-press.
+        if (Math.sqrt(dx * dx + dy * dy) > 15) {
           cancelEarly()
           if (Math.abs(dx) > Math.abs(dy)) {
             swipeRef.current = { direction: 'horizontal', startX: startClientX }
@@ -893,13 +909,15 @@ export function CalendarPage() {
 
       function onEarlyCancel(pc: PointerEvent) {
         if (pc.pointerId !== pointerId) return
-        if (hasMoved) { cancelEarly(); return }
-        // Stationary cancel: Capacitor/Android fires pointercancel on long-press instead of
-        // letting our timer reach 500ms. Treat it the same as a successful long-press.
         cancelEarly()
+        // A cancel landing here had under 15px of drift (more already removed
+        // this listener), so classify by hold time: the WebView claims a pan-y
+        // scroll within its touch slop almost immediately, while its native
+        // long-press recognizer cancels only after ~400ms. Treat a late cancel
+        // as a successful long-press and enter resize mode directly.
+        if (Date.now() - pressedAt < 250) return
         if (navigator.vibrate) navigator.vibrate(30)
         suppressClickRef.current = true
-        setTimeout(() => { suppressClickRef.current = false }, 0)
         setResizingEventId(event.id)
       }
 
@@ -908,15 +926,14 @@ export function CalendarPage() {
       window.addEventListener('pointercancel', onEarlyCancel)
 
       timer = setTimeout(() => {
-        if (cancelled) return
         window.removeEventListener('pointermove', onEarlyMove)
         window.removeEventListener('pointerup', onEarlyUp)
         window.removeEventListener('pointercancel', onEarlyCancel)
         if (navigator.vibrate) navigator.vibrate(30)
-        startDragging()
-      }, 500)
+        startDragging(lastClientX, lastClientY)
+      }, 350)
     } else {
-      startDragging()
+      startDragging(startClientX, startClientY)
     }
   }
 
@@ -1266,7 +1283,7 @@ export function CalendarPage() {
       setDragOverlays(computeOverlays(startDayIdx, startY, startDayIdx, startY))
       startAutoScroll(startClientX, startClientY)
       if (navigator.vibrate) navigator.vibrate(30)
-    }, 500)
+    }, 350)
     pendingTouchRef.current = { pointerId, startClientX, startClientY, startDayIdx, startY, timer }
   }
 
@@ -1457,7 +1474,7 @@ export function CalendarPage() {
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       ) : (
-        <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto" style={{ WebkitTouchCallout: 'none' }}>
           {/* Multi-day headers + all-day row — sticky, inside scroll container to share column widths */}
           {view !== 'day' && (
             <div className="sticky top-0 z-40 bg-background">
