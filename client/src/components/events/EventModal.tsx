@@ -234,6 +234,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
       setForm((f) => ({ ...f, startAt: '', endAt: '', durationHours: '', durationMins: '' }))
       setErrors({})
     } else if (mode === 'scheduled') {
+      setIsAllDay(false)
       if (!form.endAt && form.startAt) {
         setForm((f) => ({ ...f, endAt: addOneHour(f.startAt) }))
       }

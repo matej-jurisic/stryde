@@ -94,21 +94,26 @@ function believedProgress(checkpoints: Checkpoint[]): number {
 
 function GoalHealthRow({ goal }: { goal: Goal }) {
   const progress = believedProgress(goal.checkpoints)
+  const showProgress = goal.kind === 'milestone'
   return (
     <div className="flex items-center gap-3 py-1.5">
       <div className="h-2 w-2 shrink-0 rounded-full bg-goal-focus" />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">{goal.title}</span>
-      <div className="w-28 shrink-0">
-        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className="absolute inset-y-0 left-0 rounded-full bg-goal-focus transition-all"
-            style={{ width: `${Math.min(progress, 100)}%` }}
-          />
-        </div>
-      </div>
-      <span className="w-9 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
-        {Math.round(progress)}%
-      </span>
+      {showProgress && (
+        <>
+          <div className="w-28 shrink-0">
+            <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-goal-focus transition-all"
+                style={{ width: `${Math.min(progress, 100)}%` }}
+              />
+            </div>
+          </div>
+          <span className="w-9 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
+            {Math.round(progress)}%
+          </span>
+        </>
+      )}
     </div>
   )
 }
