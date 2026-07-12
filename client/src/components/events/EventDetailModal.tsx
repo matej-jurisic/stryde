@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, X, Pencil, Trash2, Clock, CalendarPlus, Copy, MoreHorizontal, Pin, PinOff } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
@@ -72,7 +73,9 @@ interface EventDetailModalProps {
 export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onSchedule, onDuplicate }: EventDetailModalProps) {
   const qc = useQueryClient()
   const [moreOpen, setMoreOpen] = useState(false)
-  const moreRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState<{ bottom: number; right: number }>({ bottom: 0, right: 0 })
+  const moreButtonRef = useRef<HTMLButtonElement>(null)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
   const [completedSubtaskIds, setCompletedSubtaskIds] = useState(() => new Set(occurrence?.completedSubtaskIds ?? []))
 
   useEffect(() => {
@@ -82,11 +85,22 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
   useEffect(() => {
     if (!moreOpen) return
     function close(e: MouseEvent) {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false)
+      const target = e.target as Node
+      if (moreButtonRef.current?.contains(target)) return
+      if (moreMenuRef.current?.contains(target)) return
+      setMoreOpen(false)
     }
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
   }, [moreOpen])
+
+  function openMore() {
+    if (moreButtonRef.current) {
+      const rect = moreButtonRef.current.getBoundingClientRect()
+      setMenuPos({ bottom: window.innerHeight - rect.top + 4, right: window.innerWidth - rect.right })
+    }
+    setMoreOpen((o) => !o)
+  }
 
   const subtaskToggleMutation = useMutation({
     mutationFn: (subtaskId: string) => occurrencesApi.toggleSubtask(occurrence!.id, subtaskId),
@@ -117,7 +131,11 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
   })
 
   const planMutation = useMutation({
-    mutationFn: () => occurrencesApi.update(occurrence!.id, { startAt: null, endAt: null, isAllDay: false, isPlanned: true }),
+    mutationFn: () => {
+      const d = new Date(occurrence!.startAt!)
+      d.setHours(0, 0, 0, 0)
+      return occurrencesApi.update(occurrence!.id, { startAt: d.toISOString(), endAt: null, isAllDay: true, isPlanned: true })
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
@@ -172,72 +190,76 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
               : <Trash2 className="h-4 w-4" strokeWidth={2} />}
           </button>
 
-          <div ref={moreRef} className="relative">
+          <button
+            ref={moreButtonRef}
+            onClick={openMore}
+            disabled={busy}
+            aria-label="More actions"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+          >
+            <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
+          </button>
+          {moreOpen && createPortal(
+            <div
+              ref={moreMenuRef}
+              style={{ position: 'fixed', bottom: menuPos.bottom, right: menuPos.right, zIndex: 60 }}
+              className="min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop"
+            >
               <button
-                onClick={() => setMoreOpen((o) => !o)}
-                disabled={busy}
-                aria-label="More actions"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                onClick={() => { setMoreOpen(false); onClose(); onEdit(occurrence) }}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
               >
-                <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
+                <Pencil className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                Edit
               </button>
-              {moreOpen && (
-                <div className="absolute bottom-full right-0 mb-1 z-10 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
+              {onDuplicate && (
+                <button
+                  onClick={() => { setMoreOpen(false); onDuplicate(occurrence) }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                >
+                  <Copy className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                  Duplicate
+                </button>
+              )}
+              {isPending && occurrence.isPlanned && onSchedule && (
+                <button
+                  onClick={() => { setMoreOpen(false); onClose(); onSchedule(occurrence) }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                >
+                  <CalendarPlus className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                  Schedule
+                </button>
+              )}
+              {isPending && occurrence.startAt && (
+                <>
                   <button
-                    onClick={() => { setMoreOpen(false); onClose(); onEdit(occurrence) }}
+                    onClick={() => { setMoreOpen(false); planMutation.mutate() }}
                     className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
                   >
-                    <Pencil className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
-                    Edit
+                    <Pin className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                    Plan
                   </button>
-                  {onDuplicate && (
-                    <button
-                      onClick={() => { setMoreOpen(false); onDuplicate(occurrence) }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                    >
-                      <Copy className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
-                      Duplicate
-                    </button>
-                  )}
-                  {isPending && occurrence.isPlanned && onSchedule && (
-                    <button
-                      onClick={() => { setMoreOpen(false); onClose(); onSchedule(occurrence) }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                    >
-                      <CalendarPlus className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
-                      Schedule
-                    </button>
-                  )}
-                  {isPending && occurrence.startAt && (
-                    <>
-                      <button
-                        onClick={() => { setMoreOpen(false); planMutation.mutate() }}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                      >
-                        <Pin className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
-                        Plan
-                      </button>
-                      <button
-                        onClick={() => { setMoreOpen(false); floatMutation.mutate() }}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                      >
-                        <PinOff className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
-                        Float
-                      </button>
-                    </>
-                  )}
-                  {isPending && (
-                    <button
-                      onClick={() => { setMoreOpen(false); statusMutation.mutate('skipped') }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                    >
-                      <X className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2.5} />
-                      Skip
-                    </button>
-                  )}
-                </div>
+                  <button
+                    onClick={() => { setMoreOpen(false); floatMutation.mutate() }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                  >
+                    <PinOff className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                    Float
+                  </button>
+                </>
               )}
-            </div>
+              {isPending && (
+                <button
+                  onClick={() => { setMoreOpen(false); statusMutation.mutate('skipped') }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                >
+                  <X className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2.5} />
+                  Skip
+                </button>
+              )}
+            </div>,
+            document.body,
+          )}
 
           {isPending ? (
             <>
