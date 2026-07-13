@@ -274,6 +274,7 @@ Adds a third occurrence scheduling state — "planned" — between fully schedul
 - Goal health strip: Focus goals with believed progress bar and percentage (actual progress deferred to Phase 12)
 - Day navigation (prev/next/today + date picker), same day-boundary semantics as the calendar
 - Mobile: single column, agenda first; recommendations behind drawer toggle
+- Overdue section (July 2026 update): today's view lists every overdue occurrence regardless of scheduled day, above the agenda, with dates; today's own overdue items move there instead of the agenda (Inbox "overdue wins" rule)
 
 **Done when:** Logging in lands on a Daily Plan that answers "what should I do right now" without opening the calendar. ✔
 
@@ -362,6 +363,18 @@ Users can duplicate any occurrence directly from the calendar or the `EventDetai
 - "Duplicate" action in `EventDetailModal` opens `EventModal` pre-filled with the occurrence's fields (title, activity, start/end, planned flag, duration)
 - Calendar context menu / action buttons include a duplicate shortcut
 - No backend changes — duplication is a create with copied fields
+
+---
+
+## Categories Page replaces Inbox (July 2026) ✅
+
+The Inbox is renamed to the Categories page (`/categories`, old `/inbox` redirects).
+
+- First nav item is "No category": shows only occurrences whose activity has no category (previously the default Inbox also pulled in all floating occurrences regardless of category)
+- Floating occurrences no longer get a cross-category aggregate view; they live in their category's list (grouped under "Floating") and surface in the Daily Plan suggestion panel's Floating section for scheduling
+- Nav badge now counts pending uncategorized occurrences (`useUncategorizedCount`, shared predicate in `lib/categories.ts`)
+- Desktop sidebar: "Categories" section header, "No category" item first, then category items (`/categories?category={id}`); mobile keeps the bottom nav item (relabeled "Categories") and the in-page category drawer
+- Removed dead code: the old standalone `CategoriesPage` (unrouted category manager, file reused for the new page) and `EventsDrawer.tsx`
 
 ---
 

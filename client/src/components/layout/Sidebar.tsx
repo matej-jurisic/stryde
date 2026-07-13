@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { CalendarRange, CalendarDays, Inbox, Target, Settings, Zap, Pencil, Trash2, Plus, Layers, MoreHorizontal } from 'lucide-react'
-import { useInboxCount } from './useInboxCount'
+import { CalendarRange, CalendarDays, CircleDashed, Target, Settings, Zap, Pencil, Trash2, Plus, Layers, MoreHorizontal } from 'lucide-react'
+import { useUncategorizedCount } from './useUncategorizedCount'
 import { categoriesApi } from '@/lib/api'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
 import { CategoryModal } from '@/components/categories/CategoryModal'
@@ -51,13 +51,13 @@ function NavItem({
   )
 }
 
-function InboxItem({ count }: { count: number }) {
+function NoCategoryItem({ count }: { count: number }) {
   const location = useLocation()
   const params = new URLSearchParams(location.search)
-  const active = location.pathname === '/inbox' && !params.has('category')
+  const active = location.pathname === '/categories' && !params.has('category')
 
   return (
-    <NavLink to="/inbox" className="block" end>
+    <NavLink to="/categories" className="block" end>
       <span
         className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
           active
@@ -65,11 +65,11 @@ function InboxItem({ count }: { count: number }) {
             : 'font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground'
         }`}
       >
-        <Inbox
+        <CircleDashed
           className={`h-[18px] w-[18px] shrink-0 ${active ? 'text-primary' : ''}`}
           strokeWidth={2}
         />
-        Inbox
+        No category
         {count > 0 && (
           <span className="ml-auto rounded-full bg-primary/10 px-1.5 text-[11px] font-semibold text-primary">
             {count}
@@ -88,7 +88,7 @@ function CategoryItem({
 }) {
   const location = useLocation()
   const params = new URLSearchParams(location.search)
-  const active = location.pathname === '/inbox' && params.get('category') === id
+  const active = location.pathname === '/categories' && params.get('category') === id
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const triggerRef = useRef<HTMLDivElement>(null)
@@ -122,7 +122,7 @@ function CategoryItem({
 
   return (
     <div className="relative">
-      <NavLink to={`/inbox?category=${id}`} className="block">
+      <NavLink to={`/categories?category=${id}`} className="block">
         <span
           className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 pr-10 text-sm transition-colors ${
             active
@@ -194,7 +194,7 @@ function CategoryItem({
 }
 
 export function Sidebar() {
-  const inboxCount = useInboxCount()
+  const uncategorizedCount = useUncategorizedCount()
   const qc = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | undefined>()
@@ -253,8 +253,12 @@ export function Sidebar() {
 
         <div className="my-2 border-t border-border shrink-0" />
 
+        <p className="shrink-0 px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Categories
+        </p>
+
         <ul className="flex flex-col gap-0.5 min-h-0 overflow-y-auto">
-          <li><InboxItem count={inboxCount} /></li>
+          <li><NoCategoryItem count={uncategorizedCount} /></li>
           {categories.map((cat) => (
             <li key={cat.id}>
               <CategoryItem

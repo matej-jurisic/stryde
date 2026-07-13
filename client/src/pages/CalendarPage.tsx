@@ -722,6 +722,7 @@ export function CalendarPage() {
         const [a, b] = [...ptrs.values()]
         lastDist = Math.hypot(a.x - b.x, a.y - b.y)
         pinchActiveRef.current = true
+        swipeRef.current = null
         if (pendingTouchRef.current) {
           clearTimeout(pendingTouchRef.current.timer)
           pendingTouchRef.current = null
@@ -760,15 +761,19 @@ export function CalendarPage() {
       if (ptrs.size === 0) pinchActiveRef.current = false
     }
 
-    window.addEventListener('pointerdown', onDown)
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
+    // Capture phase: event blocks and resize handles stopPropagation() on
+    // pointerdown for their own drag handling, which silences bubble-phase
+    // window listeners — a pinch with a finger starting on an event was never
+    // tracked. Capture runs before any of that.
+    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('pointermove', onMove, true)
+    window.addEventListener('pointerup', onUp, true)
+    window.addEventListener('pointercancel', onUp, true)
     return () => {
-      window.removeEventListener('pointerdown', onDown)
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('pointermove', onMove, true)
+      window.removeEventListener('pointerup', onUp, true)
+      window.removeEventListener('pointercancel', onUp, true)
     }
   }, [])
 
@@ -875,6 +880,16 @@ export function CalendarPage() {
     // would expire before the click it is meant to block.
     suppressClickRef.current = false
     const isDue = isDueOccurrence(event)
+    // Short events render with a minimum height that extends the block below
+    // the event's true end time. A pointer landing in that overflow zone falls
+    // through to the grid (no stopPropagation) so drag-to-create still works in
+    // the slot right after the event. Due pins are exempt: their fixed pin
+    // height routinely exceeds their 15-minute span.
+    if (!isDue) {
+      const block = (e.target as Element).closest('[data-true-end-px]') as HTMLElement | null
+      const trueEndPx = block ? parseFloat(block.dataset.trueEndPx ?? '') : NaN
+      if (getYInGrid(e.clientY) >= trueEndPx) return
+    }
     // Dismiss any active touch resize mode when interacting with an event body
     if (resizingEventId) {
       setResizingEventId(null)
@@ -904,6 +919,14 @@ export function CalendarPage() {
       function onPointerMove(mv: PointerEvent) {
         if (isTouch && mv.pointerId !== pointerId) return
         if (!eventMoveRef.current) return
+        // A second finger landed and started a pinch: abandon the move drag
+        if (pinchActiveRef.current) {
+          cleanup()
+          eventMoveRef.current = null
+          setMoveOverlay(null)
+          setMovingEventId(null)
+          return
+        }
         if (!eventMoveRef.current.isDragging) {
           // Movement threshold distinguishes click/hold-and-release from a drag.
           // Touch measures from the arm position: fingers jitter a few px during
@@ -947,6 +970,8 @@ export function CalendarPage() {
         eventMoveRef.current = null
         setMoveOverlay(null)
         setMovingEventId(null)
+        // A pinch consumed this gesture: don't enter resize mode or reschedule
+        if (pinchActiveRef.current) return
         if (!isDragging) {
           // Hold-and-release without drag: enter resize mode (touch only; mouse uses hover handles)
           if (isTouch) {
@@ -1049,6 +1074,8 @@ export function CalendarPage() {
         window.removeEventListener('pointermove', onEarlyMove)
         window.removeEventListener('pointerup', onEarlyUp)
         window.removeEventListener('pointercancel', onEarlyCancel)
+        // A second finger started a pinch during the hold: don't arm the drag
+        if (pinchActiveRef.current) return
         if (navigator.vibrate) navigator.vibrate(30)
         startDragging(lastClientX, lastClientY)
       }, 350)
@@ -1212,6 +1239,12 @@ export function CalendarPage() {
     }
 
     function onPointerMove(mv: PointerEvent) {
+      // A second finger landed and started a pinch: abandon the resize drag
+      if (pinchActiveRef.current) {
+        cleanup()
+        setResizeOverlay(new Map())
+        return
+      }
       setResizeOverlay(overlayForPointer(mv.clientX, mv.clientY))
       startAutoScroll(mv.clientX, mv.clientY)
     }
@@ -1334,7 +1367,13 @@ export function CalendarPage() {
   }
 
   function handleGridMouseDown(e: React.MouseEvent<HTMLDivElement>) {
-    if ((e.target as Element).closest('button')) return
+    if ((e.target as Element).closest('button')) {
+      // Same minimum-height overflow carve-out as handleGridPointerDown: below
+      // the event's true end the press belongs to the grid, not the event.
+      const block = (e.target as Element).closest('[data-true-end-px]') as HTMLElement | null
+      const trueEndPx = block ? parseFloat(block.dataset.trueEndPx ?? '99999') : 99999
+      if (getYInGrid(e.clientY) < trueEndPx) return
+    }
     if (e.button !== 0) return
     const dayIdx = getDayIdxFromX(e.clientX)
     const y = getYInGrid(e.clientY)
@@ -1365,6 +1404,9 @@ export function CalendarPage() {
       dragRef.current = null
       setDragOverlays(new Map())
       if (!isDrag) return
+      // Drags can now start on an event's overflow zone; swallow the click the
+      // browser fires on the underlying button so the detail modal doesn't open.
+      suppressClickRef.current = true
 
       const endDayIdx = getDayIdxFromX(mu.clientX)
       const endY = getYInGrid(mu.clientY)
@@ -1558,6 +1600,9 @@ export function CalendarPage() {
     const { startDayIdx, startY } = dragRef.current
     dragRef.current = null
     setDragOverlays(new Map())
+    // Drags can now start on an event's overflow zone; swallow the click the
+    // browser fires on the underlying button so the detail modal doesn't open.
+    suppressClickRef.current = true
     if (scrollRef.current) scrollRef.current.style.overflowY = ''
     const endDayIdx = getDayIdxFromX(clientX)
     const endY = getYInGrid(clientY)

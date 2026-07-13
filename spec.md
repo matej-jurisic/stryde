@@ -79,7 +79,7 @@ Occurrences exist in one of three scheduling states:
 
 ### Floating Occurrences
 
-An occurrence with no start datetime, no end datetime, no all-day flag, and `IsPlanned = false` is floating. It lives in the Inbox and surfaces in Daily Plan recommendations when relevant. It is not overdue and carries no urgency signal by itself.
+An occurrence with no start datetime, no end datetime, no all-day flag, and `IsPlanned = false` is floating. It appears in its category's list on the Categories page (under a "Floating" group) and is always visible in the Daily Plan suggestion panel's Floating section, from which it can be scheduled. It is not overdue and carries no urgency signal by itself.
 
 ### Planned Occurrences
 
@@ -122,7 +122,7 @@ A category is a user-defined label with a color and an optional icon, used to gr
 | Color | Required — hex color string |
 | Icon | Optional — icon key |
 
-Categories appear in the sidebar below the Inbox as filterable nav items (`/inbox?category={id}`). They are managed directly in the sidebar (no dedicated page). Activities carry an optional `CategoryId`.
+The Categories page (`/categories`) lists occurrences per category. Its first nav item is "No category" (`/categories`, the default view), showing only occurrences whose activity has no category; each category is a filterable nav item (`/categories?category={id}`). On desktop the items live in the sidebar under a "Categories" section; on mobile they live in an in-page drawer opened from the page header. Categories are managed inline from those lists (no dedicated management page). Activities carry an optional `CategoryId`.
 
 ---
 
@@ -181,6 +181,7 @@ The Daily Plan is the primary execution view: a distinct page (`/plan`, the app'
 
 ### Contents
 
+- **Overdue** — on today's view only: every overdue occurrence regardless of which day it was scheduled for, shown above the agenda with its date. Overdue items scheduled for today appear here instead of in the agenda (same "overdue wins" grouping rule as the Categories page).
 - **Today's agenda** — the day's scheduled events as an ordered list (not an hour grid), with one-click done/skip.
 - **Recommendations** — the ranked list below, in the middle column (see design.md three-pane layout).
 - **Goal health strip** — Focus goals with believed vs actual progress at a glance.
@@ -223,7 +224,7 @@ Only these views are in scope for v1:
 | View | Purpose |
 |---|---|
 | Daily Plan | Execution view for a single day: agenda, recommendations, goal health. Index route. |
-| Inbox | Triage list of all floating occurrences, filterable by category. Entry point for unscheduled work. |
+| Categories | Occurrence lists per category; "No category" is the first item and default view. Entry point for triaging uncategorized work. |
 | Calendar | Day/week view of scheduled occurrences. Primary scheduling surface. |
 | Goals | Goal list with progress insight per goal. Checkpoint management. |
 | Activities | Manage activity definitions: create, edit, delete activities grouped by goal. |

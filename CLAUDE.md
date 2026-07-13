@@ -77,13 +77,13 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Frontend (`client/src`)**
 - `App.tsx` — auth-gated routing; index → `/plan`.
-- `pages/` — `PlanPage`, `InboxPage`, `CalendarPage`, `GoalsPage`, `ActivitiesPage`, `SettingsPage`.
+- `pages/` — `PlanPage`, `CategoriesPage`, `CalendarPage`, `GoalsPage`, `ActivitiesPage`, `SettingsPage`.
 - `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`.
 - `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Recommendation` (discriminated union).
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
 - `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field`.
-- `components/layout/useInboxCount.ts` — shared nav badge hook (shares `['events', 'all']` cache with InboxPage).
+- `components/layout/useUncategorizedCount.ts` — shared nav badge hook (shares `['events', 'all']` cache with CategoriesPage; predicate in `lib/categories.ts`).
 
 **Tests**
 - `Unit/TestContext.cs` — in-memory SQLite + real services. Naming: `Method_scenario`.
@@ -110,7 +110,7 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   locally. Purely presentational date formatting may stay client-side.
 - **Frontend:** `verbatimModuleSyntax` — use `import type` for type-only imports. TanStack Query for
   server state; Zustand for auth (access token in memory).
-- **Query keys:** every occurrence list lives under `['events', ...]` (`['events', 'all']` for Inbox + nav
+- **Query keys:** every occurrence list lives under `['events', ...]` (`['events', 'all']` for Categories page + nav
   badge, `['events', 'calendar', ...]` for calendar ranges). After any occurrence write invalidate `['events']`
   and `['recommendations']`. After any activity write invalidate `['activities']`. After any goal write also invalidate `['goals']`.
 - **Design:** see `design.md`. Use semantic color tokens, not hardcoded values.

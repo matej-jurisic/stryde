@@ -56,6 +56,10 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
+function formatDayLabel(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
 function formatDuration(minutes: number | null): string {
   if (!minutes) return ''
   const h = Math.floor(minutes / 60)
@@ -136,9 +140,10 @@ interface AgendaRowProps {
   event: Occurrence
   onEdit: () => void
   onSchedule?: () => void
+  showDate?: boolean
 }
 
-function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
+function AgendaRow({ event, onEdit, onSchedule, showDate }: AgendaRowProps) {
   const qc = useQueryClient()
   const isPending = event.status === 'pending'
   const isDone = event.status === 'done'
@@ -175,7 +180,11 @@ function AgendaRow({ event, onEdit, onSchedule }: AgendaRowProps) {
     },
   })
 
-  const timeRange = formatTimeRange(event)
+  const baseTimeRange = formatTimeRange(event)
+  const dateRef = showDate ? event.startAt ?? event.endAt : null
+  const timeRange = dateRef
+    ? baseTimeRange ? `${formatDayLabel(dateRef)}, ${baseTimeRange}` : formatDayLabel(dateRef)
+    : baseTimeRange
   const cat = event.activity.category
   const goal = event.activity.goal
 
@@ -349,17 +358,40 @@ export function PlanPage() {
       occurrencesApi.list({ startFrom: dayStart.toISOString(), endBefore: dayEnd.toISOString() }),
   })
 
+  // Today's plan surfaces every overdue occurrence, whichever day it was
+  // scheduled for, so the full list is needed. Shares the ['events', 'all']
+  // cache with the Categories page and the nav badge.
+  const { data: allOccurrences = [] } = useQuery({
+    queryKey: ['events', 'all'],
+    queryFn: () => occurrencesApi.list(),
+    enabled: isToday,
+  })
+
   const { data: focusGoals = [] } = useQuery({
     queryKey: ['goals', { status: 'focus' }],
     queryFn: () => goalsApi.list({ status: 'focus' }),
   })
 
+  // isOverdue is server-computed and already implies pending. Every overdue
+  // occurrence has a startAt (floating ones are never overdue), so sort on it.
+  const overdueEvents = useMemo(
+    () =>
+      isToday
+        ? allOccurrences
+            .filter((o) => o.isOverdue)
+            .sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime())
+        : [],
+    [allOccurrences, isToday],
+  )
+
   const scheduledEvents = useMemo(
     () =>
       occurrences
-        .filter((o) => o.startAt !== null && !o.isPlanned)
+        // On today's view an overdue item moves to the Overdue section instead
+        // (same "overdue wins" rule as the Categories page groups).
+        .filter((o) => o.startAt !== null && !o.isPlanned && !(isToday && o.isOverdue))
         .sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime()),
-    [occurrences],
+    [occurrences, isToday],
   )
 
   const plannedEvents = useMemo(
@@ -531,6 +563,32 @@ export function PlanPage() {
               </div>
             ) : (
               <>
+                {/* Overdue - every overdue occurrence, not just this day's */}
+                {overdueEvents.length > 0 && (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      <h2 className="text-xs font-semibold uppercase tracking-wide text-destructive">
+                        Overdue
+                      </h2>
+                      <span className="rounded-full bg-destructive/10 px-1.5 text-[11px] font-medium text-destructive">
+                        {overdueEvents.length}
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-border">
+                      <ul>
+                        {overdueEvents.map((event) => (
+                          <AgendaRow
+                            key={event.id}
+                            event={event}
+                            onEdit={() => openEdit(event)}
+                            showDate
+                          />
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
                 {/* Scheduled */}
                 <div>
                   <div className="mb-2 flex items-center justify-between px-1">
