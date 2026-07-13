@@ -40,6 +40,13 @@ public static class DayMath
 
     public static DateOnly Today(DayContext ctx, DateTimeOffset nowUtc) => DayOf(nowUtc, ctx);
 
+    /// <summary>The instant at which the given day starts: the boundary time on that date.</summary>
+    public static DateTimeOffset StartOfDay(DateOnly day, DayContext ctx)
+    {
+        var local = day.ToDateTime(ctx.DayBoundary);
+        return new DateTimeOffset(local, ctx.TimeZone.GetUtcOffset(local));
+    }
+
     /// <summary>The instant at which the given day ends: the boundary time on the following date.</summary>
     public static DateTimeOffset EndOfDay(DateOnly day, DayContext ctx)
     {

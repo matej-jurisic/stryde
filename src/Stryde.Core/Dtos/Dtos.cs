@@ -88,7 +88,6 @@ public sealed record OccurrenceDto(
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
     string Status,
-    Guid? RepeatRuleId,
     DateTimeOffset CreatedAt,
     bool IsOverdue,
     bool IsAllDay,
@@ -104,7 +103,7 @@ public sealed record OccurrenceDto(
         o.Id, o.UserId, o.ActivityId, o.Title,
         o.Title ?? o.Activity.Title,
         o.StartAt, o.EndAt,
-        o.Status.ToString(), o.RepeatRuleId, o.CreatedAt,
+        o.Status.ToString(), o.CreatedAt,
         DayMath.IsOverdue(o, ctx, nowUtc),
         o.IsAllDay,
         o.IsPlanned, o.DurationMinutes,
@@ -188,8 +187,8 @@ public sealed record CategoryDto(Guid Id, Guid UserId, string Name, string Color
 public sealed record CreateCategoryRequest(string Name, string Color, string? Icon);
 public sealed record UpdateCategoryRequest(string Name, string Color, string? Icon);
 
-// Recommendations — "occurrence" for tiers 1/2/4, "activity" for tier 3 habit suggestions
-public sealed record RecommendationDto(int Tier, string Type, OccurrenceDto? Occurrence, ActivityDto? Activity);
+// Recommendations — "activity" for all tiers; timing fields null when no history exists
+public sealed record RecommendationDto(int Tier, string Type, OccurrenceDto? Occurrence, ActivityDto? Activity, int? TypicalDurationMinutes, string? TypicalStartTime);
 
 // UserSettings
 public sealed record UserSettingsDto(Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone)

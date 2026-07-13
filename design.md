@@ -143,7 +143,7 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 
 ---
 
-## Daily Plan Page (planned — plan.md Phase 11)
+## Daily Plan Page
 
 The `/plan` view follows the three-pane layout: recommendations in the middle column, and the right canvas holds (top to bottom):
 

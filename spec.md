@@ -71,7 +71,6 @@ The scheduling primitive is split into two layers:
 | Is all day | Boolean — marks an all-day occurrence |
 | Is planned | Boolean — marks a flexible/windowed occurrence (dashed calendar display, never overdue) |
 | Duration minutes | Optional — effort estimate in minutes, applicable to any occurrence type |
-| Repeat rule | Optional — see Repeats below |
 | Status | `pending`, `done`, `skipped` |
 
 `effectiveTitle` on the occurrence DTO = `title ?? activity.title`.
@@ -106,26 +105,6 @@ Floating and planned occurrences are never overdue.
 ### Scheduling
 
 Scheduling an occurrence means setting its start datetime (and optionally end datetime). An occurrence can be rescheduled by updating these fields.
-
-### Repeats
-
-Repeat rules use a **virtual-rendering model**: future occurrences are computed from a stored rule and rendered by the calendar for any requested date range — they are never pre-stored in the database. Occurrence lists (Inbox, Daily Plan, recommendations) show only the next upcoming instance.
-
-Supported patterns: daily, weekly on specific days, every N days/weeks/months, monthly on a date.
-
-A rule is stored as a `Pattern` discriminator plus a JSON `Config`:
-
-| Pattern | Config | Example |
-|---|---|---|
-| `daily` | `{}` | every day |
-| `weekly` | `{ "days": [1, 3, 5] }` (ISO weekday, 1 = Monday .. 7 = Sunday) | Mon/Wed/Fri |
-| `everyN` | `{ "n": 3, "unit": "days" \| "weeks" \| "months" }` | every 3 weeks |
-| `monthly` | `{ "day": 15 }` (clamped to the month's last day) | the 15th monthly |
-
-Behavior on completion: current instance is marked done; calendar continues showing future occurrences derived from the rule.
-Behavior on skip: current instance is marked skipped; calendar continues showing future occurrences.
-Behavior on reschedule: datetimes of current instance moved, repeat rule unchanged.
-Behavior on delete: user is prompted — delete this instance only, or delete the rule (stops all future occurrences).
 
 ### Creation
 
@@ -216,16 +195,22 @@ The start of a day (when "today" rolls over) is user-configurable in settings. S
 
 ### Recommendations (Rule-Based)
 
-The recommendation panel answers: "what should I add to today's schedule?" It never surfaces events already placed on the calendar — those are visible in the plan and calendar views.
+The recommendation panel answers: "what should I add to today's schedule?" Floating occurrences are always visible in the panel's "Floating" section regardless of recommendations.
 
-Recommendations are ranked:
+Recommendations are ranked — all tiers surface **activities** (not occurrences):
 
-1. Floating events linked to Focus goals
-2. Floating events linked to Active goals
-3. Base Events with a day-of-week pattern matching today (≥2 completions on this weekday in the past 6 weeks), where no instance is already on today's schedule — sorted by frequency descending within the tier
-4. Floating events linked to Bench goals (only if tiers 1-3 are empty)
+1. Activities linked to Focus goals
+2. Activities linked to Active goals
+3. Activities with a day-of-week pattern matching today (>=2 completions on this weekday in the past 6 weeks), where no instance is already on today's schedule — sorted by frequency descending
+4. Activities linked to Bench goals (only if tiers 1-3 are empty)
 
-Within each tier, events are sorted by due date ascending (end datetime, falling back to start), then by duration ascending (shorter first); no-duration events sort last. An event appears at most once.
+Activities already scheduled today are excluded from all tiers. An activity appears at most once.
+
+**Ranking within tiers:** Tiers 1, 2, and 4 rank by overdueness relative to the activity's own rhythm: days since last completion divided by the median gap between completion days. An activity completed today scores ~0 and sinks (natural cooldown); one past its usual gap floats up. A single completion assumes a weekly cadence; no history scores neutral (1.0). An activity whose typical start time falls inside already-occupied or past time is downranked (score halved). Tier 3 keeps its frequency-descending sort.
+
+**Timing hints:** Each recommendation is enriched with the activity's median duration and most common start time (rounded to 15 min, in user's timezone) from completed history in the **last 90 days** - older habits age out of both timing hints and cadence. When the user schedules from a suggestion, these values pre-fill the modal (start time + computed end time if both are available).
+
+**Free slot awareness:** Activities are only suggested if their typical duration fits at least one free gap on the target day. For today, gaps run from now to end-of-day; for a future day, the whole day is considered; for a past day, slot filtering is skipped. Activities with no duration history are always included.
 
 **LLM expansion slot:** The recommendation engine is designed to be replaceable or augmentable with an LLM-powered planner. Out of scope for v1.
 

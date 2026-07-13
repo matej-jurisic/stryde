@@ -17,10 +17,8 @@ public class Occurrence
     public DateTimeOffset? WindowStart { get; set; }
     public DateTimeOffset? WindowEnd { get; set; }
     public int? WindowDurationMinutes { get; set; }
-    public Guid? RepeatRuleId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public Activity Activity { get; set; } = null!;
-    public RepeatRule? RepeatRule { get; set; }
     public ICollection<OccurrenceSubtaskCompletion> SubtaskCompletions { get; set; } = [];
 }

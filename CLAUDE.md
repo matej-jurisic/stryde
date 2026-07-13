@@ -53,7 +53,7 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Backend (`Stryde.Core`)**
 - `Entities/` — POCOs; `Guid Id = Guid.NewGuid()` + `DateTimeOffset CreatedAt`, no base class.
-  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, RepeatRule, UserSettings`.
+  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, UserSettings`.
 - `Enums/` — stored as strings (`HasConversion<string>`).
 - `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. `Occurrence → Activity` cascade delete; `Activity → Category/Goal` set-null.
 - `Common/Result.cs` — `Result`/`Result<T>` + `Error(ErrorType, msg)`. **Expected failures = Results, not exceptions.**

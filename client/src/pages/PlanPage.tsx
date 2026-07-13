@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, Calend
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, goalsApi, settingsApi } from '@/lib/api'
 import type { Activity, Checkpoint, CheckpointSize, Occurrence, EventStatus, Goal } from '@/lib/types'
+import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
 import { OccurrenceBar } from '@/components/goals/OccurrenceBar'
 import { EventModal } from '@/components/events/EventModal'
 import { OccurrenceSubtasksModal } from '@/components/events/OccurrenceSubtasksModal'
@@ -308,6 +309,8 @@ export function PlanPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingOccurrence, setEditingOccurrence] = useState<Occurrence | undefined>()
   const [defaultActivity, setDefaultActivity] = useState<Activity | undefined>()
+  const [defaultStartAt, setDefaultStartAt] = useState<string | undefined>()
+  const [defaultEndAt, setDefaultEndAt] = useState<string | undefined>()
   const [focusStartAt, setFocusStartAt] = useState(false)
   const [scheduleMode, setScheduleMode] = useState(false)
   const dateInputRef = useRef<HTMLInputElement>(null)
@@ -394,11 +397,30 @@ export function PlanPage() {
     setModalOpen(true)
   }
 
-  function openFromActivity(activity: Activity) {
+  function openFromActivity(activity: Activity, timing?: ActivityTiming) {
     setEditingOccurrence(undefined)
     setDefaultActivity(activity)
     setFocusStartAt(true)
     setScheduleMode(false)
+
+    if (timing?.startTime) {
+      const [h, m] = timing.startTime.split(':').map(Number)
+      const start = new Date()
+      start.setHours(h, m, 0, 0)
+      const z = (n: number) => String(n).padStart(2, '0')
+      const fmt = (d: Date) =>
+        `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`
+      setDefaultStartAt(fmt(start))
+      setDefaultEndAt(
+        timing.durationMinutes
+          ? fmt(new Date(start.getTime() + timing.durationMinutes * 60000))
+          : undefined,
+      )
+    } else {
+      setDefaultStartAt(undefined)
+      setDefaultEndAt(undefined)
+    }
+
     setModalOpen(true)
   }
 
@@ -406,6 +428,8 @@ export function PlanPage() {
     setModalOpen(false)
     setEditingOccurrence(undefined)
     setDefaultActivity(undefined)
+    setDefaultStartAt(undefined)
+    setDefaultEndAt(undefined)
     setScheduleMode(false)
   }
 
@@ -570,11 +594,13 @@ export function PlanPage() {
       </div>
 
       <EventModal
-        key={`${editingOccurrence?.id ?? defaultActivity?.id ?? 'new'}-${scheduleMode}`}
+        key={`${editingOccurrence?.id ?? defaultActivity?.id ?? 'new'}-${scheduleMode}-${defaultStartAt ?? ''}`}
         open={modalOpen}
         onClose={closeModal}
         occurrence={editingOccurrence}
         defaultActivity={defaultActivity}
+        defaultStartAt={defaultStartAt}
+        defaultEndAt={defaultEndAt}
         focusStartAt={focusStartAt}
         scheduleOnly={scheduleMode}
       />

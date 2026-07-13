@@ -13,7 +13,6 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
     public DbSet<Activity> Activities => Set<Activity>();
     public DbSet<Goal> Goals => Set<Goal>();
     public DbSet<Checkpoint> Checkpoints => Set<Checkpoint>();
-    public DbSet<RepeatRule> RepeatRules => Set<RepeatRule>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<ActivitySubtask> ActivitySubtasks => Set<ActivitySubtask>();

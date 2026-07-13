@@ -24,27 +24,26 @@ public class RecommendationServiceTests : IDisposable
         return user.Id;
     }
 
-    private async Task<(Activity activity, Occurrence occurrence)> AddOccurrenceAsync(
-        Guid userId, string title,
-        DateTimeOffset? startAt = null, DateTimeOffset? endAt = null,
-        GoalStatus? goalStatus = null, EventStatus status = EventStatus.pending,
-        Activity? existingActivity = null)
+    private async Task<Activity> AddActivityAsync(Guid userId, string title, GoalStatus? goalStatus = null)
     {
-        var activity = existingActivity;
-        if (activity is null)
+        Goal? goal = null;
+        if (goalStatus.HasValue)
         {
-            Goal? goal = null;
-            if (goalStatus.HasValue)
-            {
-                goal = new Goal { UserId = userId, Title = title + " goal", Status = goalStatus.Value };
-                _ctx.Db.Goals.Add(goal);
-                await _ctx.Db.SaveChangesAsync();
-            }
-            activity = new Activity { UserId = userId, Title = title, GoalId = goal?.Id };
-            _ctx.Db.Activities.Add(activity);
+            goal = new Goal { UserId = userId, Title = title + " goal", Status = goalStatus.Value };
+            _ctx.Db.Goals.Add(goal);
             await _ctx.Db.SaveChangesAsync();
         }
+        var activity = new Activity { UserId = userId, Title = title, GoalId = goal?.Id };
+        _ctx.Db.Activities.Add(activity);
+        await _ctx.Db.SaveChangesAsync();
+        return activity;
+    }
 
+    private async Task<Occurrence> AddOccurrenceAsync(
+        Guid userId, Activity activity,
+        DateTimeOffset? startAt = null, DateTimeOffset? endAt = null,
+        EventStatus status = EventStatus.pending)
+    {
         var o = new Occurrence
         {
             UserId = userId,
@@ -55,54 +54,58 @@ public class RecommendationServiceTests : IDisposable
         };
         _ctx.Db.Occurrences.Add(o);
         await _ctx.Db.SaveChangesAsync();
-        return (activity, o);
+        return o;
     }
 
-    private async Task<Activity> AddActivityAsync(Guid userId, string title, GoalStatus goalStatus = GoalStatus.active)
-    {
-        var goal = new Goal { UserId = userId, Title = title + " goal", Status = goalStatus };
-        _ctx.Db.Goals.Add(goal);
-        await _ctx.Db.SaveChangesAsync();
-        var activity = new Activity { UserId = userId, Title = title, GoalId = goal.Id };
-        _ctx.Db.Activities.Add(activity);
-        await _ctx.Db.SaveChangesAsync();
-        return activity;
-    }
+    private Task<Occurrence> CompleteAsync(Guid userId, Activity activity, DateTimeOffset startAt, DateTimeOffset? endAt = null) =>
+        AddOccurrenceAsync(userId, activity, startAt, endAt, EventStatus.done);
 
     private static readonly DateTimeOffset Now = new(2026, 7, 7, 12, 0, 0, TimeSpan.Zero); // Tuesday
     private static readonly DateOnly Today = new(2026, 7, 7);
 
+    private static DateTimeOffset At(int day, int hour, int minute = 0) =>
+        new(2026, 7, day, hour, minute, 0, TimeSpan.Zero);
+
     [Fact]
-    public async Task GetAsync_tier1_returns_floating_focus_occurrences()
+    public async Task GetAsync_goal_tiers_surface_activities_by_goal_status()
     {
         var userId = await CreateUserAsync();
-        var (_, focus) = await AddOccurrenceAsync(userId, "focus task", goalStatus: GoalStatus.focus);
-        var (_, active) = await AddOccurrenceAsync(userId, "active task", goalStatus: GoalStatus.active);
+        var focus = await AddActivityAsync(userId, "focus task", GoalStatus.focus);
+        var active = await AddActivityAsync(userId, "active task", GoalStatus.active);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Equal(2, recs.Count);
         Assert.Equal(1, recs[0].Tier);
-        Assert.Equal("occurrence", recs[0].Type);
-        Assert.Equal(focus.Id, recs[0].Occurrence!.Id);
+        Assert.Equal("activity", recs[0].Type);
+        Assert.Equal(focus.Id, recs[0].Activity!.Id);
         Assert.Equal(2, recs[1].Tier);
-        Assert.Equal(active.Id, recs[1].Occurrence!.Id);
+        Assert.Equal(active.Id, recs[1].Activity!.Id);
     }
 
     [Fact]
-    public async Task GetAsync_scheduled_occurrences_are_not_recommended()
+    public async Task GetAsync_activity_scheduled_today_is_excluded()
     {
         var userId = await CreateUserAsync();
-        await AddOccurrenceAsync(userId, "today scheduled",
-            startAt: new DateTimeOffset(2026, 7, 7, 9, 0, 0, TimeSpan.Zero),
-            goalStatus: GoalStatus.focus);
-        await AddOccurrenceAsync(userId, "overdue",
-            startAt: new DateTimeOffset(2026, 7, 5, 9, 0, 0, TimeSpan.Zero),
-            goalStatus: GoalStatus.active);
+        var activity = await AddActivityAsync(userId, "scheduled", GoalStatus.focus);
+        await AddOccurrenceAsync(userId, activity, startAt: At(7, 9));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Empty(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_activity_scheduled_on_another_day_is_still_suggested()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "overdue elsewhere", GoalStatus.active);
+        await AddOccurrenceAsync(userId, activity, startAt: At(5, 9));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+        Assert.Equal(activity.Id, recs[0].Activity!.Id);
     }
 
     [Fact]
@@ -112,12 +115,8 @@ public class RecommendationServiceTests : IDisposable
         var activity = await AddActivityAsync(userId, "Tuesday deep work");
 
         // 2 completions on Tuesdays: Jun 23 and Jun 30
-        await AddOccurrenceAsync(userId, "Tuesday deep work",
-            startAt: new DateTimeOffset(2026, 6, 23, 9, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, existingActivity: activity);
-        await AddOccurrenceAsync(userId, "Tuesday deep work",
-            startAt: new DateTimeOffset(2026, 6, 30, 9, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, existingActivity: activity);
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 23, 9, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 30, 9, 0, 0, TimeSpan.Zero));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -133,17 +132,11 @@ public class RecommendationServiceTests : IDisposable
         var userId = await CreateUserAsync();
         var activity = await AddActivityAsync(userId, "Morning run");
 
-        await AddOccurrenceAsync(userId, "Morning run",
-            startAt: new DateTimeOffset(2026, 6, 23, 6, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, existingActivity: activity);
-        await AddOccurrenceAsync(userId, "Morning run",
-            startAt: new DateTimeOffset(2026, 6, 30, 6, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, existingActivity: activity);
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 23, 6, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 30, 6, 0, 0, TimeSpan.Zero));
 
         // Pending occurrence already scheduled for today
-        await AddOccurrenceAsync(userId, "Morning run",
-            startAt: new DateTimeOffset(2026, 7, 7, 6, 0, 0, TimeSpan.Zero),
-            existingActivity: activity);
+        await AddOccurrenceAsync(userId, activity, startAt: At(7, 6));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -156,50 +149,7 @@ public class RecommendationServiceTests : IDisposable
         var userId = await CreateUserAsync();
         var activity = await AddActivityAsync(userId, "Tuesday solo");
 
-        await AddOccurrenceAsync(userId, "Tuesday solo",
-            startAt: new DateTimeOffset(2026, 6, 30, 9, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, existingActivity: activity);
-
-        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
-
-        Assert.Empty(recs);
-    }
-
-    [Fact]
-    public async Task GetAsync_tier4_bench_surfaces_only_when_tiers_1_to_3_empty()
-    {
-        var userId = await CreateUserAsync();
-        var (_, bench) = await AddOccurrenceAsync(userId, "bench task", goalStatus: GoalStatus.bench);
-
-        var alone = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
-        Assert.Single(alone);
-        Assert.Equal(4, alone[0].Tier);
-        Assert.Equal(bench.Id, alone[0].Occurrence!.Id);
-
-        await AddOccurrenceAsync(userId, "focus task", goalStatus: GoalStatus.focus);
-
-        var withFocus = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
-        Assert.DoesNotContain(withFocus, r => r.Occurrence?.Id == bench.Id);
-    }
-
-    [Fact]
-    public async Task GetAsync_occurrence_appears_at_most_once()
-    {
-        var userId = await CreateUserAsync();
-        var (_, o) = await AddOccurrenceAsync(userId, "focus task", goalStatus: GoalStatus.focus);
-
-        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
-
-        Assert.Single(recs);
-        Assert.Equal(o.Id, recs[0].Occurrence!.Id);
-    }
-
-    [Fact]
-    public async Task GetAsync_excludes_done_and_skipped_occurrences()
-    {
-        var userId = await CreateUserAsync();
-        await AddOccurrenceAsync(userId, "done task", goalStatus: GoalStatus.focus, status: EventStatus.done);
-        await AddOccurrenceAsync(userId, "skipped task", goalStatus: GoalStatus.active, status: EventStatus.skipped);
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 30, 9, 0, 0, TimeSpan.Zero));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -212,12 +162,8 @@ public class RecommendationServiceTests : IDisposable
         var userId = await CreateUserAsync();
         var activity = await AddActivityAsync(userId, "Old habit");
 
-        await AddOccurrenceAsync(userId, "Old habit",
-            startAt: new DateTimeOffset(2026, 5, 19, 9, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, existingActivity: activity);
-        await AddOccurrenceAsync(userId, "Old habit",
-            startAt: new DateTimeOffset(2026, 5, 26, 9, 0, 0, TimeSpan.Zero),
-            status: EventStatus.done, existingActivity: activity);
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 5, 19, 9, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 5, 26, 9, 0, 0, TimeSpan.Zero));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -225,15 +171,167 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_buckets_days_in_user_timezone()
+    public async Task GetAsync_tier4_bench_surfaces_only_when_tiers_1_to_3_empty()
     {
-        var userId = await CreateUserAsync(timezone: "Europe/Zagreb");
-        await AddOccurrenceAsync(userId, "tomorrow local",
-            startAt: new DateTimeOffset(2026, 7, 7, 22, 30, 0, TimeSpan.Zero),
-            goalStatus: GoalStatus.focus);
+        var userId = await CreateUserAsync();
+        var bench = await AddActivityAsync(userId, "bench task", GoalStatus.bench);
+
+        var alone = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+        Assert.Single(alone);
+        Assert.Equal(4, alone[0].Tier);
+        Assert.Equal(bench.Id, alone[0].Activity!.Id);
+
+        await AddActivityAsync(userId, "focus task", GoalStatus.focus);
+
+        var withFocus = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+        Assert.DoesNotContain(withFocus, r => r.Activity?.Id == bench.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_activity_appears_at_most_once()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "goal and habit", GoalStatus.active);
+
+        // Also qualifies for tier 3 (2 Tuesday completions) — must dedupe into tier 2
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 23, 9, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 30, 9, 0, 0, TimeSpan.Zero));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
-        Assert.Empty(recs);
+        Assert.Single(recs);
+        Assert.Equal(2, recs[0].Tier);
+        Assert.Equal(activity.Id, recs[0].Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_buckets_days_in_user_timezone()
+    {
+        var userId = await CreateUserAsync(timezone: "Europe/Zagreb");
+        var todayLocal = await AddActivityAsync(userId, "today local", GoalStatus.focus);
+        var tomorrowLocal = await AddActivityAsync(userId, "tomorrow local", GoalStatus.focus);
+
+        // 21:30 UTC = 23:30 Jul 7 in Zagreb (today) — excluded; 22:30 UTC = 00:30 Jul 8 — still suggested
+        await AddOccurrenceAsync(userId, todayLocal, startAt: At(7, 21, 30));
+        await AddOccurrenceAsync(userId, tomorrowLocal, startAt: At(7, 22, 30));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+        Assert.Equal(tomorrowLocal.Id, recs[0].Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_ranks_more_overdue_activities_first_within_tier()
+    {
+        var userId = await CreateUserAsync();
+        // A: every ~2 days, last done yesterday — barely due
+        var recent = await AddActivityAsync(userId, "done recently", GoalStatus.active);
+        await CompleteAsync(userId, recent, At(2, 9));
+        await CompleteAsync(userId, recent, At(4, 9));
+        await CompleteAsync(userId, recent, At(6, 9));
+
+        // B: every ~2 days, last done 10 days ago — far past its rhythm
+        var overdue = await AddActivityAsync(userId, "long overdue", GoalStatus.active);
+        await CompleteAsync(userId, overdue, new DateTimeOffset(2026, 6, 23, 9, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, overdue, new DateTimeOffset(2026, 6, 25, 9, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, overdue, new DateTimeOffset(2026, 6, 27, 9, 0, 0, TimeSpan.Zero));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Equal(2, recs.Count);
+        Assert.Equal(overdue.Id, recs[0].Activity!.Id);
+        Assert.Equal(recent.Id, recs[1].Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_downranks_activity_whose_typical_start_is_not_free()
+    {
+        var userId = await CreateUserAsync();
+        // Same cadence; "morning" typically starts 09:00 (already past at Now=12:00), "evening" at 20:00 (still free)
+        var morning = await AddActivityAsync(userId, "morning task", GoalStatus.active);
+        await CompleteAsync(userId, morning, At(2, 9));
+        await CompleteAsync(userId, morning, At(4, 9));
+        await CompleteAsync(userId, morning, At(6, 9));
+
+        var evening = await AddActivityAsync(userId, "evening task", GoalStatus.active);
+        await CompleteAsync(userId, evening, At(2, 20));
+        await CompleteAsync(userId, evening, At(4, 20));
+        await CompleteAsync(userId, evening, At(6, 20));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Equal(2, recs.Count);
+        Assert.Equal(evening.Id, recs[0].Activity!.Id);
+        Assert.Equal(morning.Id, recs[1].Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_past_date_skips_slot_filtering()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "hour long", GoalStatus.active);
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 20, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 20, 10, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 24, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 24, 10, 0, 0, TimeSpan.Zero));
+
+        // A past day has no remaining free time; duration history must not filter everything out
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 1), Now);
+
+        Assert.Single(recs);
+        Assert.Equal(activity.Id, recs[0].Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_future_date_computes_slots_within_that_day_only()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "hour long", GoalStatus.active);
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 20, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 20, 10, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 24, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 24, 10, 0, 0, TimeSpan.Zero));
+
+        var tomorrow = new DateOnly(2026, 7, 8);
+
+        var open = await _ctx.RecommendationService.GetAsync(userId, tomorrow, Now);
+        Assert.Single(open);
+        Assert.Equal(activity.Id, open[0].Activity!.Id);
+
+        // Block tomorrow 00:30-23:30: only two 30-min gaps remain, the 60-min activity no longer fits.
+        // The old from-now slot math would have counted the span between now and the block as free.
+        var blocker = await AddActivityAsync(userId, "blocker");
+        await AddOccurrenceAsync(userId, blocker, startAt: At(8, 0, 30), endAt: At(8, 23, 30));
+
+        var blocked = await _ctx.RecommendationService.GetAsync(userId, tomorrow, Now);
+        Assert.Empty(blocked);
+    }
+
+    [Fact]
+    public async Task GetAsync_timing_hints_come_from_completed_history()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "with history", GoalStatus.active);
+        await CompleteAsync(userId, activity, At(2, 20), At(2, 21, 15));
+        await CompleteAsync(userId, activity, At(4, 20), At(4, 21, 15));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+        Assert.Equal(75, recs[0].TypicalDurationMinutes);
+        Assert.Equal("20:00", recs[0].TypicalStartTime);
+    }
+
+    [Fact]
+    public async Task GetAsync_timing_stats_ignore_completions_older_than_90_days()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "stale history", GoalStatus.active);
+        // ~100 days before Now — outside the stats window
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 3, 29, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 3, 29, 10, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 4, 2, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 4, 2, 10, 0, 0, TimeSpan.Zero));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+        Assert.Null(recs[0].TypicalDurationMinutes);
+        Assert.Null(recs[0].TypicalStartTime);
     }
 }

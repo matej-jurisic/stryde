@@ -5,10 +5,15 @@ import { occurrencesApi, recommendationsApi } from '@/lib/api'
 import type { Activity, GoalStatus, Occurrence, Recommendation } from '@/lib/types'
 import { Badge } from '@/components/ui/Badge'
 
+export interface ActivityTiming {
+  durationMinutes: number | null
+  startTime: string | null
+}
+
 interface RecommendationPanelProps {
   date: string
   onOccurrenceClick: (o: Occurrence) => void
-  onActivityClick: (a: Activity) => void
+  onActivityClick: (a: Activity, timing: ActivityTiming) => void
   mobileOpen?: boolean
   onMobileClose?: () => void
 }
@@ -26,6 +31,27 @@ function goalTone(status: GoalStatus): 'focus' | 'active' | 'bench' {
   return 'bench'
 }
 
+function formatMins(mins: number): string {
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
+function formatTimeLabel(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const ampm = h >= 12 ? 'pm' : 'am'
+  const h12 = h % 12 || 12
+  return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2, '0')}${ampm}`
+}
+
+function timingLabel(duration: number | null, startTime: string | null): string | null {
+  const parts: string[] = []
+  if (duration) parts.push(`~${formatMins(duration)}`)
+  if (startTime) parts.push(formatTimeLabel(startTime))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function formatDuration(o: Occurrence): string | null {
   let mins: number
   if (o.startAt && o.endAt) {
@@ -36,10 +62,7 @@ function formatDuration(o: Occurrence): string | null {
     return null
   }
   if (mins <= 0) return null
-  if (mins < 60) return `${mins}m`
-  const h = Math.floor(mins / 60)
-  const m = mins % 60
-  return m === 0 ? `${h}h` : `${h}h ${m}m`
+  return formatMins(mins)
 }
 
 function OccurrenceRecItem({ occurrence, onSchedule }: { occurrence: Occurrence; onSchedule: () => void }) {
@@ -74,11 +97,26 @@ function OccurrenceRecItem({ occurrence, onSchedule }: { occurrence: Occurrence;
   )
 }
 
-function ActivityRecItem({ activity, onCreate }: { activity: Activity; onCreate: () => void }) {
+function ActivityRecItem({
+  activity,
+  timing,
+  onCreate,
+}: {
+  activity: Activity
+  timing: ActivityTiming
+  onCreate: () => void
+}) {
+  const hint = timingLabel(timing.durationMinutes, timing.startTime)
+
   return (
     <li className="group flex items-start gap-2 rounded-lg border border-transparent px-2 py-2.5 transition-colors hover:border-border hover:bg-muted/40">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-foreground">{activity.title}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate text-sm text-foreground">{activity.title}</p>
+          {hint && (
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{hint}</span>
+          )}
+        </div>
         {activity.goal && (
           <div className="mt-1.5">
             <Badge tone={goalTone(activity.goal.status)} className="max-w-[160px] truncate block">
@@ -89,7 +127,7 @@ function ActivityRecItem({ activity, onCreate }: { activity: Activity; onCreate:
       </div>
       <button
         onClick={onCreate}
-        title="Create occurrence from habit"
+        title="Schedule activity"
         className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary"
       >
         <CalendarPlus className="h-4 w-4" />
@@ -125,6 +163,7 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
     return order.map((label) => ({ label, items: map.get(label)! }))
   }, [recommendations])
 
+  // Floating occurrences not already in the recs list (recs are now all activities, so all floating show here)
   const floatingOnly = useMemo(() => {
     const recIds = new Set(
       recommendations.flatMap((r) => (r.type === 'occurrence' ? [r.occurrence.id] : [])),
@@ -177,7 +216,8 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
                   <ActivityRecItem
                     key={rec.activity.id + i}
                     activity={rec.activity}
-                    onCreate={() => onActivityClick(rec.activity)}
+                    timing={{ durationMinutes: rec.typicalDurationMinutes, startTime: rec.typicalStartTime }}
+                    onCreate={() => onActivityClick(rec.activity, { durationMinutes: rec.typicalDurationMinutes, startTime: rec.typicalStartTime })}
                   />
                 )
               )}

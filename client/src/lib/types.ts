@@ -100,7 +100,6 @@ export interface Occurrence {
   isAllDay: boolean
   isPlanned: boolean
   durationMinutes: number | null
-  repeatRuleId: string | null
   createdAt: string
   isOverdue: boolean
   completedSubtaskIds: string[]
@@ -108,8 +107,8 @@ export interface Occurrence {
 }
 
 export type Recommendation =
-  | { tier: number; type: 'occurrence'; occurrence: Occurrence; activity: null }
-  | { tier: number; type: 'activity'; occurrence: null; activity: Activity }
+  | { tier: number; type: 'occurrence'; occurrence: Occurrence; activity: null; typicalDurationMinutes: number | null; typicalStartTime: string | null }
+  | { tier: number; type: 'activity'; occurrence: null; activity: Activity; typicalDurationMinutes: number | null; typicalStartTime: string | null }
 
 export interface UserSettings {
   userId: string

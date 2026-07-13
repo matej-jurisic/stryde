@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Menu, Plus, LayoutGrid, CalendarCheck } from
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, settingsApi } from '@/lib/api'
 import type { Activity, Occurrence } from '@/lib/types'
+import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
 import { EventModal } from '@/components/events/EventModal'
 import { EventDetailModal } from '@/components/events/EventDetailModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
@@ -785,13 +786,29 @@ export function CalendarPage() {
     setCurrent(view === 'week' ? startOfWeek(effectiveToday) : effectiveToday)
   }
 
-  function openFromActivity(activity: Activity) {
+  function openFromActivity(activity: Activity, timing?: ActivityTiming) {
     setDuplicateFromOccurrence(undefined)
     setEditingOccurrence(undefined)
-    setDefaultStartAt(undefined)
-    setDefaultEndAt(undefined)
     setDefaultActivity(activity)
     setFocusStartAt(true)
+    setScheduleMode(false)
+
+    if (timing?.startTime) {
+      const [h, m] = timing.startTime.split(':').map(Number)
+      const start = new Date()
+      start.setHours(h, m, 0, 0)
+      const startStr = formatDatetimeLocal(start)
+      setDefaultStartAt(startStr)
+      setDefaultEndAt(
+        timing.durationMinutes
+          ? formatDatetimeLocal(new Date(start.getTime() + timing.durationMinutes * 60000))
+          : undefined,
+      )
+    } else {
+      setDefaultStartAt(undefined)
+      setDefaultEndAt(undefined)
+    }
+
     setModalOpen(true)
   }
 

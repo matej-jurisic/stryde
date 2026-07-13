@@ -47,7 +47,7 @@ Phased build, each phase producing working, committed software. Phases build on 
 
 **Goal:** All entities exist in the database with correct relationships and a full CRUD API for each.
 
-**Entities added:** `Event`, `Goal`, `Checkpoint`, `RepeatRule`, `UserSettings`
+**Entities added:** `Event`, `Goal`, `Checkpoint`, `UserSettings`
 - `Event ↔ Goal` many-to-many via skip navigation (join table `EventGoals`)
 - `UserSettings` one-to-one with `User` (UserId as PK)
 - All enums stored as strings via `HasConversion<string>()`
@@ -310,7 +310,7 @@ Adds a third occurrence scheduling state — "planned" — between fully schedul
 
 **Data model**
 - Dropped: `BaseEvents`, `Events`, `EventGoals` tables.
-- Added: `Activities` (Id, UserId, Title, CategoryId?, GoalId?, CreatedAt) and `Occurrences` (Id, UserId, ActivityId, Title?, StartAt?, EndAt?, Status, IsAllDay, WindowStart?, WindowEnd?, WindowDurationMinutes?, RepeatRuleId?, CreatedAt).
+- Added: `Activities` (Id, UserId, Title, CategoryId?, GoalId?, CreatedAt) and `Occurrences` (Id, UserId, ActivityId, Title?, StartAt?, EndAt?, Status, IsAllDay, WindowStart?, WindowEnd?, WindowDurationMinutes?, CreatedAt).
 - Migration: `ActivityOccurrenceModel`.
 - `OccurrenceDto.EffectiveTitle` = `occurrence.Title ?? occurrence.Activity.Title`.
 - Recommendations now return a discriminated union: `type: 'occurrence' | 'activity'`.
@@ -365,31 +365,6 @@ Users can duplicate any occurrence directly from the calendar or the `EventDetai
 
 ---
 
-## Phase 11 — Repeat Rules
-
-**Goal:** Events can repeat. The calendar renders all future occurrences virtually; lists show only the next upcoming instance.
-
-**Supported patterns:** daily, weekly on specific days, every N days/weeks/months, monthly on a date.
-
-**Backend**
-- Repeat rule stored as structured JSON (pattern type + config — schema is specced in spec.md, Repeats)
-- `Recurrence/RecurrenceCalculator.cs` — enumerates occurrences for a date range from a `RepeatRule` via `DayMath`; virtual (no DB writes for future instances)
-- Calendar endpoint expands repeat rules across the requested date range and merges with real events
-- Inbox and recommendations show only the next upcoming instance of a repeating event
-- On event complete/skip: current instance is marked; no new record created — future occurrences continue to be derived from the rule
-- Idempotent: re-marking an already done/skipped instance must not produce another
-- On event reschedule: datetimes of current instance updated, rule unchanged
-- On event delete: scope `this` (current instance only) or `future` (deletes the rule, stopping all future occurrences)
-
-**Frontend**
-- Repeat rule picker in the event creation/edit modal
-- Calendar renders virtual occurrences alongside real events
-- On delete of a repeating event: prompt — "Delete this event only" or "Delete this and all future repeats"
-
-**Done when:** A repeating daily event at 05:00-07:00 appears on every future day in the calendar. Only the next pending instance shows in lists. Completion, skip, reschedule, and both delete scopes work correctly.
-
----
-
 ## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.
@@ -408,7 +383,7 @@ Users can duplicate any occurrence directly from the calendar or the `EventDetai
 - Empty states for all list views
 - Page titles and basic navigation structure finalized
 - Drag-and-drop: drag a recommendation onto the calendar grid to schedule it; drag/resize existing calendar blocks to reschedule
-- Delete confirmations for events and goals (repeat-scope prompt ships with Phase 11)
+- Delete confirmations for events and goals
 
 **Docker Compose production hardening**
 - `docker-compose.prod.yml` override (or env-based config) with production-appropriate settings
@@ -416,6 +391,13 @@ Users can duplicate any occurrence directly from the calendar or the `EventDetai
 - Frontend container: nginx serving the Vite build output, reverse-proxying `/api` to the API container
 - SQLite data volume with a clear mount path for backups
 - Restart policies on all services
+
+**Recommendation engine improvements** (shipped ahead of Phase 12)
+- Goal-linked tiers (1/2/4) now surface **activities**, not individual floating occurrences - floating occurrences remain visible in the "Floating" section of the panel
+- Timing hints: each suggestion displays the activity's median duration and most common start time from completed history (rounded to 15 min); clicking "schedule" pre-fills the modal with start + end time
+- Free slot awareness: activities are only suggested if their typical duration fits at least one free gap on the target day (today: from now; future day: whole day; past day: no filtering); no history = always included
+- Cadence ranking: tiers 1/2/4 rank by overdueness (days since last completion / median gap between completion days), so just-done activities sink and past-rhythm ones float up; activities whose typical start time is already occupied or past are downranked
+- Stats windowing: timing hints and cadence derive from the last 90 days of completed history only
 
 **Done when:** All views work on mobile and desktop, settings persist correctly, progress insights are visible on goals, and `docker compose -f docker-compose.yml -f docker-compose.prod.yml up` runs a production-ready stack.
 
