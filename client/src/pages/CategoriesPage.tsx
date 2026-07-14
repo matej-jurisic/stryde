@@ -311,11 +311,14 @@ export function CategoriesPage() {
     setCatModalOpen(true)
   }
 
+  const showAll = searchParams.get('all') === 'true'
   const activeCategory = categoryId ? categories.find((c) => c.id === categoryId) : null
 
-  const visibleOccurrences = categoryId
-    ? occurrences.filter((o) => o.activity.category?.id === categoryId)
-    : occurrences.filter(isUncategorized)
+  const visibleOccurrences = showAll
+    ? occurrences
+    : categoryId
+      ? occurrences.filter((o) => o.activity.category?.id === categoryId)
+      : occurrences.filter(isUncategorized)
 
   function openCreate() {
     setEditingOccurrence(undefined)
@@ -354,7 +357,9 @@ export function CategoriesPage() {
     <div className="flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={
-          activeCategory ? (
+          showAll ? (
+            'All'
+          ) : activeCategory ? (
             <span className="flex items-center gap-2">
               <CategoryIcon icon={activeCategory.icon} color={activeCategory.color} size={15} strokeWidth={2} />
               {activeCategory.name}
@@ -398,12 +403,14 @@ export function CategoriesPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-foreground">
-                  {activeCategory ? 'Nothing in this category yet' : 'No uncategorized items'}
+                  {showAll ? 'No occurrences yet' : activeCategory ? 'Nothing in this category yet' : 'No uncategorized items'}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {activeCategory
-                    ? 'Occurrences of activities in this category will appear here.'
-                    : 'Occurrences of activities without a category will appear here.'}
+                  {showAll
+                    ? 'All occurrences across every category will appear here.'
+                    : activeCategory
+                      ? 'Occurrences of activities in this category will appear here.'
+                      : 'Occurrences of activities without a category will appear here.'}
                 </p>
               </div>
               <button

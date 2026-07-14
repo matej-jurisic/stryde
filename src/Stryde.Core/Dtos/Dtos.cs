@@ -142,6 +142,7 @@ public sealed record GoalDto(
     Guid UserId,
     string Title,
     string? Description,
+    string? Notes,
     string Status,
     string Kind,
     DateTimeOffset CreatedAt,
@@ -149,14 +150,14 @@ public sealed record GoalDto(
     GoalOccurrenceStats? OccurrenceStats = null)
 {
     public static GoalDto FromEntity(Goal g, GoalOccurrenceStats? stats = null) => new(
-        g.Id, g.UserId, g.Title, g.Description,
+        g.Id, g.UserId, g.Title, g.Description, g.Notes,
         g.Status.ToString(), g.Kind.ToString(), g.CreatedAt,
         g.Checkpoints.Select(CheckpointDto.FromEntity).ToList(),
         stats);
 }
 
-public sealed record CreateGoalRequest(string Title, string? Description, GoalKind Kind = GoalKind.milestone);
-public sealed record UpdateGoalRequest(string Title, string? Description, GoalKind Kind = GoalKind.milestone);
+public sealed record CreateGoalRequest(string Title, string? Description, GoalKind Kind = GoalKind.milestone, string? Notes = null);
+public sealed record UpdateGoalRequest(string Title, string? Description, GoalKind Kind = GoalKind.milestone, string? Notes = null);
 public sealed record SetGoalStatusRequest(GoalStatus Status);
 
 // Checkpoints

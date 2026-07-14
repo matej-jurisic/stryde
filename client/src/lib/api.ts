@@ -141,10 +141,10 @@ export const goalsApi = {
 
   get: (id: string) => request<Goal>(`/api/goals/${id}`),
 
-  create: (body: { title: string; description?: string | null; kind?: GoalKind }) =>
+  create: (body: { title: string; description?: string | null; kind?: GoalKind; notes?: string | null }) =>
     request<Goal>('/api/goals', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title: string; description?: string | null; kind?: GoalKind }) =>
+  update: (id: string, body: { title: string; description?: string | null; kind?: GoalKind; notes?: string | null }) =>
     request<Goal>(`/api/goals/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (id: string) => request<void>(`/api/goals/${id}`, { method: 'DELETE' }),

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { marked } from 'marked'
 import { ArrowLeft, Plus, Pencil, Trash2, Check } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/Badge'
@@ -185,6 +186,8 @@ export function GoalDetailPage() {
   const [editModal, setEditModal] = useState(false)
   const [cpModal, setCpModal] = useState<{ open: boolean; checkpoint?: Checkpoint }>({ open: false })
   const [statusError, setStatusError] = useState('')
+  const [editingNotes, setEditingNotes] = useState(false)
+  const [notesValue, setNotesValue] = useState('')
 
   const { data: goal, isLoading } = useQuery({
     queryKey: ['goals', id],
@@ -204,6 +207,15 @@ export function GoalDetailPage() {
     queryKey: ['events', 'goal', id],
     queryFn: () => occurrencesApi.list({ goalId: id! }),
     enabled: !!id,
+  })
+
+  const notesMutation = useMutation({
+    mutationFn: (notes: string | null) =>
+      goalsApi.update(id!, { title: goal!.title, description: goal!.description, kind: goal!.kind, notes }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['goals'] })
+      setEditingNotes(false)
+    },
   })
 
   const deleteMutation = useMutation({
@@ -357,6 +369,61 @@ export function GoalDetailPage() {
               </div>
             )}
             {statusError && <p className="text-xs text-destructive">{statusError}</p>}
+          </div>
+
+          {/* Notes */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notes</span>
+              {!editingNotes && (
+                <button
+                  onClick={() => { setNotesValue(goal.notes ?? ''); setEditingNotes(true) }}
+                  className="-my-1 -mr-1 py-1 px-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {goal.notes ? 'Edit' : 'Add'}
+                </button>
+              )}
+            </div>
+            {editingNotes ? (
+              <div className="flex flex-col gap-2">
+                <textarea
+                  value={notesValue}
+                  onChange={(e) => setNotesValue(e.target.value)}
+                  rows={8}
+                  autoFocus
+                  placeholder="Write notes in Markdown..."
+                  className="rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setEditingNotes(false)}
+                    disabled={notesMutation.isPending}
+                    className="h-7 rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => notesMutation.mutate(notesValue.trim() || null)}
+                    disabled={notesMutation.isPending}
+                    className="h-7 rounded-md bg-primary px-2.5 text-xs text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : goal.notes ? (
+              <div
+                className="notes-content text-sm text-foreground"
+                dangerouslySetInnerHTML={{ __html: marked.parse(goal.notes) as string }}
+              />
+            ) : (
+              <button
+                onClick={() => { setNotesValue(''); setEditingNotes(true) }}
+                className="py-1 text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Add notes...
+              </button>
+            )}
           </div>
 
           {/* Checkpoints */}

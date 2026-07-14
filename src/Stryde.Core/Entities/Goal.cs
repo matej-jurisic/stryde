@@ -12,5 +12,7 @@ public class Goal
     public GoalKind Kind { get; set; } = GoalKind.milestone;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    public string? Notes { get; set; }
+
     public List<Checkpoint> Checkpoints { get; set; } = [];
 }

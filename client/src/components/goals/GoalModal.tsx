@@ -55,6 +55,7 @@ export function GoalModal({ open, onClose, goal }: GoalModalProps) {
         title: form.title.trim(),
         description: form.description.trim() || null,
         kind: form.kind,
+        notes: isEdit ? (goal!.notes ?? null) : null,
       }
       return isEdit ? goalsApi.update(goal!.id, payload) : goalsApi.create(payload)
     },

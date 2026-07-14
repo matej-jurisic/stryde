@@ -2,8 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { CalendarRange, CalendarDays, CircleDashed, Target, Settings, Zap, Pencil, Trash2, Plus, Layers, MoreHorizontal } from 'lucide-react'
-import { useUncategorizedCount } from './useUncategorizedCount'
+import { CalendarRange, CalendarDays, CircleDashed, LayoutList, Target, Settings, Zap, Pencil, Trash2, Plus, Layers, MoreHorizontal } from 'lucide-react'
 import { categoriesApi } from '@/lib/api'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
 import { CategoryModal } from '@/components/categories/CategoryModal'
@@ -51,10 +50,34 @@ function NavItem({
   )
 }
 
-function NoCategoryItem({ count }: { count: number }) {
+function AllCategoriesItem() {
   const location = useLocation()
   const params = new URLSearchParams(location.search)
-  const active = location.pathname === '/categories' && !params.has('category')
+  const active = location.pathname === '/categories' && params.get('all') === 'true'
+
+  return (
+    <NavLink to="/categories?all=true" className="block" end>
+      <span
+        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+          active
+            ? 'bg-muted font-semibold text-foreground'
+            : 'font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+        }`}
+      >
+        <LayoutList
+          className={`h-[18px] w-[18px] shrink-0 ${active ? 'text-primary' : ''}`}
+          strokeWidth={2}
+        />
+        All
+      </span>
+    </NavLink>
+  )
+}
+
+function NoCategoryItem() {
+  const location = useLocation()
+  const params = new URLSearchParams(location.search)
+  const active = location.pathname === '/categories' && !params.has('category') && params.get('all') !== 'true'
 
   return (
     <NavLink to="/categories" className="block" end>
@@ -70,11 +93,6 @@ function NoCategoryItem({ count }: { count: number }) {
           strokeWidth={2}
         />
         No category
-        {count > 0 && (
-          <span className="ml-auto rounded-full bg-primary/10 px-1.5 text-[11px] font-semibold text-primary">
-            {count}
-          </span>
-        )}
       </span>
     </NavLink>
   )
@@ -194,7 +212,6 @@ function CategoryItem({
 }
 
 export function Sidebar() {
-  const uncategorizedCount = useUncategorizedCount()
   const qc = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | undefined>()
@@ -258,7 +275,8 @@ export function Sidebar() {
         </p>
 
         <ul className="flex flex-col gap-0.5 min-h-0 overflow-y-auto">
-          <li><NoCategoryItem count={uncategorizedCount} /></li>
+          <li><AllCategoriesItem /></li>
+          <li><NoCategoryItem /></li>
           {categories.map((cat) => (
             <li key={cat.id}>
               <CategoryItem

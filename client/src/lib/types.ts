@@ -45,6 +45,7 @@ export interface Goal {
   userId: string
   title: string
   description: string | null
+  notes: string | null
   status: GoalStatus
   kind: GoalKind
   createdAt: string
