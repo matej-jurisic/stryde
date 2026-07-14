@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Trash2 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { occurrencesApi, activitiesApi, categoriesApi, goalsApi } from '@/lib/api'
+import { toastError } from '@/store/toasts'
 import type { Activity, ActivityKind, Occurrence } from '@/lib/types'
 
 interface FormState {
@@ -139,6 +142,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
   const [showNewActivity, setShowNewActivity] = useState(false)
   const [newActivityTitle, setNewActivityTitle] = useState('')
   const [newActivityCategoryId, setNewActivityCategoryId] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   useEffect(() => {
     if (open) setErrors({})
@@ -216,6 +220,17 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     },
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: () => occurrencesApi.delete(occurrence!.id),
+    onSuccess: () => {
+      setConfirmDelete(false)
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+      onClose()
+    },
+    onError: (err) => toastError(err, 'Could not delete the occurrence.'),
+  })
+
   function handleSubmit() {
     const errs = validate(form, kind, timeMode, isPlanned)
     if (Object.keys(errs).length > 0) {
@@ -290,10 +305,20 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
       title={scheduleOnly ? 'Schedule Occurrence' : kindTitle}
       footer={
         <>
-          {!isEdit && (
-            <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>Cancel</Button>
+          {isEdit && !scheduleOnly && (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              disabled={mutation.isPending || deleteMutation.isPending}
+              aria-label="Delete"
+              className="mr-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" strokeWidth={2} />
+            </button>
           )}
-          <Button onClick={handleSubmit} loading={mutation.isPending}>
+          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending || deleteMutation.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} loading={mutation.isPending} disabled={deleteMutation.isPending}>
             {isEdit ? 'Save Changes' : 'Create'}
           </Button>
         </>
@@ -665,6 +690,17 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
 
       {mutation.error instanceof Error && (
         <p className="text-sm text-destructive">{mutation.error.message}</p>
+      )}
+
+      {isEdit && (
+        <ConfirmDialog
+          open={confirmDelete}
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={() => deleteMutation.mutate()}
+          loading={deleteMutation.isPending}
+          title="Delete occurrence?"
+          message={`"${occurrence!.effectiveTitle}" will be permanently deleted. This cannot be undone.`}
+        />
       )}
     </Modal>
   )

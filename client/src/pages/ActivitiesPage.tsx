@@ -3,8 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Plus, Pencil, Trash2, Layers } from "lucide-react";
 import { activitiesApi, goalsApi, categoriesApi } from "@/lib/api";
+import { toastError } from "@/store/toasts";
 import type { Activity } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { CategoryIcon } from "@/components/categories/categoryIcons";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { ActivityModal } from "@/components/activities/ActivityModal";
@@ -82,6 +84,7 @@ export function ActivitiesPage() {
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Activity | undefined>();
+  const [deleting, setDeleting] = useState<Activity | null>(null);
 
   const { data: activities = [], isLoading } = useQuery({
     queryKey: ["activities"],
@@ -100,7 +103,13 @@ export function ActivitiesPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => activitiesApi.delete(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["activities"] }),
+    onSuccess: () => {
+      setDeleting(null);
+      qc.invalidateQueries({ queryKey: ["activities"] });
+      qc.invalidateQueries({ queryKey: ["events"] });
+      qc.invalidateQueries({ queryKey: ["recommendations"] });
+    },
+    onError: (err) => toastError(err, "Could not delete the activity."),
   });
 
   function openCreate() {
@@ -186,7 +195,7 @@ export function ActivitiesPage() {
                             activity={a}
                             onView={() => navigate(`/activities/${a.id}`)}
                             onEdit={() => openEdit(a)}
-                            onDelete={() => deleteMutation.mutate(a.id)}
+                            onDelete={() => setDeleting(a)}
                           />
                         ))}
                       </ul>
@@ -206,6 +215,15 @@ export function ActivitiesPage() {
         activity={editing}
         goals={goals}
         categories={categories}
+      />
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+        loading={deleteMutation.isPending}
+        title="Delete activity?"
+        message={`"${deleting?.title ?? ""}" and all of its occurrences will be permanently deleted. This cannot be undone.`}
       />
     </div>
   );

@@ -412,6 +412,14 @@ The Inbox is renamed to the Categories page (`/categories`, old `/inbox` redirec
 - Cadence ranking: tiers 1/2/4 rank by overdueness (days since last completion / median gap between completion days), so just-done activities sink and past-rhythm ones float up; activities whose typical start time is already occupied or past are downranked
 - Stats windowing: timing hints and cadence derive from the last 90 days of completed history only
 
+**UX hardening** (shipped ahead of the Polish phase)
+- Toast notifications (`store/toasts.ts` + `components/ui/Toasts.tsx`): every mutation without inline error display now reports failures via `toastError`
+- Delete confirmations everywhere: shared `ConfirmDialog` modal guards deletes of occurrences, activities (warns about cascade), goals, checkpoints, and categories; the edit occurrence modal gained Delete + Cancel in its footer
+- Shared `OccurrenceListRow` replaces the duplicated Plan/Categories rows: optimistic status toggling (instant checkbox with rollback on error), done/skipped items can be toggled back to pending from any list, correct goal-status badge tones
+- Shared `ActionMenu` (portal + fixed positioning + flip): row menus can no longer clip off-screen at the bottom of long lists; closes on Escape
+- Stacked modals: Escape now closes only the topmost dialog
+- Goal detail checkpoint actions always visible (were hover-only, unusable on touch)
+
 **Done when:** All views work on mobile and desktop, settings persist correctly, progress insights are visible on goals, and `docker compose -f docker-compose.yml -f docker-compose.prod.yml up` runs a production-ready stack.
 
 ---

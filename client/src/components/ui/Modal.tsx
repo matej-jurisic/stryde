@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
@@ -10,12 +10,27 @@ interface ModalProps {
   footer?: ReactNode
 }
 
+// Stack of open modals so Escape only closes the topmost one (e.g. a
+// ConfirmDialog layered over an edit modal).
+const modalStack: symbol[] = []
+
 export function Modal({ open, onClose, title, children, footer }: ModalProps) {
+  const idRef = useRef<symbol | null>(null)
+  if (idRef.current === null) idRef.current = Symbol('modal')
+
   useEffect(() => {
     if (!open) return
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const id = idRef.current!
+    modalStack.push(id)
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && modalStack[modalStack.length - 1] === id) onClose()
+    }
     document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
+    return () => {
+      const idx = modalStack.indexOf(id)
+      if (idx !== -1) modalStack.splice(idx, 1)
+      document.removeEventListener('keydown', handler)
+    }
   }, [open, onClose])
 
   if (!open) return null

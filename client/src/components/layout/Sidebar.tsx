@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect } from 'react'
-import { createPortal } from 'react-dom'
+import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { CalendarRange, CalendarDays, CircleDashed, LayoutList, Target, Settings, Zap, Pencil, Trash2, Plus, Layers, MoreHorizontal } from 'lucide-react'
+import { CalendarRange, CalendarDays, CircleDashed, LayoutList, Target, Settings, Zap, Pencil, Trash2, Plus, Layers } from 'lucide-react'
 import { categoriesApi } from '@/lib/api'
+import { toastError } from '@/store/toasts'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
 import { CategoryModal } from '@/components/categories/CategoryModal'
+import { ActionMenu } from '@/components/ui/ActionMenu'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { Category } from '@/lib/types'
 
 function NavItem({
@@ -107,36 +109,6 @@ function CategoryItem({
   const location = useLocation()
   const params = new URLSearchParams(location.search)
   const active = location.pathname === '/categories' && params.get('category') === id
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const triggerRef = useRef<HTMLDivElement>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null)
-
-  useEffect(() => {
-    if (!menuOpen) return
-    function onPointerDown(e: PointerEvent) {
-      const inTrigger = triggerRef.current?.contains(e.target as Node)
-      const inDropdown = dropdownRef.current?.contains(e.target as Node)
-      if (!inTrigger && !inDropdown) {
-        setMenuOpen(false)
-        setConfirmDelete(false)
-      }
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [menuOpen])
-
-  function handleMenuToggle(e: React.MouseEvent) {
-    e.preventDefault()
-    if (!menuOpen && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect()
-      setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
-    }
-    setMenuOpen((o) => !o)
-    setConfirmDelete(false)
-  }
 
   return (
     <div className="relative">
@@ -154,59 +126,17 @@ function CategoryItem({
           <span className="truncate">{name}</span>
         </span>
       </NavLink>
-      <div ref={triggerRef} className="absolute right-1 top-1/2 -translate-y-1/2">
-        <button
-          ref={buttonRef}
-          onClick={handleMenuToggle}
-          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-        >
-          <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
-        </button>
+      <div className="absolute right-1 top-1/2 -translate-y-1/2">
+        <ActionMenu
+          ariaLabel={`Actions for ${name}`}
+          triggerClassName="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          iconClassName="h-3.5 w-3.5"
+          items={[
+            { icon: Pencil, label: 'Edit', onClick: onEdit },
+            { icon: Trash2, label: 'Delete', onClick: onDelete, destructive: true },
+          ]}
+        />
       </div>
-      {menuOpen && menuPos && createPortal(
-        <div
-          ref={dropdownRef}
-          className="fixed z-50 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop"
-          style={{ top: menuPos.top, right: menuPos.right }}
-        >
-          {confirmDelete ? (
-            <>
-              <p className="px-3 py-1.5 text-xs text-foreground">Delete &ldquo;{name}&rdquo;?</p>
-              <button
-                onClick={() => { onDelete(); setMenuOpen(false); setConfirmDelete(false) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
-              >
-                <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                Confirm delete
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => { onEdit(); setMenuOpen(false) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-              >
-                <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
-                Edit
-              </button>
-              <button
-                onClick={() => setConfirmDelete(true)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
-              >
-                <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-                Delete
-              </button>
-            </>
-          )}
-        </div>,
-        document.body
-      )}
     </div>
   )
 }
@@ -215,6 +145,7 @@ export function Sidebar() {
   const qc = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | undefined>()
+  const [deletingCategory, setDeletingCategory] = useState<Category | null>(null)
 
   const { data: categories = [] } = useQuery({
     queryKey: ['categories'],
@@ -224,9 +155,11 @@ export function Sidebar() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => categoriesApi.delete(id),
     onSuccess: () => {
+      setDeletingCategory(null)
       qc.invalidateQueries({ queryKey: ['categories'] })
       qc.invalidateQueries({ queryKey: ['events'] })
     },
+    onError: (err) => toastError(err, 'Could not delete the category.'),
   })
 
   async function handleSave(name: string, color: string, icon: string | null) {
@@ -285,7 +218,7 @@ export function Sidebar() {
                 color={cat.color}
                 icon={cat.icon}
                 onEdit={() => openEdit(cat)}
-                onDelete={() => deleteMutation.mutate(cat.id)}
+                onDelete={() => setDeletingCategory(cat)}
               />
             </li>
           ))}
@@ -311,6 +244,15 @@ export function Sidebar() {
         onClose={() => setModalOpen(false)}
         category={editingCategory}
         onSave={handleSave}
+      />
+
+      <ConfirmDialog
+        open={deletingCategory !== null}
+        onClose={() => setDeletingCategory(null)}
+        onConfirm={() => deletingCategory && deleteMutation.mutate(deletingCategory.id)}
+        loading={deleteMutation.isPending}
+        title="Delete category?"
+        message={`"${deletingCategory?.name ?? ''}" will be deleted. Activities in this category will be kept without a category.`}
       />
     </aside>
   )

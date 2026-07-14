@@ -5,9 +5,11 @@ import { Check, X, Pencil, Trash2, Clock, CalendarPlus, Copy, MoreHorizontal, Pi
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
 import { SkipRescheduleModal } from '@/components/events/SkipRescheduleModal'
 import { occurrencesApi } from '@/lib/api'
+import { toastError } from '@/store/toasts'
 import type { Occurrence, EventStatus } from '@/lib/types'
 
 function formatTime(iso: string): string {
@@ -75,6 +77,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
   const qc = useQueryClient()
   const [moreOpen, setMoreOpen] = useState(false)
   const [skipOpen, setSkipOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [menuPos, setMenuPos] = useState<{ bottom: number; right: number }>({ bottom: 0, right: 0 })
   const moreButtonRef = useRef<HTMLButtonElement>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
@@ -130,6 +133,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
       qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
+    onError: (err) => toastError(err, 'Could not update the status.'),
   })
 
   const planMutation = useMutation({
@@ -143,6 +147,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
       qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
+    onError: (err) => toastError(err, 'Could not update the occurrence.'),
   })
 
   const floatMutation = useMutation({
@@ -152,11 +157,13 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
       qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
+    onError: (err) => toastError(err, 'Could not update the occurrence.'),
   })
 
   const deleteMutation = useMutation({
     mutationFn: () => occurrencesApi.delete(occurrence!.id),
     onSuccess: () => {
+      setConfirmDelete(false)
       qc.setQueriesData<Occurrence[]>({ queryKey: ['events'] }, (old) =>
         old ? old.filter((o) => o.id !== occurrence!.id) : old,
       )
@@ -164,6 +171,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
       qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
+    onError: (err) => toastError(err, 'Could not delete the occurrence.'),
   })
 
   if (!occurrence) return null
@@ -191,7 +199,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
       footer={
         <>
           <button
-            onClick={() => deleteMutation.mutate()}
+            onClick={() => setConfirmDelete(true)}
             disabled={busy}
             aria-label="Delete"
             className="mr-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
@@ -200,6 +208,14 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
               ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
               : <Trash2 className="h-4 w-4" strokeWidth={2} />}
           </button>
+          <ConfirmDialog
+            open={confirmDelete}
+            onClose={() => setConfirmDelete(false)}
+            onConfirm={() => deleteMutation.mutate()}
+            loading={deleteMutation.isPending}
+            title="Delete occurrence?"
+            message={`"${occurrence.effectiveTitle}" will be permanently deleted. This cannot be undone.`}
+          />
 
           <button
             ref={moreButtonRef}

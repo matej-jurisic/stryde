@@ -9,6 +9,8 @@ import { goalsApi, checkpointsApi, activitiesApi, occurrencesApi, ApiError } fro
 import type { Goal, GoalStatus, Checkpoint, CheckpointSize, Activity, Occurrence } from '@/lib/types'
 import { GoalModal } from '@/components/goals/GoalModal'
 import { CheckpointModal } from '@/components/goals/CheckpointModal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toastError } from '@/store/toasts'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -73,16 +75,22 @@ function CheckpointRow({
   checkpoint: Checkpoint; goalId: string; isLast: boolean; onEdit: (cp: Checkpoint) => void
 }) {
   const qc = useQueryClient()
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const reached = checkpoint.status === 'reached'
 
   const toggleMutation = useMutation({
     mutationFn: () => checkpointsApi.setStatus(goalId, checkpoint.id, reached ? 'pending' : 'reached'),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['goals'] }),
+    onError: (err) => toastError(err, 'Could not update the checkpoint.'),
   })
 
   const deleteMutation = useMutation({
     mutationFn: () => checkpointsApi.delete(goalId, checkpoint.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['goals'] }),
+    onSuccess: () => {
+      setConfirmDelete(false)
+      qc.invalidateQueries({ queryKey: ['goals'] })
+    },
+    onError: (err) => toastError(err, 'Could not delete the checkpoint.'),
   })
 
   return (
@@ -107,21 +115,31 @@ function CheckpointRow({
           </span>
           <span className="text-[11px] text-muted-foreground capitalize">{checkpoint.size}</span>
         </div>
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             onClick={() => onEdit(checkpoint)}
+            aria-label="Edit checkpoint"
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <Pencil className="h-3 w-3" strokeWidth={2} />
           </button>
           <button
-            onClick={() => deleteMutation.mutate()}
+            onClick={() => setConfirmDelete(true)}
+            aria-label="Delete checkpoint"
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
           >
             <Trash2 className="h-3 w-3" strokeWidth={2} />
           </button>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => deleteMutation.mutate()}
+        loading={deleteMutation.isPending}
+        title="Delete checkpoint?"
+        message={`"${checkpoint.title}" will be permanently deleted.`}
+      />
     </li>
   )
 }
@@ -185,6 +203,7 @@ export function GoalDetailPage() {
 
   const [editModal, setEditModal] = useState(false)
   const [cpModal, setCpModal] = useState<{ open: boolean; checkpoint?: Checkpoint }>({ open: false })
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [statusError, setStatusError] = useState('')
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesValue, setNotesValue] = useState('')
@@ -216,6 +235,7 @@ export function GoalDetailPage() {
       qc.invalidateQueries({ queryKey: ['goals'] })
       setEditingNotes(false)
     },
+    onError: (err) => toastError(err, 'Could not save the notes.'),
   })
 
   const deleteMutation = useMutation({
@@ -226,6 +246,7 @@ export function GoalDetailPage() {
       qc.invalidateQueries({ queryKey: ['recommendations'] })
       navigate('/goals')
     },
+    onError: (err) => toastError(err, 'Could not delete the goal.'),
   })
 
   const statusMutation = useMutation({
@@ -310,8 +331,9 @@ export function GoalDetailPage() {
               Edit
             </button>
             <button
-              onClick={() => deleteMutation.mutate()}
+              onClick={() => setConfirmDelete(true)}
               disabled={deleteMutation.isPending}
+              aria-label="Delete goal"
               className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-destructive transition-colors disabled:opacity-50"
             >
               <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
@@ -503,6 +525,14 @@ export function GoalDetailPage() {
         onClose={() => setCpModal({ open: false })}
         goalId={goal.id}
         checkpoint={cpModal.checkpoint}
+      />
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => deleteMutation.mutate()}
+        loading={deleteMutation.isPending}
+        title="Delete goal?"
+        message={`"${goal.title}" and its checkpoints will be permanently deleted. Linked activities and occurrences will be kept without a goal.`}
       />
     </div>
   )

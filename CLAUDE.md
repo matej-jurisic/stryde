@@ -82,7 +82,9 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Recommendation` (discriminated union).
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
-- `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field`.
+- `store/toasts.ts` — Zustand toast store; `toastError(err)` for mutation failures without inline error display.
+- `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field, ConfirmDialog, ActionMenu, Toasts`.
+- `components/events/OccurrenceListRow.tsx` — shared occurrence list row (Plan + Categories): optimistic status toggle, action menu, confirmed delete.
 - `components/layout/useUncategorizedCount.ts` — shared nav badge hook (shares `['events', 'all']` cache with CategoriesPage; predicate in `lib/categories.ts`).
 
 **Tests**
@@ -108,6 +110,9 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   `bg-slate-*` / `text-*-600`. Dark mode = `.dark` on `<html>`, controlled by `lib/theme.ts`.
 - **Day math is server-side.** The client consumes `occurrence.isOverdue`; it never recomputes overdue
   locally. Purely presentational date formatting may stay client-side.
+- **Destructive actions confirm via `ConfirmDialog`** (never inline or immediate); mutations without
+  inline error display report failures with `toastError` from `store/toasts.ts`. Row dropdowns use
+  `components/ui/ActionMenu.tsx` (portal + flip), not hand-rolled absolute menus.
 - **Frontend:** `verbatimModuleSyntax` — use `import type` for type-only imports. TanStack Query for
   server state; Zustand for auth (access token in memory).
 - **Query keys:** every occurrence list lives under `['events', ...]` (`['events', 'all']` for Categories page + nav

@@ -1,17 +1,14 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, CalendarPlus, MoreHorizontal, CalendarCheck, ListChecks } from 'lucide-react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { ChevronLeft, ChevronRight, Menu, Plus, CalendarCheck } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { occurrencesApi, goalsApi, settingsApi } from '@/lib/api'
 import { quotes } from '@/lib/quotes'
-import type { Activity, Checkpoint, CheckpointSize, Occurrence, EventStatus, Goal } from '@/lib/types'
+import type { Activity, Checkpoint, CheckpointSize, Occurrence, Goal } from '@/lib/types'
 import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
 import { OccurrenceBar } from '@/components/goals/OccurrenceBar'
 import { EventModal } from '@/components/events/EventModal'
-import { OccurrenceSubtasksModal } from '@/components/events/OccurrenceSubtasksModal'
-import { SkipRescheduleModal } from '@/components/events/SkipRescheduleModal'
+import { OccurrenceListRow } from '@/components/events/OccurrenceListRow'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
-import { Badge } from '@/components/ui/Badge'
-import { CategoryIcon } from '@/components/categories/categoryIcons'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -128,187 +125,13 @@ function GoalHealthRow({ goal }: { goal: Goal }) {
   )
 }
 
-// ── Agenda row ─────────────────────────────────────────────────────────────
+// ── Agenda row time label ──────────────────────────────────────────────────
 
-const GOAL_TONE: Record<string, 'focus' | 'active' | 'bench' | 'neutral'> = {
-  focus: 'focus',
-  active: 'active',
-  bench: 'bench',
-  closed: 'neutral',
-}
-
-interface AgendaRowProps {
-  event: Occurrence
-  onEdit: () => void
-  onSchedule?: () => void
-  showDate?: boolean
-}
-
-function AgendaRow({ event, onEdit, onSchedule, showDate }: AgendaRowProps) {
-  const qc = useQueryClient()
-  const isPending = event.status === 'pending'
-  const isDone = event.status === 'done'
-  const isSkipped = event.status === 'skipped'
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [subtasksOpen, setSubtasksOpen] = useState(false)
-  const [skipOpen, setSkipOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const hasSubtasks = event.activity.subtasks.length > 0
-  const completedCount = event.completedSubtaskIds.length
-
-  useEffect(() => {
-    if (!menuOpen) return
-    function onPointerDown(e: PointerEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [menuOpen])
-
-  const statusMutation = useMutation({
-    mutationFn: (status: EventStatus) => occurrencesApi.setStatus(event.id, status),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: () => occurrencesApi.delete(event.id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
-    },
-  })
-
-  const baseTimeRange = formatTimeRange(event)
+function agendaTimeText(event: Occurrence, showDate = false): string | null {
+  const base = formatTimeRange(event)
   const dateRef = showDate ? event.startAt ?? event.endAt : null
-  const timeRange = dateRef
-    ? baseTimeRange ? `${formatDayLabel(dateRef)}, ${baseTimeRange}` : formatDayLabel(dateRef)
-    : baseTimeRange
-  const cat = event.activity.category
-  const goal = event.activity.goal
-
-  return (
-    <li className="group relative flex items-center gap-3 border-b border-border bg-card px-5 py-3 last:border-b-0 first:rounded-t-lg last:rounded-b-lg hover:bg-muted/40 transition-colors">
-      {/* Status checkbox */}
-      <button
-        onClick={() => {
-          if (isPending) statusMutation.mutate('done')
-          else statusMutation.mutate('pending')
-        }}
-        title={isDone ? 'Mark pending' : isSkipped ? 'Mark pending' : 'Mark done'}
-        className={[
-          'flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border transition-colors',
-          isDone
-            ? 'border-primary bg-primary text-primary-foreground'
-            : isSkipped
-              ? 'border-dashed border-muted-foreground text-muted-foreground'
-              : 'border-border bg-background hover:border-primary',
-        ].join(' ')}
-      >
-        {isDone && <Check className="h-3 w-3" strokeWidth={3} />}
-        {isSkipped && <X className="h-3 w-3" strokeWidth={3} />}
-      </button>
-
-      {/* Content */}
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className={`text-sm ${!isPending ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-            {event.effectiveTitle}
-          </span>
-          {goal && (
-            <Badge tone={GOAL_TONE[goal.status] ?? 'neutral'}>{goal.title}</Badge>
-          )}
-        </div>
-        {(timeRange || cat || hasSubtasks) && (
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-            {timeRange && (
-              <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{timeRange}</span>
-            )}
-            {cat && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                <CategoryIcon icon={cat.icon} color={cat.color} size={11} strokeWidth={2} />
-                {cat.name}
-              </span>
-            )}
-            {hasSubtasks && (
-              <span className="text-xs text-muted-foreground">{completedCount}/{event.activity.subtasks.length}</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Actions menu */}
-      <div ref={menuRef} className="shrink-0">
-        <button
-          onClick={() => setMenuOpen((o) => !o)}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-        >
-          <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
-        </button>
-        {menuOpen && (
-          <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
-            {hasSubtasks && (
-              <button
-                onClick={() => { setSubtasksOpen(true); setMenuOpen(false) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-              >
-                <ListChecks className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
-                Subtasks
-              </button>
-            )}
-            {isPending && (
-              <button
-                onClick={() => { setMenuOpen(false); setSkipOpen(true) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-              >
-                <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2.5} />
-                Skip
-              </button>
-            )}
-            {isPending && !event.startAt && onSchedule && (
-              <button
-                onClick={() => { onSchedule(); setMenuOpen(false) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-              >
-                <CalendarPlus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
-                Schedule
-              </button>
-            )}
-            <button
-              onClick={() => { onEdit(); setMenuOpen(false) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-            >
-              <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
-              Edit
-            </button>
-            <button
-              onClick={() => { deleteMutation.mutate(); setMenuOpen(false) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
-            >
-              <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-              Delete
-            </button>
-          </div>
-        )}
-      </div>
-
-      {hasSubtasks && subtasksOpen && (
-        <OccurrenceSubtasksModal
-          open={subtasksOpen}
-          onClose={() => setSubtasksOpen(false)}
-          occurrence={event}
-        />
-      )}
-      <SkipRescheduleModal
-        open={skipOpen}
-        onClose={() => setSkipOpen(false)}
-        occurrence={event}
-        onDone={() => setSkipOpen(false)}
-      />
-    </li>
-  )
+  if (dateRef) return base ? `${formatDayLabel(dateRef)}, ${base}` : formatDayLabel(dateRef)
+  return base || null
 }
 
 // ── PlanPage ───────────────────────────────────────────────────────────────
@@ -583,11 +406,11 @@ export function PlanPage() {
                     <div className="rounded-lg border border-border">
                       <ul>
                         {overdueEvents.map((event) => (
-                          <AgendaRow
+                          <OccurrenceListRow
                             key={event.id}
-                            event={event}
-                            onEdit={() => openEdit(event)}
-                            showDate
+                            occurrence={event}
+                            timeText={agendaTimeText(event, true)}
+                            onEdit={openEdit}
                           />
                         ))}
                       </ul>
@@ -618,7 +441,12 @@ export function PlanPage() {
                     <div className="rounded-lg border border-border">
                       <ul>
                         {scheduledEvents.map((event) => (
-                          <AgendaRow key={event.id} event={event} onEdit={() => openEdit(event)} />
+                          <OccurrenceListRow
+                            key={event.id}
+                            occurrence={event}
+                            timeText={agendaTimeText(event)}
+                            onEdit={openEdit}
+                          />
                         ))}
                       </ul>
                     </div>
@@ -639,11 +467,12 @@ export function PlanPage() {
                     <div className="rounded-lg border border-border">
                       <ul>
                         {plannedEvents.map((event) => (
-                          <AgendaRow
+                          <OccurrenceListRow
                             key={event.id}
-                            event={event}
-                            onEdit={() => openEdit(event)}
-                            onSchedule={() => openSchedule(event)}
+                            occurrence={event}
+                            timeText={agendaTimeText(event)}
+                            onEdit={openEdit}
+                            onSchedule={openSchedule}
                           />
                         ))}
                       </ul>

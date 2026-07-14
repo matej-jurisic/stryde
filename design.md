@@ -126,6 +126,22 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - White card, centered overlay, `backdrop-blur-sm` backdrop at `bg-black/40`.
 - `shadow-[var(--shadow-pop)]` — the ONE place drop shadows are used.
 - `rounded-[var(--radius-xl)]`, `border border-border`.
+- Escape closes only the topmost open modal (modal stack in `Modal.tsx`).
+
+### Confirmation dialogs
+
+- Every destructive action (delete occurrence / activity / goal / checkpoint / category) goes through `ConfirmDialog` — a small modal with the item name in the message, a ghost Cancel, and a destructive confirm button. Never inline confirms, never immediate deletes.
+- The dialog stays open with a loading state until the mutation succeeds; the caller closes it.
+
+### Toasts
+
+- `Toasts` viewport (bottom-center, above the mobile bottom nav) + `useToastStore` / `toastError` in `store/toasts.ts`.
+- Card-style pill: `border border-border bg-card shadow-pop`, tone icon (destructive alert / primary check), auto-dismiss after 5s, manual dismiss X.
+- Used for mutation failures that have no inline error display (status toggles, deletes, calendar drag reschedules).
+
+### Dropdown menus
+
+- Row action menus use `ActionMenu`: `MoreHorizontal` trigger, menu rendered in a portal with fixed positioning so it is never clipped by overflow containers; flips above the trigger when there is no room below. Closes on outside press and Escape.
 
 ### Shadows — strictly flat
 

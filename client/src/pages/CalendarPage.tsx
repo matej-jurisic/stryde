@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, Menu, Plus, LayoutGrid, CalendarCheck } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, settingsApi } from '@/lib/api'
+import { toastError } from '@/store/toasts'
 import type { Activity, Occurrence } from '@/lib/types'
 import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
 import { EventModal } from '@/components/events/EventModal'
@@ -1103,6 +1104,8 @@ export function CalendarPage() {
       isAllDay: ev.isAllDay,
       isPlanned: ev.isPlanned,
       durationMinutes: ev.durationMinutes,
+    }).catch((err) => {
+      toastError(err, 'Could not reschedule the occurrence.')
     }).finally(() => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
       queryClient.invalidateQueries({ queryKey: ['recommendations'] })
@@ -1125,6 +1128,8 @@ export function CalendarPage() {
       isAllDay: false,
       isPlanned: ev.isPlanned,
       durationMinutes: ev.durationMinutes,
+    }).catch((err) => {
+      toastError(err, 'Could not reschedule the occurrence.')
     }).finally(() => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
       queryClient.invalidateQueries({ queryKey: ['recommendations'] })

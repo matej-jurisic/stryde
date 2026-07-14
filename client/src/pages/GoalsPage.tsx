@@ -1,13 +1,16 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Pencil, Trash2, Check, MoreHorizontal, ChevronRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, Check, ChevronRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { goalsApi, checkpointsApi, ApiError } from '@/lib/api'
+import { toastError } from '@/store/toasts'
 import type { Goal, GoalStatus, Checkpoint, CheckpointSize } from '@/lib/types'
 import { OccurrenceBar } from '@/components/goals/OccurrenceBar'
 import { GoalModal } from '@/components/goals/GoalModal'
 import { CheckpointModal } from '@/components/goals/CheckpointModal'
+import { ActionMenu, type ActionMenuEntry } from '@/components/ui/ActionMenu'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -58,17 +61,23 @@ interface CheckpointRowProps {
 
 function CheckpointRow({ checkpoint, goalId, isLast, onEdit }: CheckpointRowProps) {
   const qc = useQueryClient()
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const reached = checkpoint.status === 'reached'
 
   const toggleMutation = useMutation({
     mutationFn: () =>
       checkpointsApi.setStatus(goalId, checkpoint.id, reached ? 'pending' : 'reached'),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['goals'] }),
+    onError: (err) => toastError(err, 'Could not update the checkpoint.'),
   })
 
   const deleteMutation = useMutation({
     mutationFn: () => checkpointsApi.delete(goalId, checkpoint.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['goals'] }),
+    onSuccess: () => {
+      setConfirmDelete(false)
+      qc.invalidateQueries({ queryKey: ['goals'] })
+    },
+    onError: (err) => toastError(err, 'Could not delete the checkpoint.'),
   })
 
   return (
@@ -101,90 +110,23 @@ function CheckpointRow({ checkpoint, goalId, isLast, onEdit }: CheckpointRowProp
             <Pencil className="h-3 w-3" strokeWidth={2} />
           </button>
           <button
-            onClick={() => deleteMutation.mutate()}
+            onClick={() => setConfirmDelete(true)}
+            aria-label="Delete checkpoint"
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
           >
             <Trash2 className="h-3 w-3" strokeWidth={2} />
           </button>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => deleteMutation.mutate()}
+        loading={deleteMutation.isPending}
+        title="Delete checkpoint?"
+        message={`"${checkpoint.title}" will be permanently deleted.`}
+      />
     </li>
-  )
-}
-
-function GoalMenu({
-  transitions,
-  isPending,
-  onEdit,
-  onDelete,
-  onStatusSelect,
-  onAddCheckpoint,
-}: {
-  transitions: { label: string; value: GoalStatus }[]
-  isPending: boolean
-  onEdit: () => void
-  onDelete: () => void
-  onStatusSelect: (value: GoalStatus) => void
-  onAddCheckpoint: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function close(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [open])
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        disabled={isPending}
-        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
-      >
-        <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
-          <button
-            onClick={() => { onEdit(); setOpen(false) }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-          >
-            <Pencil className="h-3 w-3" strokeWidth={2} />
-            Edit goal
-          </button>
-          <button
-            onClick={() => { onAddCheckpoint(); setOpen(false) }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-          >
-            <Plus className="h-3 w-3" strokeWidth={2} />
-            Add checkpoint
-          </button>
-          {transitions.length > 0 && <div className="my-1 border-t border-border" />}
-          {transitions.map((t) => (
-            <button
-              key={t.value}
-              onClick={() => { onStatusSelect(t.value); setOpen(false) }}
-              className="w-full px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-            >
-              {t.label}
-            </button>
-          ))}
-          <div className="my-1 border-t border-border" />
-          <button
-            onClick={() => { onDelete(); setOpen(false) }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
-          >
-            <Trash2 className="h-3 w-3" strokeWidth={2} />
-            Delete goal
-          </button>
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -200,6 +142,7 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
   const qc = useQueryClient()
   const [statusError, setStatusError] = useState('')
   const [expanded, setExpanded] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const tier = (goal.status === 'closed' ? 'bench' : goal.status) as Tier
   const isMilestone = goal.kind === 'milestone'
   const believed = believedProgress(goal.checkpoints)
@@ -209,10 +152,12 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
   const deleteMutation = useMutation({
     mutationFn: () => goalsApi.delete(goal.id),
     onSuccess: () => {
+      setConfirmDelete(false)
       qc.invalidateQueries({ queryKey: ['goals'] })
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
+    onError: (err) => toastError(err, 'Could not delete the goal.'),
   })
 
   const statusMutation = useMutation({
@@ -278,13 +223,21 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
           ) : null
         )}
 
-        <GoalMenu
-          transitions={transitions}
-          isPending={statusMutation.isPending}
-          onEdit={() => onEdit(goal)}
-          onDelete={() => deleteMutation.mutate()}
-          onStatusSelect={(s) => statusMutation.mutate(s)}
-          onAddCheckpoint={() => onAddCheckpoint(goal.id)}
+        <ActionMenu
+          disabled={statusMutation.isPending}
+          triggerClassName="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+          iconClassName="h-3.5 w-3.5"
+          items={[
+            { icon: Pencil, label: 'Edit goal', onClick: () => onEdit(goal) },
+            { icon: Plus, label: 'Add checkpoint', onClick: () => onAddCheckpoint(goal.id) },
+            ...(transitions.length > 0 ? ['separator' as const] : []),
+            ...transitions.map((t): ActionMenuEntry => ({
+              label: t.label,
+              onClick: () => statusMutation.mutate(t.value),
+            })),
+            'separator',
+            { icon: Trash2, label: 'Delete goal', onClick: () => setConfirmDelete(true), destructive: true },
+          ]}
         />
       </div>
 
@@ -313,6 +266,15 @@ function GoalRow({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: Go
       )}
 
       {statusError && <p className="px-3 pb-2 text-xs text-destructive">{statusError}</p>}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => deleteMutation.mutate()}
+        loading={deleteMutation.isPending}
+        title="Delete goal?"
+        message={`"${goal.title}" and its checkpoints will be permanently deleted. Linked activities and occurrences will be kept without a goal.`}
+      />
     </li>
   )
 }

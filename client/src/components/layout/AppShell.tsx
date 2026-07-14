@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { BottomNav } from './BottomNav'
+import { Toasts } from '@/components/ui/Toasts'
 
 interface AppShellProps {
   children: ReactNode
@@ -14,6 +15,7 @@ export function AppShell({ children }: AppShellProps) {
         {children}
         <BottomNav />
       </div>
+      <Toasts />
     </div>
   )
 }

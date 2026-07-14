@@ -1,16 +1,16 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock, Menu, CircleDashed, MoreHorizontal, ListChecks, LayoutList } from 'lucide-react'
+import { X, Pencil, Trash2, Plus, Menu, CircleDashed, LayoutList } from 'lucide-react'
 import { occurrencesApi, categoriesApi } from '@/lib/api'
 import { isUncategorized } from '@/lib/categories'
-import type { Category, Occurrence, EventStatus } from '@/lib/types'
+import { toastError } from '@/store/toasts'
+import type { Category, Occurrence } from '@/lib/types'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
-import { Badge } from '@/components/ui/Badge'
 import { EventModal } from '@/components/events/EventModal'
-import { OccurrenceSubtasksModal } from '@/components/events/OccurrenceSubtasksModal'
-import { SkipRescheduleModal } from '@/components/events/SkipRescheduleModal'
+import { OccurrenceListRow } from '@/components/events/OccurrenceListRow'
 import { CategoryModal } from '@/components/categories/CategoryModal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PageHeader } from '@/components/layout/PageHeader'
 
 // --- date helpers ---
@@ -89,173 +89,6 @@ const GROUP_LABELS: Record<Group, string> = {
   done: 'Completed / Skipped',
 }
 
-// --- row component ---
-
-interface OccurrenceRowProps {
-  occurrence: Occurrence
-  onEdit: (o: Occurrence) => void
-  onSchedule: (o: Occurrence) => void
-}
-
-function OccurrenceRow({ occurrence, onEdit, onSchedule }: OccurrenceRowProps) {
-  const qc = useQueryClient()
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [subtasksOpen, setSubtasksOpen] = useState(false)
-  const [skipOpen, setSkipOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const hasSubtasks = occurrence.activity.subtasks.length > 0
-  const completedCount = occurrence.completedSubtaskIds.length
-
-  useEffect(() => {
-    if (!menuOpen) return
-    function onPointerDown(e: PointerEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [menuOpen])
-
-  const statusMutation = useMutation({
-    mutationFn: (status: EventStatus) => occurrencesApi.setStatus(occurrence.id, status),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: () => occurrencesApi.delete(occurrence.id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
-    },
-  })
-
-  const isPending = occurrence.status === 'pending'
-  const isFloating = !occurrence.startAt
-  const category = occurrence.activity.category
-  const goal = occurrence.activity.goal
-
-  return (
-    <li className="group relative flex items-center gap-3 border-b border-border bg-card px-5 py-3 last:border-b-0 first:rounded-t-lg last:rounded-b-lg hover:bg-muted/40 transition-colors">
-      {/* Checkbox */}
-      <button
-        onClick={() => isPending && statusMutation.mutate('done')}
-        className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border transition-colors ${
-          occurrence.status === 'done'
-            ? 'border-primary bg-primary text-primary-foreground'
-            : occurrence.status === 'skipped'
-              ? 'border-dashed border-muted-foreground text-muted-foreground'
-              : 'border-border bg-background hover:border-primary'
-        }`}
-      >
-        {occurrence.status === 'done' && <Check className="h-3 w-3" strokeWidth={3} />}
-        {occurrence.status === 'skipped' && <X className="h-3 w-3" strokeWidth={3} />}
-      </button>
-
-      {/* Title + meta */}
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className={`text-sm ${occurrence.status !== 'pending' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-            {occurrence.effectiveTitle}
-          </span>
-          {goal && (
-            <Badge key={goal.id} tone="focus">{goal.title}</Badge>
-          )}
-        </div>
-        {(occurrence.startAt || occurrence.endAt || occurrence.isAllDay || category || hasSubtasks) && (
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-            {(occurrence.startAt || occurrence.endAt || occurrence.isAllDay) && (
-              <span className="whitespace-nowrap flex items-center gap-1 text-xs text-muted-foreground">
-                <Clock className="h-3 w-3 shrink-0" strokeWidth={2} />
-                {formatOccurrenceDate(occurrence)}
-              </span>
-            )}
-            {category && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                <CategoryIcon icon={category.icon} color={category.color} size={11} strokeWidth={2} />
-                {category.name}
-              </span>
-            )}
-            {hasSubtasks && (
-              <span className="text-xs text-muted-foreground">{completedCount}/{occurrence.activity.subtasks.length}</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Actions menu */}
-      <div ref={menuRef} className="shrink-0">
-        <button
-          onClick={() => setMenuOpen((o) => !o)}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-        >
-          <MoreHorizontal className="h-4 w-4" strokeWidth={2} />
-        </button>
-        {menuOpen && (
-          <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-pop">
-            {hasSubtasks && (
-              <button
-                onClick={() => { setSubtasksOpen(true); setMenuOpen(false) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-              >
-                <ListChecks className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
-                Subtasks
-              </button>
-            )}
-            {isPending && (
-              <button
-                onClick={() => { setMenuOpen(false); setSkipOpen(true) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-              >
-                <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2.5} />
-                Skip
-              </button>
-            )}
-            {isPending && isFloating && (
-              <button
-                onClick={() => { onSchedule(occurrence); setMenuOpen(false) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-              >
-                <CalendarPlus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
-                Schedule
-              </button>
-            )}
-            <button
-              onClick={() => { onEdit(occurrence); setMenuOpen(false) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted transition-colors"
-            >
-              <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
-              Edit
-            </button>
-            <button
-              onClick={() => { deleteMutation.mutate(); setMenuOpen(false) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted transition-colors"
-            >
-              <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-              Delete
-            </button>
-          </div>
-        )}
-      </div>
-
-      {hasSubtasks && subtasksOpen && (
-        <OccurrenceSubtasksModal
-          open={subtasksOpen}
-          onClose={() => setSubtasksOpen(false)}
-          occurrence={occurrence}
-        />
-      )}
-      <SkipRescheduleModal
-        open={skipOpen}
-        onClose={() => setSkipOpen(false)}
-        occurrence={occurrence}
-        onDone={() => setSkipOpen(false)}
-      />
-    </li>
-  )
-}
-
 // --- page ---
 
 export function CategoriesPage() {
@@ -271,6 +104,7 @@ export function CategoriesPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [catModalOpen, setCatModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | undefined>()
+  const [deletingCategory, setDeletingCategory] = useState<Category | null>(null)
 
   const { data: occurrences = [], isLoading } = useQuery({
     queryKey: ['events', 'all'],
@@ -285,10 +119,12 @@ export function CategoriesPage() {
   const deleteCatMutation = useMutation({
     mutationFn: (id: string) => categoriesApi.delete(id),
     onSuccess: (_, id) => {
+      setDeletingCategory(null)
       qc.invalidateQueries({ queryKey: ['categories'] })
       qc.invalidateQueries({ queryKey: ['events'] })
       if (categoryId === id) navigate('/categories', { replace: true })
     },
+    onError: (err) => toastError(err, 'Could not delete the category.'),
   })
 
   async function handleCatSave(name: string, color: string, icon: string | null) {
@@ -436,7 +272,13 @@ export function CategoriesPage() {
                     <div className="rounded-lg border border-border">
                       <ul>
                         {list.map((o) => (
-                          <OccurrenceRow key={o.id} occurrence={o} onEdit={openEdit} onSchedule={openSchedule} />
+                          <OccurrenceListRow
+                            key={o.id}
+                            occurrence={o}
+                            timeText={formatOccurrenceDate(o) || null}
+                            onEdit={openEdit}
+                            onSchedule={openSchedule}
+                          />
                         ))}
                       </ul>
                     </div>
@@ -462,6 +304,15 @@ export function CategoriesPage() {
         onClose={() => setCatModalOpen(false)}
         category={editingCategory}
         onSave={handleCatSave}
+      />
+
+      <ConfirmDialog
+        open={deletingCategory !== null}
+        onClose={() => setDeletingCategory(null)}
+        onConfirm={() => deletingCategory && deleteCatMutation.mutate(deletingCategory.id)}
+        loading={deleteCatMutation.isPending}
+        title="Delete category?"
+        message={`"${deletingCategory?.name ?? ''}" will be deleted. Activities in this category will be kept without a category.`}
       />
 
       {/* Mobile category drawer */}
@@ -542,7 +393,8 @@ export function CategoriesPage() {
                       <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
                     </button>
                     <button
-                      onClick={() => deleteCatMutation.mutate(cat.id)}
+                      onClick={() => { setDeletingCategory(cat); setDrawerOpen(false) }}
+                      aria-label={`Delete ${cat.name}`}
                       className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive"
                     >
                       <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
