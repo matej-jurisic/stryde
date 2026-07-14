@@ -17,6 +17,7 @@ public class TestContext : IDisposable
     public CheckpointService CheckpointService { get; }
     public UserSettingsService UserSettingsService { get; }
     public RecommendationService RecommendationService { get; }
+    public InsightsService InsightsService { get; }
 
     public TestContext()
     {
@@ -46,6 +47,7 @@ public class TestContext : IDisposable
         OccurrenceService = new OccurrenceService(Db, UserSettingsService);
         CheckpointService = new CheckpointService(Db);
         RecommendationService = new RecommendationService(Db, UserSettingsService);
+        InsightsService = new InsightsService(Db, UserSettingsService);
     }
 
     public void Dispose()

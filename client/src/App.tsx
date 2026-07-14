@@ -13,6 +13,7 @@ import { SettingsPage } from '@/pages/SettingsPage'
 import { ActivitiesPage } from '@/pages/ActivitiesPage'
 import { GoalDetailPage } from '@/pages/GoalDetailPage'
 import { ActivityDetailPage } from '@/pages/ActivityDetailPage'
+import { InsightsPage } from '@/pages/InsightsPage'
 
 function AppRoutes() {
   const { status, setStatus } = useAuthStore()
@@ -52,6 +53,7 @@ function AppRoutes() {
         <Route path="/goals/:id"     element={<GoalDetailPage />} />
         <Route path="/activities"    element={<ActivitiesPage />} />
         <Route path="/activities/:id" element={<ActivityDetailPage />} />
+        <Route path="/insights"   element={<InsightsPage />} />
         <Route path="/settings"   element={<SettingsPage />} />
         <Route path="/"       element={<Navigate to="/plan" replace />} />
         <Route path="*"       element={<Navigate to="/plan" replace />} />

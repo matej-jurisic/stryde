@@ -27,6 +27,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<CheckpointService>();
         services.AddScoped<RecommendationService>();
         services.AddScoped<CategoryService>();
+        services.AddScoped<InsightsService>();
 
         return services;
     }

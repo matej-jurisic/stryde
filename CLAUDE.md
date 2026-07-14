@@ -77,8 +77,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Frontend (`client/src`)**
 - `App.tsx` — auth-gated routing; index → `/plan`.
-- `pages/` — `PlanPage`, `CategoriesPage`, `CalendarPage`, `GoalsPage`, `ActivitiesPage`, `SettingsPage`.
-- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`.
+- `pages/` — `PlanPage`, `CategoriesPage`, `CalendarPage`, `GoalsPage`, `ActivitiesPage`, `InsightsPage`, `SettingsPage`.
+- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`.
 - `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Recommendation` (discriminated union).
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
@@ -86,6 +86,7 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field, ConfirmDialog, ActionMenu, Toasts`.
 - `components/events/OccurrenceListRow.tsx` — shared occurrence list row (Plan + Categories): optimistic status toggle, action menu, confirmed delete.
 - `components/layout/useUncategorizedCount.ts` — shared nav badge hook (shares `['events', 'all']` cache with CategoriesPage; predicate in `lib/categories.ts`).
+- `components/layout/BottomNav.tsx` — mobile nav: 4 tabs + "More" bottom sheet (Activities, Insights, Settings). Max 5 slots; new pages go in the sheet.
 
 **Tests**
 - `Unit/TestContext.cs` — in-memory SQLite + real services. Naming: `Method_scenario`.

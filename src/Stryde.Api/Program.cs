@@ -76,6 +76,7 @@ app.MapCheckpointEndpoints();
 app.MapSettingsEndpoints();
 app.MapRecommendationEndpoints();
 app.MapCategoryEndpoints();
+app.MapInsightsEndpoints();
 
 app.MapFallbackToFile("index.html");
 

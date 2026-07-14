@@ -228,9 +228,23 @@ Only these views are in scope for v1:
 | Calendar | Day/week view of scheduled occurrences. Primary scheduling surface. |
 | Goals | Goal list with progress insight per goal. Checkpoint management. |
 | Activities | Manage activity definitions: create, edit, delete activities grouped by goal. |
+| Insights | Completion stats: headline counts, streak, 14-day chart, category breakdown. |
 | Settings | Timezone, day boundary, max Focus goals, appearance, sign out. |
 
 Additional views (Cockpit, Lab) are deferred — defined during development if needed.
+
+---
+
+## Insights
+
+Read-only stats over **done occurrences**, computed server-side (`GET /api/insights`) using the user's day context (timezone + day boundary). Occurrences without a `StartAt` (floating) are excluded — they have no day to count on. All windows end on the user's current day.
+
+| Stat | Rule |
+|---|---|
+| Done today / last 7 days / last 30 days | Count of done occurrences whose start day falls in the window. |
+| Current streak | Consecutive days with at least one completion, counting back from today. A today with no completion yet does not break the streak — it then counts back from yesterday. |
+| Daily series | Per-day done counts for the last 14 days. |
+| Category breakdown | Done counts per category over the last 30 days; completions of uncategorized activities appear as a "No category" bucket. |
 
 ---
 

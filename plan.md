@@ -378,6 +378,19 @@ The Inbox is renamed to the Categories page (`/categories`, old `/inbox` redirec
 
 ---
 
+## Insights Page & Mobile More Sheet (July 2026) ✅
+
+**Goal:** A basic stats view, plus room in the mobile nav for it (and future pages) without overcrowding.
+
+**Backend**
+- `InsightsService` + `GET /api/insights`: done-occurrence stats bucketed server-side via `DayMath` (today / last 7 days / last 30 days, current streak with a today-grace rule, 14-day per-day series, 30-day category breakdown with an uncategorized bucket). Floating occurrences are excluded — they have no day.
+
+**Frontend**
+- `/insights` page: KPI stat tiles, 14-day completion column chart (single hue, hover tooltips), category breakdown bars in each category's color.
+- Mobile bottom nav capped at 5 slots: Plan, Categories, Calendar, Goals + a "More" button opening a bottom sheet with Activities, Insights, Settings (labeled rows). Desktop sidebar gains an Insights item.
+
+---
+
 ## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.

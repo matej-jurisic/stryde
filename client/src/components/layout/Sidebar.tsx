@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { CalendarRange, CalendarDays, CircleDashed, LayoutList, Target, Settings, Zap, Pencil, Trash2, Plus, Layers } from 'lucide-react'
+import { CalendarRange, CalendarDays, ChartColumn, CircleDashed, LayoutList, Target, Settings, Zap, Pencil, Trash2, Plus, Layers } from 'lucide-react'
 import { categoriesApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
@@ -199,6 +199,7 @@ export function Sidebar() {
           <li><NavItem to="/calendar"   label="Calendar"    Icon={CalendarDays} /></li>
           <li><NavItem to="/goals"      label="Goals"       Icon={Target} /></li>
           <li><NavItem to="/activities" label="Activities"  Icon={Layers} /></li>
+          <li><NavItem to="/insights"   label="Insights"    Icon={ChartColumn} /></li>
         </ul>
 
         <div className="my-2 border-t border-border shrink-0" />

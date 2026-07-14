@@ -171,6 +171,21 @@ Mobile: single column, agenda first, recommendations collapsed behind a toggle.
 
 ---
 
+## Mobile Navigation
+
+- **Bottom tab bar is capped at 5 slots**, icon-only: Plan, Categories, Calendar, Goals, and a "More" button (`Ellipsis` icon). New pages go in the More sheet, never a 6th tab.
+- **More sheet:** bottom sheet (same overlay + slide-up animation as mobile modals: `bg-black/40 backdrop-blur-sm`, `rounded-t-2xl`, drag handle) listing secondary destinations — Activities, Insights, Settings — as icon + label rows styled like sidebar nav items. Closes on backdrop tap, Escape, or navigation. The More button shows the active (primary) tint when the current route is one of its items.
+
+---
+
+## Insights Page
+
+- **KPI row:** 4 stat tiles (2×2 on mobile, 1×4 on desktop): label in `text-xs text-muted-foreground`, value `text-2xl font-semibold`.
+- **14-day completion chart:** single-series column chart in `bg-primary` — no legend. Columns max 24px wide, 4px rounded top, square baseline on a hairline `border-border`; zero days show a 2px `bg-muted` stub. Weekday initials below, per-column hover tooltip (card + `shadow-pop`) with date and count. Values live in tooltips, not on every bar.
+- **Category breakdown:** rows with category icon + name (text tokens, never colored text), count right-aligned (`tabular-nums`), and a 4px proportional bar in the category's own color on a `bg-muted` track. Uncategorized uses `CircleDashed` + muted tones.
+
+---
+
 ## Spacing & Sizing
 
 - Border radius: buttons/tags `6px`, cards/modals `8-12px`, avatars fully round.

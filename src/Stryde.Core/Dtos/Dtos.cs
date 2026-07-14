@@ -191,6 +191,19 @@ public sealed record UpdateCategoryRequest(string Name, string Color, string? Ic
 // Recommendations — "activity" for all tiers; timing fields null when no history exists
 public sealed record RecommendationDto(int Tier, string Type, OccurrenceDto? Occurrence, ActivityDto? Activity, int? TypicalDurationMinutes, string? TypicalStartTime);
 
+// Insights — server-side day bucketing; floating occurrences (no StartAt) are excluded
+public sealed record InsightsDayDto(DateOnly Day, int Done);
+
+public sealed record InsightsCategoryDto(Guid? CategoryId, string? Name, string? Color, string? Icon, int Done);
+
+public sealed record InsightsDto(
+    int DoneToday,
+    int DoneThisWeek,
+    int DoneLast30Days,
+    int CurrentStreakDays,
+    List<InsightsDayDto> Days,
+    List<InsightsCategoryDto> Categories);
+
 // UserSettings
 public sealed record UserSettingsDto(Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone)
 {

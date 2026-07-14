@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
-import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivitySubtask, Occurrence } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivitySubtask, Occurrence, Insights } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -188,6 +188,10 @@ export const recommendationsApi = {
     if (date) q.set('date', date)
     return request<Recommendation[]>(`/api/recommendations${q.size ? `?${q}` : ''}`)
   },
+}
+
+export const insightsApi = {
+  get: () => request<Insights>('/api/insights'),
 }
 
 export const authApi = {
