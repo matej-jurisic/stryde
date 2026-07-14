@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, Menu, Plus, Check, X, Pencil, Trash2, CalendarPlus, MoreHorizontal, CalendarCheck, ListChecks } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, goalsApi, settingsApi } from '@/lib/api'
+import { quotes } from '@/lib/quotes'
 import type { Activity, Checkpoint, CheckpointSize, Occurrence, EventStatus, Goal } from '@/lib/types'
 import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
 import { OccurrenceBar } from '@/components/goals/OccurrenceBar'
@@ -401,6 +402,11 @@ export function PlanPage() {
 
   const isLoading = occurrencesLoading
 
+  const dailyQuote = useMemo(() => {
+    const seed = dateStr.split('-').reduce((acc, n) => acc + parseInt(n, 10), 0)
+    return quotes[seed % quotes.length]
+  }, [dateStr])
+
   function prev() { setCurrent((d) => addDays(d, -1)) }
   function next() { setCurrent((d) => addDays(d, 1)) }
   function goToday() { setCurrent(effectiveToday) }
@@ -648,6 +654,12 @@ export function PlanPage() {
               </>
             )}
           </section>
+
+          {/* Daily quote */}
+          <div className="px-6 pb-8 pt-2 text-center">
+            <p className="text-sm italic text-muted-foreground">"{dailyQuote.text}"</p>
+            <p className="mt-1 text-xs text-muted-foreground/60">- {dailyQuote.author}</p>
+          </div>
         </div>
       </div>
 
