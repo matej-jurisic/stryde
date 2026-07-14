@@ -68,7 +68,7 @@ function AllCategoriesItem() {
           className={`h-[18px] w-[18px] shrink-0 ${active ? 'text-primary' : ''}`}
           strokeWidth={2}
         />
-        All
+        Active
       </span>
     </NavLink>
   )

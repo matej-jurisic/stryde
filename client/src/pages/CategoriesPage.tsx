@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock, Menu, CircleDashed, MoreHorizontal, ListChecks } from 'lucide-react'
+import { Check, X, Pencil, CalendarPlus, Trash2, Plus, Clock, Menu, CircleDashed, MoreHorizontal, ListChecks, LayoutList } from 'lucide-react'
 import { occurrencesApi, categoriesApi } from '@/lib/api'
 import { isUncategorized } from '@/lib/categories'
 import type { Category, Occurrence, EventStatus } from '@/lib/types'
@@ -311,11 +311,11 @@ export function CategoriesPage() {
     setCatModalOpen(true)
   }
 
-  const showAll = searchParams.get('all') === 'true'
+  const showActive = searchParams.get('all') === 'true'
   const activeCategory = categoryId ? categories.find((c) => c.id === categoryId) : null
 
-  const visibleOccurrences = showAll
-    ? occurrences
+  const visibleOccurrences = showActive
+    ? occurrences.filter((o) => o.status === 'pending')
     : categoryId
       ? occurrences.filter((o) => o.activity.category?.id === categoryId)
       : occurrences.filter(isUncategorized)
@@ -357,8 +357,8 @@ export function CategoriesPage() {
     <div className="flex flex-1 flex-col overflow-hidden">
       <PageHeader
         title={
-          showAll ? (
-            'All'
+          showActive ? (
+            'Active'
           ) : activeCategory ? (
             <span className="flex items-center gap-2">
               <CategoryIcon icon={activeCategory.icon} color={activeCategory.color} size={15} strokeWidth={2} />
@@ -403,11 +403,11 @@ export function CategoriesPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-foreground">
-                  {showAll ? 'No occurrences yet' : activeCategory ? 'Nothing in this category yet' : 'No uncategorized items'}
+                  {showActive ? 'Nothing active right now' : activeCategory ? 'Nothing in this category yet' : 'No uncategorized items'}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {showAll
-                    ? 'All occurrences across every category will appear here.'
+                  {showActive
+                    ? 'Pending occurrences across every category will appear here.'
                     : activeCategory
                       ? 'Occurrences of activities in this category will appear here.'
                       : 'Occurrences of activities without a category will appear here.'}
@@ -484,10 +484,27 @@ export function CategoriesPage() {
 
             <nav className="flex-1 overflow-y-auto px-3 py-2">
               <Link
+                to="/categories?all=true"
+                onClick={() => setDrawerOpen(false)}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                  showActive
+                    ? 'bg-muted font-semibold text-foreground'
+                    : 'font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                }`}
+              >
+                <span className="h-[18px] w-[18px] shrink-0 flex items-center justify-center">
+                  <LayoutList className={`h-[15px] w-[15px] ${showActive ? 'text-primary' : ''}`} strokeWidth={2} />
+                </span>
+                Active
+              </Link>
+
+              <div className="my-2 border-t border-border" />
+
+              <Link
                 to="/categories"
                 onClick={() => setDrawerOpen(false)}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
-                  !categoryId
+                  !categoryId && !showActive
                     ? 'bg-muted font-semibold text-foreground'
                     : 'font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                 }`}
