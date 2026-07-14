@@ -111,25 +111,25 @@ export type Recommendation =
   | { tier: number; type: 'occurrence'; occurrence: Occurrence; activity: null; typicalDurationMinutes: number | null; typicalStartTime: string | null }
   | { tier: number; type: 'activity'; occurrence: null; activity: Activity; typicalDurationMinutes: number | null; typicalStartTime: string | null }
 
-export interface InsightsDay {
-  day: string // "yyyy-MM-dd" in the user's day context
-  done: number
+export interface InsightsActivity {
+  activityId: string
+  title: string
+  categoryColor: string | null
+  timeMinutes: number
+  count: number
 }
 
 export interface InsightsCategory {
-  categoryId: string | null // null = completions without a category
+  categoryId: string | null
   name: string | null
   color: string | null
   icon: string | null
   done: number
+  timeMinutes: number
 }
 
 export interface Insights {
-  doneToday: number
-  doneThisWeek: number
-  doneLast30Days: number
-  currentStreakDays: number
-  days: InsightsDay[]
+  activities: InsightsActivity[]
   categories: InsightsCategory[]
 }
 

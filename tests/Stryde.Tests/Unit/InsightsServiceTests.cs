@@ -9,19 +9,14 @@ public class InsightsServiceTests : IDisposable
 
     public void Dispose() => _ctx.Dispose();
 
-    private static readonly DateTimeOffset Now = new(2026, 7, 7, 12, 0, 0, TimeSpan.Zero); // Tuesday
+    private static readonly DateTimeOffset Now = new(2026, 7, 7, 12, 0, 0, TimeSpan.Zero);
 
     private static DateTimeOffset At(int day, int hour, int minute = 0) =>
         new(2026, 7, day, hour, minute, 0, TimeSpan.Zero);
 
     private async Task<Guid> CreateUserAsync(string timezone = "UTC")
     {
-        var user = new User
-        {
-            Username = "u" + Guid.NewGuid().ToString("N")[..8],
-            PasswordHash = "x",
-            Timezone = timezone,
-        };
+        var user = new User { Username = "u" + Guid.NewGuid().ToString("N")[..8], PasswordHash = "x", Timezone = timezone };
         _ctx.Db.Users.Add(user);
         await _ctx.Db.SaveChangesAsync();
         return user.Id;
@@ -44,134 +39,115 @@ public class InsightsServiceTests : IDisposable
     }
 
     private async Task AddOccurrenceAsync(
-        Guid userId, Activity activity, DateTimeOffset? startAt, EventStatus status = EventStatus.done)
+        Guid userId, Activity activity,
+        DateTimeOffset? startAt, DateTimeOffset? endAt = null,
+        EventStatus status = EventStatus.done)
     {
         _ctx.Db.Occurrences.Add(new Occurrence
         {
             UserId = userId,
             ActivityId = activity.Id,
             StartAt = startAt,
+            EndAt = endAt,
             Status = status,
         });
         await _ctx.Db.SaveChangesAsync();
     }
 
     [Fact]
-    public async Task GetAsync_counts_done_occurrences_per_window()
+    public async Task GetAsync_sums_elapsed_time_from_start_end()
     {
         var userId = await CreateUserAsync();
-        var activity = await AddActivityAsync(userId, "task");
-        await AddOccurrenceAsync(userId, activity, At(7, 9));   // today
-        await AddOccurrenceAsync(userId, activity, At(7, 15));  // today
-        await AddOccurrenceAsync(userId, activity, At(3, 9));   // this week
-        await AddOccurrenceAsync(userId, activity, new DateTimeOffset(2026, 6, 15, 9, 0, 0, TimeSpan.Zero)); // last 30 days
-        await AddOccurrenceAsync(userId, activity, new DateTimeOffset(2026, 5, 1, 9, 0, 0, TimeSpan.Zero));  // outside all windows
+        var run = await AddActivityAsync(userId, "run");
+        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 9, 30));  // 30 min
+        await AddOccurrenceAsync(userId, run, At(6, 8), At(6, 8, 45));  // 45 min
 
-        var insights = await _ctx.InsightsService.GetAsync(userId, Now);
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
 
-        Assert.Equal(2, insights.DoneToday);
-        Assert.Equal(3, insights.DoneThisWeek);
-        Assert.Equal(4, insights.DoneLast30Days);
+        Assert.Single(insights.Activities);
+        Assert.Equal(75, insights.Activities[0].TimeMinutes);
+        Assert.Equal(2, insights.Activities[0].Count);
+    }
+
+    [Fact]
+    public async Task GetAsync_excludes_occurrences_without_end_time()
+    {
+        var userId = await CreateUserAsync();
+        var run = await AddActivityAsync(userId, "run");
+        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 9, 30));  // 30 min - counted
+        await AddOccurrenceAsync(userId, run, At(6, 8));                  // no EndAt - ignored
+
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
+
+        Assert.Single(insights.Activities);
+        Assert.Equal(30, insights.Activities[0].TimeMinutes);
+        Assert.Equal(1, insights.Activities[0].Count);
+    }
+
+    [Fact]
+    public async Task GetAsync_excludes_occurrences_outside_window()
+    {
+        var userId = await CreateUserAsync();
+        var run = await AddActivityAsync(userId, "run");
+        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 9, 30));                                              // in window
+        await AddOccurrenceAsync(userId, run, new DateTimeOffset(2026, 5, 1, 9, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 5, 1, 9, 30, 0, TimeSpan.Zero));                                               // outside
+
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
+
+        Assert.Single(insights.Activities);
+        Assert.Equal(30, insights.Activities[0].TimeMinutes);
     }
 
     [Fact]
     public async Task GetAsync_pending_skipped_and_floating_do_not_count()
     {
         var userId = await CreateUserAsync();
-        var activity = await AddActivityAsync(userId, "task");
-        await AddOccurrenceAsync(userId, activity, At(7, 9), EventStatus.pending);
-        await AddOccurrenceAsync(userId, activity, At(7, 10), EventStatus.skipped);
-        await AddOccurrenceAsync(userId, activity, startAt: null); // floating done
+        var run = await AddActivityAsync(userId, "run");
+        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 9, 30), EventStatus.pending);
+        await AddOccurrenceAsync(userId, run, At(7, 10), At(7, 10, 30), EventStatus.skipped);
+        await AddOccurrenceAsync(userId, run, startAt: null, endAt: null); // floating
 
-        var insights = await _ctx.InsightsService.GetAsync(userId, Now);
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
 
-        Assert.Equal(0, insights.DoneToday);
-        Assert.Equal(0, insights.DoneLast30Days);
+        Assert.Empty(insights.Activities);
     }
 
     [Fact]
-    public async Task GetAsync_days_covers_14_days_ending_today()
+    public async Task GetAsync_activities_sorted_by_time_desc()
     {
         var userId = await CreateUserAsync();
-        var activity = await AddActivityAsync(userId, "task");
-        await AddOccurrenceAsync(userId, activity, At(7, 9));
-        await AddOccurrenceAsync(userId, activity, At(5, 9));
+        var run = await AddActivityAsync(userId, "run");
+        var read = await AddActivityAsync(userId, "read");
+        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 9, 30));   // 30 min
+        await AddOccurrenceAsync(userId, read, At(7, 10), At(7, 11, 30)); // 90 min
 
-        var insights = await _ctx.InsightsService.GetAsync(userId, Now);
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
 
-        Assert.Equal(14, insights.Days.Count);
-        Assert.Equal(new DateOnly(2026, 6, 24), insights.Days[0].Day);
-        Assert.Equal(new DateOnly(2026, 7, 7), insights.Days[^1].Day);
-        Assert.Equal(1, insights.Days[^1].Done);
-        Assert.Equal(1, insights.Days[^3].Done);
-        Assert.Equal(0, insights.Days[^2].Done);
+        Assert.Equal(2, insights.Activities.Count);
+        Assert.Equal("read", insights.Activities[0].Title);
+        Assert.Equal("run", insights.Activities[1].Title);
     }
 
     [Fact]
-    public async Task GetAsync_streak_counts_consecutive_days()
-    {
-        var userId = await CreateUserAsync();
-        var activity = await AddActivityAsync(userId, "task");
-        await AddOccurrenceAsync(userId, activity, At(7, 9));
-        await AddOccurrenceAsync(userId, activity, At(6, 9));
-        await AddOccurrenceAsync(userId, activity, At(5, 9));
-        await AddOccurrenceAsync(userId, activity, At(3, 9)); // gap on the 4th breaks it
-
-        var insights = await _ctx.InsightsService.GetAsync(userId, Now);
-
-        Assert.Equal(3, insights.CurrentStreakDays);
-    }
-
-    [Fact]
-    public async Task GetAsync_streak_survives_a_day_with_no_completion_yet()
-    {
-        var userId = await CreateUserAsync();
-        var activity = await AddActivityAsync(userId, "task");
-        await AddOccurrenceAsync(userId, activity, At(6, 9));
-        await AddOccurrenceAsync(userId, activity, At(5, 9));
-
-        var insights = await _ctx.InsightsService.GetAsync(userId, Now);
-
-        Assert.Equal(2, insights.CurrentStreakDays);
-    }
-
-    [Fact]
-    public async Task GetAsync_categories_group_last_30_days_with_uncategorized_bucket()
+    public async Task GetAsync_categories_group_timed_occurrences()
     {
         var userId = await CreateUserAsync();
         var health = await AddCategoryAsync(userId, "Health");
         var withCategory = await AddActivityAsync(userId, "run", health.Id);
         var without = await AddActivityAsync(userId, "chores");
 
-        await AddOccurrenceAsync(userId, withCategory, At(7, 9));
-        await AddOccurrenceAsync(userId, withCategory, At(6, 9));
-        await AddOccurrenceAsync(userId, without, At(7, 10));
-        await AddOccurrenceAsync(userId, withCategory, new DateTimeOffset(2026, 5, 1, 9, 0, 0, TimeSpan.Zero)); // outside window
+        await AddOccurrenceAsync(userId, withCategory, At(7, 9), At(7, 9, 30));   // 30 min
+        await AddOccurrenceAsync(userId, withCategory, At(6, 9), At(6, 9, 45));   // 45 min
+        await AddOccurrenceAsync(userId, without, At(7, 10), At(7, 11));           // 60 min
 
-        var insights = await _ctx.InsightsService.GetAsync(userId, Now);
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
 
         Assert.Equal(2, insights.Categories.Count);
+        // chores (60 min) > health (75 min)... actually 75 > 60, so health first
         Assert.Equal(health.Id, insights.Categories[0].CategoryId);
-        Assert.Equal("Health", insights.Categories[0].Name);
-        Assert.Equal(2, insights.Categories[0].Done);
+        Assert.Equal(75, insights.Categories[0].TimeMinutes);
         Assert.Null(insights.Categories[1].CategoryId);
-        Assert.Equal(1, insights.Categories[1].Done);
-    }
-
-    [Fact]
-    public async Task GetAsync_day_boundary_buckets_late_night_completion_to_previous_day()
-    {
-        var userId = await CreateUserAsync();
-        _ctx.Db.UserSettings.Add(new UserSettings { UserId = userId, DayBoundaryTime = new TimeOnly(4, 0) });
-        await _ctx.Db.SaveChangesAsync();
-
-        var activity = await AddActivityAsync(userId, "night owl");
-        // 01:00 on the 7th is before the 04:00 boundary — belongs to the 6th
-        await AddOccurrenceAsync(userId, activity, At(7, 1));
-
-        var insights = await _ctx.InsightsService.GetAsync(userId, Now);
-
-        Assert.Equal(0, insights.DoneToday);
-        Assert.Equal(1, insights.Days[^2].Done);
+        Assert.Equal(60, insights.Categories[1].TimeMinutes);
     }
 }

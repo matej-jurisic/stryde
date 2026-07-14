@@ -8,75 +8,60 @@ namespace Stryde.Core.Services;
 
 public class InsightsService(StrydeDbContext db, UserSettingsService settings)
 {
-    /// <summary>Length of the per-day completion chart.</summary>
-    private const int ChartDays = 14;
-
-    /// <summary>Window for the category breakdown and the 30-day total.</summary>
-    private const int BreakdownWindowDays = 30;
-
-    /// <param name="nowUtc">Injectable clock for tests; defaults to the real time.</param>
-    public async Task<InsightsDto> GetAsync(Guid userId, DateTimeOffset? nowUtc = null)
+    public async Task<InsightsDto> GetAsync(Guid userId, int windowDays = 30, DateTimeOffset? nowUtc = null)
     {
         var now = nowUtc ?? DateTimeOffset.UtcNow;
         var ctx = await settings.GetDayContextAsync(userId);
         var today = DayMath.Today(ctx, now);
+        var windowStart = today.AddDays(-(windowDays - 1));
 
-        // Only dated completions count: a floating occurrence has no day to bucket into.
-        // Day filtering happens in memory, consistent with the rest of the day math.
         var completed = await db.Occurrences
             .Include(o => o.Activity).ThenInclude(a => a.Category)
             .Where(o => o.UserId == userId && o.Status == EventStatus.done && o.StartAt != null)
             .ToListAsync();
 
-        var byDay = completed
-            .GroupBy(o => DayMath.DayOf(o.StartAt!.Value, ctx))
-            .ToDictionary(g => g.Key, g => g.ToList());
-
-        int DoneOn(DateOnly day) => byDay.TryGetValue(day, out var list) ? list.Count : 0;
-
-        int DoneSince(DateOnly from) =>
-            byDay.Where(kv => kv.Key >= from && kv.Key <= today).Sum(kv => kv.Value.Count);
-
-        var days = new List<InsightsDayDto>(ChartDays);
-        for (var i = ChartDays - 1; i >= 0; i--)
-        {
-            var day = today.AddDays(-i);
-            days.Add(new InsightsDayDto(day, DoneOn(day)));
-        }
-
-        // Streak: consecutive days with at least one completion. A day with none yet
-        // (today) doesn't break it — the streak then counts back from yesterday.
-        var streak = 0;
-        var cursor = byDay.ContainsKey(today) ? today : today.AddDays(-1);
-        while (byDay.ContainsKey(cursor))
-        {
-            streak++;
-            cursor = cursor.AddDays(-1);
-        }
-
-        var windowStart = today.AddDays(-(BreakdownWindowDays - 1));
-        var categories = completed
+        // Only occurrences with both timestamps and positive elapsed time contribute.
+        var timed = completed
             .Where(o =>
             {
-                var day = DayMath.DayOf(o.StartAt!.Value, ctx);
+                if (!o.StartAt.HasValue || !o.EndAt.HasValue) return false;
+                var day = DayMath.DayOf(o.StartAt.Value, ctx);
                 return day >= windowStart && day <= today;
             })
-            .GroupBy(o => o.Activity.Category?.Id)
+            .Select(o => (Occurrence: o, Minutes: (int)(o.EndAt!.Value - o.StartAt!.Value).TotalMinutes))
+            .Where(x => x.Minutes > 0)
+            .ToList();
+
+        var activities = timed
+            .GroupBy(x => x.Occurrence.ActivityId)
             .Select(g =>
             {
-                var cat = g.First().Activity.Category;
-                return new InsightsCategoryDto(cat?.Id, cat?.Name, cat?.Color, cat?.Icon, g.Count());
+                var first = g.First().Occurrence;
+                return new InsightsActivityDto(
+                    first.ActivityId,
+                    first.Activity.Title,
+                    first.Activity.Category?.Color,
+                    g.Sum(x => x.Minutes),
+                    g.Count());
             })
-            .OrderByDescending(c => c.Done)
+            .OrderByDescending(a => a.TimeMinutes)
+            .ThenByDescending(a => a.Count)
+            .ToList();
+
+        var categories = timed
+            .GroupBy(x => x.Occurrence.Activity.Category?.Id)
+            .Select(g =>
+            {
+                var cat = g.First().Occurrence.Activity.Category;
+                return new InsightsCategoryDto(
+                    cat?.Id, cat?.Name, cat?.Color, cat?.Icon,
+                    g.Count(),
+                    g.Sum(x => x.Minutes));
+            })
+            .OrderByDescending(c => c.TimeMinutes)
             .ThenBy(c => c.Name)
             .ToList();
 
-        return new InsightsDto(
-            DoneToday: DoneOn(today),
-            DoneThisWeek: DoneSince(today.AddDays(-6)),
-            DoneLast30Days: DoneSince(windowStart),
-            CurrentStreakDays: streak,
-            Days: days,
-            Categories: categories);
+        return new InsightsDto(activities, categories);
     }
 }

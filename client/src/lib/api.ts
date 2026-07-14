@@ -191,7 +191,7 @@ export const recommendationsApi = {
 }
 
 export const insightsApi = {
-  get: () => request<Insights>('/api/insights'),
+  get: (period: number = 30) => request<Insights>(`/api/insights?period=${period}`),
 }
 
 export const authApi = {

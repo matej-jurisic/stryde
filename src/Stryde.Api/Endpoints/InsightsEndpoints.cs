@@ -9,11 +9,12 @@ public static class InsightsEndpoints
     {
         app.MapGet("/api/insights", async (
             ClaimsPrincipal principal,
+            int? period,
             InsightsService svc) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
-            var insights = await svc.GetAsync(userId.Value);
+            var insights = await svc.GetAsync(userId.Value, period ?? 30);
             return Results.Ok(insights);
         }).RequireAuthorization();
     }
