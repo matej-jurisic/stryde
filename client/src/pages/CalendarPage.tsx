@@ -539,6 +539,8 @@ function FloatingTasksRow({
   rowRef,
   isHighlighted,
   forceVisible,
+  movingEventId,
+  pendingDragId,
 }: {
   tasks: Occurrence[]
   onSchedule: (o: Occurrence) => void
@@ -546,6 +548,8 @@ function FloatingTasksRow({
   rowRef?: React.RefObject<HTMLDivElement | null>
   isHighlighted?: boolean
   forceVisible?: boolean
+  movingEventId?: string | null
+  pendingDragId?: string | null
 }) {
   const scrollElRef = useRef<HTMLDivElement>(null)
 
@@ -645,7 +649,7 @@ function FloatingTasksRow({
                   key={o.id}
                   onPointerDown={(e) => handlePointerDown(e, o)}
                   onClick={() => onSchedule(o)}
-                  className={`shrink-0 max-w-[160px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${className}`}
+                  className={`shrink-0 max-w-[160px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${movingEventId === o.id ? 'opacity-20' : pendingDragId === o.id ? 'opacity-50 scale-95' : ''} ${className}`}
                   style={{ touchAction: 'none', ...style }}
                 >
                   {o.effectiveTitle}
@@ -736,7 +740,9 @@ export function CalendarPage() {
   const floatRowRef = useRef<HTMLDivElement>(null)
   const allDayRowRef = useRef<HTMLDivElement>(null)
   const dragDropTargetRef = useRef<'float' | 'allday' | null>(null)
+  const dragDropDayIdxRef = useRef<number | null>(null)
   const [dragDropTarget, setDragDropTarget] = useState<'float' | 'allday' | null>(null)
+  const [dragDropDayIdx, setDragDropDayIdx] = useState<number | null>(null)
   const [isDraggingGridEvent, setIsDraggingGridEvent] = useState(false)
 
   const [hourPx, setHourPx] = useState(() => {
@@ -1095,6 +1101,13 @@ export function CalendarPage() {
           dragDropTargetRef.current = dropTarget
           setDragDropTarget(dropTarget)
         }
+        if (dropTarget === 'allday') {
+          const dayIdx = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
+          if (dayIdx !== dragDropDayIdxRef.current) {
+            dragDropDayIdxRef.current = dayIdx
+            setDragDropDayIdx(dayIdx)
+          }
+        }
         if (dropTarget) {
           setMoveOverlay(null)
           return
@@ -1119,7 +1132,9 @@ export function CalendarPage() {
         window.removeEventListener('pointerup', onPointerUp)
         window.removeEventListener('pointercancel', onPointerCancel)
         dragDropTargetRef.current = null
+        dragDropDayIdxRef.current = null
         setDragDropTarget(null)
+        setDragDropDayIdx(null)
         setIsDraggingGridEvent(false)
         document.body.style.cursor = ''
         stopAutoScroll()
@@ -2064,19 +2079,22 @@ export function CalendarPage() {
                 rowRef={floatRowRef}
                 isHighlighted={dragDropTarget === 'float'}
                 forceVisible={isDraggingGridEvent}
+                movingEventId={movingEventId}
+                pendingDragId={pendingAllDayDragId}
               />
               {(allDayEvents.length > 0 || isDraggingGridEvent) && (
-                <div ref={allDayRowRef} className={`flex border-b border-border transition-colors ${dragDropTarget === 'allday' ? 'bg-primary/10' : ''}`}>
+                <div ref={allDayRowRef} className="flex border-b border-border">
                   <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
                     <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Today</span>
                   </div>
                   {days.map((day, idx) => {
                     const ds = sod(day); const de = addDays(ds, 1)
                     const dayAll = allDayEvents.filter((e) => { const t = new Date(e.startAt!).getTime(); return t >= ds.getTime() && t < de.getTime() })
+                    const isColHighlighted = dragDropTarget === 'allday' && dragDropDayIdx === idx
                     return (
-                      <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 min-h-[26px] ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'}`}>
+                      <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 min-h-[26px] transition-colors ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'} ${isColHighlighted ? 'bg-primary/10' : ''}`}>
                         {dayAll.map((e) => (
-                          <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status === 'done' ? 'opacity-50 line-through' : e.status === 'skipped' ? 'opacity-30' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style, ...(e.isPlanned ? { border: `1px dashed ${e.activity.category?.color ?? 'var(--color-primary)'}` } : undefined) }}>
+                          <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status === 'done' ? 'opacity-50 line-through' : e.status === 'skipped' ? 'opacity-30' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style, ...(e.isPlanned ? { border: `1px dashed ${e.activity.category?.color ?? 'var(--color-primary)'}` } : undefined) }}>
                             {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
                           </button>
                         ))}
@@ -2098,6 +2116,8 @@ export function CalendarPage() {
                 rowRef={floatRowRef}
                 isHighlighted={dragDropTarget === 'float'}
                 forceVisible={isDraggingGridEvent}
+                movingEventId={movingEventId}
+                pendingDragId={pendingAllDayDragId}
               />
               {(dayAllDayEvents.length > 0 || isDraggingGridEvent) && (
                 <div ref={allDayRowRef} className={`flex border-b border-border transition-colors ${dragDropTarget === 'allday' ? 'bg-primary/10' : ''}`}>
@@ -2106,7 +2126,7 @@ export function CalendarPage() {
                   </div>
                   <div className="flex flex-1 flex-col gap-0.5 border-l border-r border-border px-0.5 py-0.5 min-h-[26px]">
                     {dayAllDayEvents.map((e) => (
-                      <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status !== 'pending' ? 'opacity-50 line-through' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style }}>
+                      <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status !== 'pending' ? 'opacity-50 line-through' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style }}>
                         {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
                       </button>
                     ))}
@@ -2185,7 +2205,7 @@ export function CalendarPage() {
                         <button
                           key={o.id}
                           onClick={() => openDetail(o)}
-                          className="flex w-full items-center overflow-hidden rounded-[3px] text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80"
+                          className="flex w-full items-center overflow-hidden rounded-[3px] text-left text-[10px] font-medium leading-tight transition-opacity hover:opacity-80"
                           style={{ border: `1px solid ${accentColor}`, backgroundColor: bgColor }}
                         >
                           <div style={{ width: 3, minWidth: 3, alignSelf: 'stretch', background: leftColor }} className="shrink-0" />
