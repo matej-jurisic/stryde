@@ -269,6 +269,18 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     setIsAllDay((v) => !v)
   }
 
+  function setEndOfDay() {
+    const existing = form.startAt ? form.startAt.substring(0, 10) : ''
+    const d = new Date()
+    const z = (n: number) => String(n).padStart(2, '0')
+    const today = `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`
+    const date = existing || today
+    setIsAllDay(false)
+    setTimeMode('due')
+    setForm((f) => ({ ...f, startAt: date + 'T23:59', endAt: '' }))
+    setErrors({})
+  }
+
   const selectedActivity = activities.find((a) => a.id === form.activityId) ?? defaultActivity ?? duplicateFrom?.activity ?? null
 
   const segmentClass = (active: boolean) =>
@@ -294,7 +306,17 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
           : 'border-border bg-transparent text-muted-foreground hover:border-foreground/30 hover:text-foreground'
       }`}
     >
-      All day
+      Date only
+    </button>
+  )
+
+  const endOfDayButton = (
+    <button
+      type="button"
+      onClick={setEndOfDay}
+      className="rounded-full border border-border bg-transparent px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+    >
+      End of day
     </button>
   )
 
@@ -456,7 +478,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
             <label className="text-sm font-medium text-foreground">
               {timeMode === 'scheduled' ? (isPlanned ? 'Window start' : 'Start') : 'Due date'}
             </label>
-            {timeMode === 'due' && allDayButton}
+            {timeMode === 'due' && <div className="flex gap-1.5">{allDayButton}{endOfDayButton}</div>}
           </div>
           <input
             type={isAllDay ? 'date' : 'datetime-local'}
@@ -517,7 +539,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
-                    {allDayButton}
+                    <div className="flex gap-1.5">{allDayButton}{endOfDayButton}</div>
                   </div>
                   <input
                     type={isAllDay ? 'date' : 'datetime-local'}

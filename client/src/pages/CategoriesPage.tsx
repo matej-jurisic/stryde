@@ -48,7 +48,7 @@ function formatOccurrenceDate(o: Occurrence): string {
   if (!refIso) return ''
   if (o.isAllDay) {
     const dur = formatDuration(o.durationMinutes)
-    return dur ? `${getDayLabel(refIso)}, All day · ~${dur}` : `${getDayLabel(refIso)}, All day`
+    return dur ? `${getDayLabel(refIso)}, Date only · ~${dur}` : `${getDayLabel(refIso)}, Date only`
   }
   const dayLabel = getDayLabel(refIso)
   if (o.startAt && o.endAt) {

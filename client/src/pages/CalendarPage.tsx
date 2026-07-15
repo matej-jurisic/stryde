@@ -528,6 +528,45 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
   )
 }
 
+// ── FloatingTasksRow ─────────────────────────────────────────────────────────
+
+function FloatingTasksRow({
+  tasks,
+  onSchedule,
+  onDragStart,
+}: {
+  tasks: Occurrence[]
+  onSchedule: (o: Occurrence) => void
+  onDragStart?: (e: React.PointerEvent, o: Occurrence) => void
+}) {
+  if (tasks.length === 0) return null
+  return (
+    <div className="flex border-b border-border">
+      <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
+        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Float</span>
+      </div>
+      <div className="flex-1 overflow-x-auto border-l border-border" style={{ scrollbarWidth: 'none' }}>
+        <div className="flex gap-1 px-1 py-1">
+          {tasks.map((o) => {
+            const { className, style } = eventAllDayColors(o)
+            return (
+              <button
+                key={o.id}
+                onPointerDown={onDragStart ? (e) => onDragStart(e, o) : undefined}
+                onClick={() => onSchedule(o)}
+                className={`shrink-0 max-w-[160px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${className}`}
+                style={{ touchAction: 'none', ...style }}
+              >
+                {o.effectiveTitle}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── CalendarPage ─────────────────────────────────────────────────────────────
 
 type ViewMode = 'day' | '3day' | 'week'
@@ -643,6 +682,12 @@ export function CalendarPage() {
         startFrom: rangeStart.toISOString(),
         endBefore: rangeEnd.toISOString(),
       }),
+  })
+
+  const { data: floatingTasks = [] } = useQuery({
+    queryKey: ['events', 'floating'],
+    queryFn: () => occurrencesApi.list({ floating: true, status: 'pending' }),
+    staleTime: 30 * 1000,
   })
 
   // Scroll to current time once the grid first becomes visible. Gated on
@@ -1136,7 +1181,32 @@ export function CalendarPage() {
     })
   }
 
-  function handleAllDayPillMoveStart(e: React.PointerEvent, event: Occurrence) {
+  function scheduleFloating(ev: Occurrence, newStart: Date, newEnd: Date) {
+    queryClient.cancelQueries({ queryKey: ['events'] })
+    queryClient.setQueryData<Occurrence[]>(
+      ['events', 'floating'],
+      (old) => old?.filter((o) => o.id !== ev.id),
+    )
+    queryClient.setQueryData<Occurrence[]>(
+      ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
+      (old) => [...(old ?? []), { ...ev, startAt: newStart.toISOString(), endAt: newEnd.toISOString() }],
+    )
+    occurrencesApi.update(ev.id, {
+      title: ev.title,
+      startAt: newStart.toISOString(),
+      endAt: newEnd.toISOString(),
+      isAllDay: false,
+      isPlanned: ev.isPlanned,
+      durationMinutes: ev.durationMinutes,
+    }).catch((err) => {
+      toastError(err, 'Could not schedule the task.')
+    }).finally(() => {
+      queryClient.invalidateQueries({ queryKey: ['events'] })
+      queryClient.invalidateQueries({ queryKey: ['recommendations'] })
+    })
+  }
+
+  function handleAllDayPillMoveStart(e: React.PointerEvent, event: Occurrence, onDrop?: (ev: Occurrence, start: Date, end: Date) => void) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     e.stopPropagation()
     suppressClickRef.current = false
@@ -1205,7 +1275,7 @@ export function CalendarPage() {
       const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
       const newStart = snapToGrid(days[curDayIdx], getYInGrid(mu.clientY), hourPxRef.current)
       const newEnd = new Date(newStart.getTime() + durationMs)
-      rescheduleFromAllDay(event, newStart, newEnd)
+      ;(onDrop ?? rescheduleFromAllDay)(event, newStart, newEnd)
     }
 
     function onPointerCancel(pc: PointerEvent) {
@@ -1659,6 +1729,10 @@ export function CalendarPage() {
 
   const allDayEvents = events.filter((e) => e.isAllDay && e.startAt && e.status !== 'skipped')
   const calendarEvents = events.filter((e) => !e.isAllDay && e.status !== 'skipped')
+  const dayAllDayEvents = useMemo(() => {
+    const ds = sod(days[0]).getTime()
+    return allDayEvents.filter((e) => { const t = new Date(e.startAt!).getTime(); return t >= ds && t < ds + 86400000 })
+  }, [allDayEvents, days])
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -1800,22 +1874,26 @@ export function CalendarPage() {
                   })}
                 </div>
               )}
+              <FloatingTasksRow tasks={floatingTasks} onSchedule={openSchedule} onDragStart={(e, o) => handleAllDayPillMoveStart(e, o, scheduleFloating)} />
             </div>
           )}
 
           {/* Day view all-day row */}
-          {view === 'day' && allDayEvents.some((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 }) && (
-            <div className="sticky top-0 z-40 flex border-b border-border bg-background">
-              <div className="w-12 shrink-0" />
-              <div className="flex flex-1 flex-col gap-0.5 border-l border-r border-border px-0.5 py-0.5">
-                {allDayEvents
-                  .filter((e) => { const t = new Date(e.startAt!).getTime(); const ds = sod(days[0]).getTime(); return t >= ds && t < ds + 86400000 })
-                  .map((e) => (
-                    <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status !== 'pending' ? 'opacity-50 line-through' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style }}>
-                      {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
-                    </button>
-                  ))}
-              </div>
+          {view === 'day' && (dayAllDayEvents.length > 0 || floatingTasks.length > 0) && (
+            <div className="sticky top-0 z-40 bg-background">
+              {dayAllDayEvents.length > 0 && (
+                <div className="flex border-b border-border">
+                  <div className="w-12 shrink-0" />
+                  <div className="flex flex-1 flex-col gap-0.5 border-l border-r border-border px-0.5 py-0.5">
+                    {dayAllDayEvents.map((e) => (
+                      <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status !== 'pending' ? 'opacity-50 line-through' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style }}>
+                        {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <FloatingTasksRow tasks={floatingTasks} onSchedule={openSchedule} onDragStart={(e, o) => handleAllDayPillMoveStart(e, o, scheduleFloating)} />
             </div>
           )}
 

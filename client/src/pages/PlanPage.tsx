@@ -70,7 +70,7 @@ function formatDuration(minutes: number | null): string {
 function formatTimeRange(event: Occurrence): string {
   if (event.isAllDay) {
     const dur = formatDuration(event.durationMinutes)
-    return dur ? `All day ~${dur}` : 'All day'
+    return dur ? `Date only ~${dur}` : 'Date only'
   }
   if (!event.startAt && event.endAt) return `Due ${formatTime(event.endAt)}`
   if (!event.startAt) return ''

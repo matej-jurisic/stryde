@@ -44,7 +44,7 @@ function formatOccurrenceTime(o: Occurrence): string {
 
   if (o.isAllDay) {
     const dur = formatDuration(o.durationMinutes)
-    return dur ? `${dateLabel}, All day ~${dur}` : `${dateLabel}, All day`
+    return dur ? `${dateLabel}, Date only ~${dur}` : `${dateLabel}, Date only`
   }
 
   if (o.startAt && o.endAt) {
