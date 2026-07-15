@@ -530,6 +530,8 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
 
 // ── FloatingTasksRow ─────────────────────────────────────────────────────────
 
+type FloatingDragInfo = { pointerId: number; clientX: number; clientY: number; pointerType: string }
+
 function FloatingTasksRow({
   tasks,
   onSchedule,
@@ -537,22 +539,87 @@ function FloatingTasksRow({
 }: {
   tasks: Occurrence[]
   onSchedule: (o: Occurrence) => void
-  onDragStart?: (e: React.PointerEvent, o: Occurrence) => void
+  onDragStart?: (info: FloatingDragInfo, o: Occurrence) => void
 }) {
+  const scrollElRef = useRef<HTMLDivElement>(null)
+  const pendingRef = useRef<{
+    timer: ReturnType<typeof setTimeout>
+    pointerId: number
+    startX: number
+    startY: number
+    scrollStart: number
+    scrolling: boolean
+    occ: Occurrence
+    pointerType: string
+  } | null>(null)
+
+  function cancelPending() {
+    if (!pendingRef.current) return
+    clearTimeout(pendingRef.current.timer)
+    pendingRef.current = null
+  }
+
+  function handlePointerDown(e: React.PointerEvent<HTMLButtonElement>, o: Occurrence) {
+    if (e.pointerType === 'mouse') {
+      if (e.button !== 0) return
+      onDragStart?.({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY, pointerType: e.pointerType }, o)
+      return
+    }
+    if (!onDragStart) return
+    const { pointerId, clientX, clientY, pointerType } = e
+    const scrollStart = scrollElRef.current?.scrollLeft ?? 0
+    const timer = setTimeout(() => {
+      const p = pendingRef.current
+      pendingRef.current = null
+      if (!p) return
+      if (navigator.vibrate) navigator.vibrate(30)
+      onDragStart({ pointerId, clientX, clientY, pointerType }, o)
+    }, 350)
+    pendingRef.current = { timer, pointerId, startX: clientX, startY: clientY, scrollStart, scrolling: false, occ: o, pointerType }
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    const p = pendingRef.current
+    if (!p || e.pointerId !== p.pointerId) return
+    const dx = e.clientX - p.startX
+    const dy = e.clientY - p.startY
+    if (p.scrolling) {
+      if (scrollElRef.current) scrollElRef.current.scrollLeft = p.scrollStart - dx
+      return
+    }
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      // Horizontal — cancel hold timer, scroll manually
+      clearTimeout(p.timer)
+      p.scrolling = true
+      if (scrollElRef.current) scrollElRef.current.scrollLeft = p.scrollStart - dx
+    }
+    // Vertical movement: let the hold timer fire
+  }
+
+  function handlePointerUp(e: React.PointerEvent) {
+    if (pendingRef.current?.pointerId === e.pointerId) cancelPending()
+  }
+
   if (tasks.length === 0) return null
   return (
-    <div className="flex border-b border-border">
+    <div
+      className="flex border-b border-border"
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={cancelPending}
+    >
       <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
         <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Float</span>
       </div>
-      <div className="flex-1 overflow-x-auto border-l border-border" style={{ scrollbarWidth: 'none' }}>
+      <div ref={scrollElRef} className="flex-1 overflow-x-auto border-l border-border" style={{ scrollbarWidth: 'none' }}>
         <div className="flex gap-1 px-1 py-1">
           {tasks.map((o) => {
             const { className, style } = eventAllDayColors(o)
             return (
               <button
                 key={o.id}
-                onPointerDown={onDragStart ? (e) => onDragStart(e, o) : undefined}
+                onPointerDown={(e) => handlePointerDown(e, o)}
                 onClick={() => onSchedule(o)}
                 className={`shrink-0 max-w-[160px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${className}`}
                 style={{ touchAction: 'none', ...style }}
@@ -596,6 +663,7 @@ export function CalendarPage() {
   const [duplicateFromOccurrence, setDuplicateFromOccurrence] = useState<Occurrence | undefined>()
   const [scrollTop, setScrollTop] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const timeGridRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
     startDayIdx: number
@@ -1738,13 +1806,18 @@ export function CalendarPage() {
   }, [allDayEvents, days])
 
   const belowFoldDuePins = useMemo(() => {
+    // Compute the scroll-content position of the time grid's top edge:
+    // viewport_pos + scrollTop = scroll_content_pos (works even when the grid has scrolled above the viewport)
+    const scrollRefTop = scrollRef.current?.getBoundingClientRect().top ?? 0
+    const gridTop = timeGridRef.current?.getBoundingClientRect().top ?? scrollRefTop
+    const gridOffset = gridTop - scrollRefTop + scrollTop
     const visibleBottom = scrollTop + (scrollRef.current?.clientHeight ?? 600)
     return calendarEvents
       .filter((e) => isDueOccurrence(e) && e.status === 'pending')
       .filter((e) => {
         const d = new Date(e.startAt!)
-        // Use 40px margin so pins are caught as they approach the bottom (accounts for sticky strip height + pin height)
-        return (d.getHours() + d.getMinutes() / 60) * hourPx > visibleBottom - 40
+        const pinScrollPos = gridOffset + (d.getHours() + d.getMinutes() / 60) * hourPx
+        return pinScrollPos > visibleBottom - DUE_PIN_HEIGHT
       })
       .sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime())
   }, [calendarEvents, scrollTop, hourPx])
@@ -1870,6 +1943,11 @@ export function CalendarPage() {
                   </div>
                 ))}
               </div>
+              <FloatingTasksRow
+                tasks={floatingTasks}
+                onSchedule={(o) => { if (!suppressClickRef.current) openSchedule(o) }}
+                onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, scheduleFloating)}
+              />
               {allDayEvents.length > 0 && (
                 <div className="flex border-b border-border">
                   <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
@@ -1890,13 +1968,17 @@ export function CalendarPage() {
                   })}
                 </div>
               )}
-              <FloatingTasksRow tasks={floatingTasks} onSchedule={openSchedule} onDragStart={(e, o) => handleAllDayPillMoveStart(e, o, scheduleFloating)} />
             </div>
           )}
 
           {/* Day view all-day row */}
           {view === 'day' && (dayAllDayEvents.length > 0 || floatingTasks.length > 0) && (
             <div className="sticky top-0 z-40 bg-background">
+              <FloatingTasksRow
+                tasks={floatingTasks}
+                onSchedule={(o) => { if (!suppressClickRef.current) openSchedule(o) }}
+                onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, scheduleFloating)}
+              />
               {dayAllDayEvents.length > 0 && (
                 <div className="flex border-b border-border">
                   <div className="w-12 shrink-0 flex items-center justify-end pr-2">
@@ -1911,11 +1993,10 @@ export function CalendarPage() {
                   </div>
                 </div>
               )}
-              <FloatingTasksRow tasks={floatingTasks} onSchedule={openSchedule} onDragStart={(e, o) => handleAllDayPillMoveStart(e, o, scheduleFloating)} />
             </div>
           )}
 
-          <div className="flex flex-1" style={{ minHeight: hourPx * 24 }}>
+          <div ref={timeGridRef} className="flex flex-1" style={{ minHeight: hourPx * 24 }}>
             {/* Hour labels */}
             <div className="relative w-12 shrink-0">
               {Array.from({ length: 24 }, (_, h) => (
