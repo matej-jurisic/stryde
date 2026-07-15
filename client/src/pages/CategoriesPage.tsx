@@ -319,10 +319,10 @@ export function CategoriesPage() {
       {drawerOpen && (
         <div className="md:hidden fixed inset-0 z-40 flex">
           <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-modal-overlay"
             onClick={() => setDrawerOpen(false)}
           />
-          <div className="relative z-10 flex w-64 flex-col bg-background border-r border-border">
+          <div className="relative z-10 flex w-64 flex-col bg-background border-r border-border animate-modal-panel-left">
             <div className="flex items-center justify-between px-4 py-4 border-b border-border">
               <span className="text-sm font-semibold text-foreground">Categories</span>
               <button

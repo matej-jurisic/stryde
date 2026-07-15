@@ -264,10 +264,10 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
       {mobileOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-modal-overlay"
             onClick={onMobileClose}
           />
-          <div className="relative z-10 flex w-72 shrink-0 flex-col overflow-hidden border-r border-border bg-background">
+          <div className="relative z-10 flex w-72 shrink-0 flex-col overflow-hidden border-r border-border bg-background animate-modal-panel-left">
             <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-4">
               <span className="text-sm font-semibold text-foreground">Suggestions</span>
               <button

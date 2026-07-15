@@ -104,11 +104,16 @@
   from { transform: translateY(100%) }
   to   { transform: translateY(0)    }
 }
+@keyframes modal-panel-left {
+  from { transform: translateX(-100%) }
+  to   { transform: translateX(0)     }
+}
 
 @theme inline {
-  --animate-modal-overlay:    modal-overlay-in  150ms ease-out          forwards;
-  --animate-modal-panel:      modal-panel-in    200ms cubic-bezier(0.16,1,0.3,1) forwards;
-  --animate-modal-panel-up:   modal-panel-up    300ms cubic-bezier(0.16,1,0.3,1) forwards;
+  --animate-modal-overlay:      modal-overlay-in   150ms ease-out                   forwards;
+  --animate-modal-panel:        modal-panel-in     200ms cubic-bezier(0.16,1,0.3,1) forwards;
+  --animate-modal-panel-up:     modal-panel-up     300ms cubic-bezier(0.16,1,0.3,1) forwards;
+  --animate-modal-panel-left:   modal-panel-left   300ms cubic-bezier(0.16,1,0.3,1) forwards;
 }
 
 *,
