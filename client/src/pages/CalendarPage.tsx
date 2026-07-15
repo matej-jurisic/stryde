@@ -542,6 +542,21 @@ function FloatingTasksRow({
   onDragStart?: (info: FloatingDragInfo, o: Occurrence) => void
 }) {
   const scrollElRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = scrollElRef.current
+    if (!el) return
+    function onWheel(e: WheelEvent) {
+      if (!el) return
+      const canScrollH = el.scrollWidth > el.clientWidth
+      if (!canScrollH) return
+      e.preventDefault()
+      el.scrollLeft += e.deltaY + e.deltaX
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
   const pendingRef = useRef<{
     timer: ReturnType<typeof setTimeout>
     pointerId: number
