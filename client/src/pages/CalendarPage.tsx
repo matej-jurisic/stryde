@@ -1743,7 +1743,8 @@ export function CalendarPage() {
       .filter((e) => isDueOccurrence(e) && e.status === 'pending')
       .filter((e) => {
         const d = new Date(e.startAt!)
-        return (d.getHours() + d.getMinutes() / 60) * hourPx > visibleBottom - DUE_PIN_HEIGHT
+        // Use 40px margin so pins are caught as they approach the bottom (accounts for sticky strip height + pin height)
+        return (d.getHours() + d.getMinutes() / 60) * hourPx > visibleBottom - 40
       })
       .sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime())
   }, [calendarEvents, scrollTop, hourPx])
@@ -1960,34 +1961,33 @@ export function CalendarPage() {
               ))}
             </div>
           </div>
-        </div>
-      )}
-
-      {belowFoldDuePins.length > 0 && !isLoading && (
-        <div className="shrink-0 flex border-t border-border bg-background">
-          <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
-            <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Due</span>
-          </div>
-          {days.map((day, idx) => {
-            const ds = sod(day).getTime()
-            const dayPins = belowFoldDuePins.filter((o) => {
-              const t = new Date(o.startAt!).getTime()
-              return t >= ds && t < ds + 86400000
-            })
-            return (
-              <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'}`}>
-                {dayPins.map((o) => {
-                  const { className, style } = eventAllDayColors(o)
-                  const time = new Date(o.startAt!).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-                  return (
-                    <button key={o.id} onClick={() => openDetail(o)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${className}`} style={style}>
-                      {o.effectiveTitle} · {time}
-                    </button>
-                  )
-                })}
+          {belowFoldDuePins.length > 0 && (
+            <div className="sticky bottom-0 z-40 flex border-t border-border bg-background">
+              <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
+                <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Due</span>
               </div>
-            )
-          })}
+              {days.map((day, idx) => {
+                const ds = sod(day).getTime()
+                const dayPins = belowFoldDuePins.filter((o) => {
+                  const t = new Date(o.startAt!).getTime()
+                  return t >= ds && t < ds + 86400000
+                })
+                return (
+                  <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'}`}>
+                    {dayPins.map((o) => {
+                      const { className, style } = eventAllDayColors(o)
+                      const time = new Date(o.startAt!).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+                      return (
+                        <button key={o.id} onClick={() => openDetail(o)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${className}`} style={style}>
+                          {o.effectiveTitle} · {time}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
