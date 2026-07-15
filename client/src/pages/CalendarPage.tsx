@@ -594,6 +594,7 @@ export function CalendarPage() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailEvent, setDetailEvent] = useState<Occurrence | null>(null)
   const [duplicateFromOccurrence, setDuplicateFromOccurrence] = useState<Occurrence | undefined>()
+  const [scrollTop, setScrollTop] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
@@ -699,7 +700,9 @@ export function CalendarPage() {
     if (hasScrolledToNowRef.current || isLoading || !scrollRef.current) return
     const now = new Date()
     const px = ((now.getHours() * 60 + now.getMinutes()) / 60) * hourPxRef.current
-    scrollRef.current.scrollTop = Math.max(0, px - 200)
+    const top = Math.max(0, px - 200)
+    scrollRef.current.scrollTop = top
+    setScrollTop(top)
     hasScrolledToNowRef.current = true
   }, [isLoading])
 
@@ -1734,6 +1737,17 @@ export function CalendarPage() {
     return allDayEvents.filter((e) => { const t = new Date(e.startAt!).getTime(); return t >= ds && t < ds + 86400000 })
   }, [allDayEvents, days])
 
+  const belowFoldDuePins = useMemo(() => {
+    const visibleBottom = scrollTop + (scrollRef.current?.clientHeight ?? 600)
+    return calendarEvents
+      .filter((e) => isDueOccurrence(e) && e.status === 'pending')
+      .filter((e) => {
+        const d = new Date(e.startAt!)
+        return (d.getHours() + d.getMinutes() / 60) * hourPx > visibleBottom - DUE_PIN_HEIGHT
+      })
+      .sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime())
+  }, [calendarEvents, scrollTop, hourPx])
+
   return (
     <div className="flex flex-1 overflow-hidden">
       <RecommendationPanel
@@ -1838,7 +1852,7 @@ export function CalendarPage() {
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       ) : (
-        <div ref={scrollRef} className="flex-1 overflow-y-auto flex flex-col" style={{ WebkitTouchCallout: 'none' }}>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto flex flex-col" style={{ WebkitTouchCallout: 'none' }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
           {/* Multi-day headers + all-day row — sticky, inside scroll container to share column widths */}
           {view !== 'day' && (
             <div className="sticky top-0 z-40 bg-background">
@@ -1943,6 +1957,26 @@ export function CalendarPage() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {belowFoldDuePins.length > 0 && !isLoading && (
+        <div className="shrink-0 flex items-center gap-1.5 overflow-x-auto border-t border-border bg-background px-3 py-1.5" style={{ scrollbarWidth: 'none' }}>
+          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Due</span>
+          {belowFoldDuePins.map((o) => {
+            const { className, style } = eventAllDayColors(o)
+            const time = new Date(o.startAt!).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+            return (
+              <button
+                key={o.id}
+                onClick={() => openDetail(o)}
+                className={`shrink-0 max-w-[180px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${className}`}
+                style={style}
+              >
+                {o.effectiveTitle} · {time}
+              </button>
+            )
+          })}
         </div>
       )}
 
