@@ -551,6 +551,7 @@ function FloatingTasksRow({
       const canScrollH = el.scrollWidth > el.clientWidth
       if (!canScrollH) return
       e.preventDefault()
+      e.stopPropagation()
       el.scrollLeft += e.deltaY + e.deltaX
     }
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -1528,6 +1529,9 @@ export function CalendarPage() {
   }
 
   function handleGridMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    // mousedown bubbles independently of pointerdown, so an event-move or resize
+    // that already started via pointerdown would run concurrently. Bail out early.
+    if (eventMoveRef.current || resizeDragActiveRef.current || allDayDragActiveRef.current) return
     if ((e.target as Element).closest('button')) {
       // Same minimum-height overflow carve-out as handleGridPointerDown: below
       // the event's true end the press belongs to the grid, not the event.
@@ -2071,11 +2075,23 @@ export function CalendarPage() {
                 return (
                   <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'}`}>
                     {dayPins.map((o) => {
-                      const { className, style } = eventAllDayColors(o)
+                      const accentColor = o.activity.category?.color ?? 'var(--color-primary)'
+                      const leftColor = o.activity.category?.color ?? 'var(--color-border)'
+                      const isHex = accentColor.startsWith('#')
+                      const bgColor = isHex ? `${accentColor}18` : `color-mix(in srgb, ${accentColor} 9%, transparent)`
                       const time = new Date(o.startAt!).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
                       return (
-                        <button key={o.id} onClick={() => openDetail(o)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${className}`} style={style}>
-                          {o.effectiveTitle} · {time}
+                        <button
+                          key={o.id}
+                          onClick={() => openDetail(o)}
+                          className="flex w-full items-center overflow-hidden rounded-[3px] text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80"
+                          style={{ border: `1px solid ${accentColor}`, backgroundColor: bgColor }}
+                        >
+                          <div style={{ width: 3, minWidth: 3, alignSelf: 'stretch', background: leftColor }} className="shrink-0" />
+                          <div className="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-0.5">
+                            <p className="min-w-0 flex-1 truncate" style={{ color: accentColor }}>{o.effectiveTitle}</p>
+                            <span className="shrink-0 text-[9px] leading-none opacity-60" style={{ color: accentColor }}>{time}</span>
+                          </div>
                         </button>
                       )
                     })}
