@@ -1872,6 +1872,7 @@ export function CalendarPage() {
               {allDayEvents.length > 0 && (
                 <div className="flex border-b border-border">
                   <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
+                    <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Today</span>
                   </div>
                   {days.map((day, idx) => {
                     const ds = sod(day); const de = addDays(ds, 1)
@@ -1897,7 +1898,9 @@ export function CalendarPage() {
             <div className="sticky top-0 z-40 bg-background">
               {dayAllDayEvents.length > 0 && (
                 <div className="flex border-b border-border">
-                  <div className="w-12 shrink-0" />
+                  <div className="w-12 shrink-0 flex items-center justify-end pr-2">
+                  <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Today</span>
+                </div>
                   <div className="flex flex-1 flex-col gap-0.5 border-l border-r border-border px-0.5 py-0.5">
                     {dayAllDayEvents.map((e) => (
                       <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status !== 'pending' ? 'opacity-50 line-through' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style }}>
@@ -1961,20 +1964,28 @@ export function CalendarPage() {
       )}
 
       {belowFoldDuePins.length > 0 && !isLoading && (
-        <div className="shrink-0 flex items-center gap-1.5 overflow-x-auto border-t border-border bg-background px-3 py-1.5" style={{ scrollbarWidth: 'none' }}>
-          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Due</span>
-          {belowFoldDuePins.map((o) => {
-            const { className, style } = eventAllDayColors(o)
-            const time = new Date(o.startAt!).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+        <div className="shrink-0 flex border-t border-border bg-background">
+          <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
+            <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Due</span>
+          </div>
+          {days.map((day, idx) => {
+            const ds = sod(day).getTime()
+            const dayPins = belowFoldDuePins.filter((o) => {
+              const t = new Date(o.startAt!).getTime()
+              return t >= ds && t < ds + 86400000
+            })
             return (
-              <button
-                key={o.id}
-                onClick={() => openDetail(o)}
-                className={`shrink-0 max-w-[180px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${className}`}
-                style={style}
-              >
-                {o.effectiveTitle} · {time}
-              </button>
+              <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'}`}>
+                {dayPins.map((o) => {
+                  const { className, style } = eventAllDayColors(o)
+                  const time = new Date(o.startAt!).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+                  return (
+                    <button key={o.id} onClick={() => openDetail(o)} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-80 ${className}`} style={style}>
+                      {o.effectiveTitle} · {time}
+                    </button>
+                  )
+                })}
+              </div>
             )
           })}
         </div>
