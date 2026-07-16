@@ -237,6 +237,19 @@ export function PlanPage() {
     [occurrences],
   )
 
+  // Floating occurrences have no day, so they show on every day. Planned ones
+  // belong to the suggestions panel; the plan lists only the unplanned rest.
+  const { data: allFloating = [] } = useQuery({
+    queryKey: ['events', 'floating'],
+    queryFn: () => occurrencesApi.list({ floating: true, status: 'pending' }),
+    staleTime: 30 * 1000,
+  })
+
+  const floatingEvents = useMemo(
+    () => allFloating.filter((o) => !o.isPlanned),
+    [allFloating],
+  )
+
   const isLoading = occurrencesLoading
 
   const dailyQuote = useMemo(() => {
@@ -481,6 +494,33 @@ export function PlanPage() {
                     <div className="rounded-lg border border-border">
                       <ul>
                         {plannedEvents.map((event) => (
+                          <OccurrenceListRow
+                            key={event.id}
+                            occurrence={event}
+                            timeText={agendaTimeText(event)}
+                            onEdit={openEdit}
+                            onSchedule={openSchedule}
+                          />
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
+                {/* Floating - unplanned, dateless occurrences, same on every day */}
+                {floatingEvents.length > 0 && (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Floating
+                      </h2>
+                      <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
+                        {floatingEvents.length}
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-border">
+                      <ul>
+                        {floatingEvents.map((event) => (
                           <OccurrenceListRow
                             key={event.id}
                             occurrence={event}

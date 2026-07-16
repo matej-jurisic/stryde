@@ -67,6 +67,30 @@ public static class OccurrenceEndpoints
             return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
         });
 
+        group.MapPost("/{id:guid}/subtasks", async (Guid id, CreateOccurrenceSubtaskRequest req, ClaimsPrincipal principal, OccurrenceService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var result = await svc.CreateSubtaskAsync(id, userId.Value, req);
+            return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
+        });
+
+        group.MapPut("/{id:guid}/subtasks/{subtaskId:guid}", async (Guid id, Guid subtaskId, UpdateOccurrenceSubtaskRequest req, ClaimsPrincipal principal, OccurrenceService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var result = await svc.UpdateSubtaskAsync(id, subtaskId, userId.Value, req);
+            return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
+        });
+
+        group.MapDelete("/{id:guid}/subtasks/{subtaskId:guid}", async (Guid id, Guid subtaskId, ClaimsPrincipal principal, OccurrenceService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var result = await svc.DeleteSubtaskAsync(id, subtaskId, userId.Value);
+            return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
+        });
+
         group.MapPost("/{id:guid}/subtasks/{subtaskId:guid}/toggle", async (Guid id, Guid subtaskId, ClaimsPrincipal principal, OccurrenceService svc) =>
         {
             var userId = principal.GetUserId();

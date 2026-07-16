@@ -35,8 +35,8 @@ export function OccurrenceListRow({ occurrence, timeText, onEdit, onSchedule }: 
   const isPending = occurrence.status === 'pending'
   const isDone = occurrence.status === 'done'
   const isSkipped = occurrence.status === 'skipped'
-  const hasSubtasks = occurrence.activity.subtasks.length > 0
-  const completedCount = occurrence.completedSubtaskIds.length
+  const hasSubtasks = occurrence.subtasks.length > 0
+  const completedCount = occurrence.subtasks.filter((s) => s.isDone).length
   const cat = occurrence.activity.category
   const goal = occurrence.activity.goal
 
@@ -133,9 +133,17 @@ export function OccurrenceListRow({ occurrence, timeText, onEdit, onSchedule }: 
               </span>
             )}
             {hasSubtasks && (
-              <span className="text-xs text-muted-foreground">
-                {completedCount}/{occurrence.activity.subtasks.length}
-              </span>
+              <button
+                type="button"
+                onClick={() => setSubtasksOpen(true)}
+                title="Subtasks"
+                className={`flex items-center gap-1 text-xs transition-colors hover:text-foreground ${
+                  completedCount === occurrence.subtasks.length ? 'text-primary' : 'text-muted-foreground'
+                }`}
+              >
+                <ListChecks className="h-3 w-3 shrink-0" strokeWidth={2} />
+                {completedCount}/{occurrence.subtasks.length}
+              </button>
             )}
           </div>
         )}

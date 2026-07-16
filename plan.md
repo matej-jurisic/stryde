@@ -453,6 +453,21 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 
 ---
 
+## Planned Floating Occurrences (July 2026) ✅
+
+**Goal:** Let floating occurrences carry the `IsPlanned` flag so the user can split "float this into today's suggestions" from "just keep it in the daily plan backlog".
+
+**Backend**
+- `floating=true` list filter no longer excludes `IsPlanned` occurrences - floating is purely "no dates, not all-day"
+
+**Frontend**
+- Create/edit modal: the "Planned" checkbox is available in Floating mode (switching to Floating no longer clears it)
+- Suggestions panel (desktop sidebar + mobile drawer): Floating section shows only planned floating occurrences
+- Daily Plan agenda: new "Floating" group (after Planned) with the unplanned floating occurrences, shown on every day, with Schedule action
+- Calendar FLOAT row: shows both, planned ones first
+
+---
+
 ## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.

@@ -69,7 +69,7 @@ The scheduling primitive is split into two layers:
 | Start datetime | Optional — absent for floating occurrences; window start when `IsPlanned` |
 | End datetime | Optional — window end when `IsPlanned`; deadline/duration end otherwise |
 | Is all day | Boolean — marks an all-day occurrence |
-| Is planned | Boolean — marks a flexible/windowed occurrence (dashed calendar display, never overdue) |
+| Is planned | Boolean — marks a flexible/windowed occurrence (dashed calendar display, never overdue); may also be set on a floating occurrence, which routes it to the suggestion panel |
 | Duration minutes | Optional — effort estimate in minutes, applicable to any occurrence type |
 | Status | `pending`, `done`, `skipped` |
 
@@ -79,7 +79,12 @@ Occurrences exist in one of three scheduling states:
 
 ### Floating Occurrences
 
-An occurrence with no start datetime, no end datetime, no all-day flag, and `IsPlanned = false` is floating. It appears in its category's list on the Categories page (under a "Floating" group) and is always visible in the Daily Plan suggestion panel's Floating section, from which it can be scheduled. It is not overdue and carries no urgency signal by itself.
+An occurrence with no start datetime, no end datetime, and no all-day flag is floating. `IsPlanned` may be set independently and splits where floating occurrences surface on the Daily Plan:
+
+- **Planned floating** (`IsPlanned = true`) — shown in the suggestion panel's Floating section (desktop sidebar and mobile drawer), from which it can be scheduled.
+- **Unplanned floating** (`IsPlanned = false`) — shown in the Daily Plan agenda under a "Floating" group (on every day, since it has no day of its own).
+
+The calendar's FLOAT row shows both, planned ones first. On the Categories page a planned floating occurrence groups under "Planned"; an unplanned one under "Floating". A floating occurrence is not overdue and carries no urgency signal by itself.
 
 ### Planned Occurrences
 
@@ -205,7 +210,7 @@ The start of a day (when "today" rolls over) is user-configurable in settings. S
 
 ### Recommendations (Rule-Based)
 
-The recommendation panel answers: "what should I add to today's schedule?" Floating occurrences are always visible in the panel's "Floating" section regardless of recommendations.
+The recommendation panel answers: "what should I add to today's schedule?" Planned floating occurrences are always visible in the panel's "Floating" section regardless of recommendations; unplanned floating occurrences live in the Daily Plan agenda instead.
 
 Recommendations are ranked — all tiers surface **activities** (not occurrences):
 

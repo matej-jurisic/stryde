@@ -97,6 +97,24 @@ export const activitySubtasksApi = {
     request<void>(`/api/activities/${activityId}/subtasks/${id}`, { method: 'DELETE' }),
 }
 
+export const occurrenceSubtasksApi = {
+  create: (occurrenceId: string, body: { title: string }) =>
+    request<Occurrence>(`/api/occurrences/${occurrenceId}/subtasks`, { method: 'POST', body: JSON.stringify(body) }),
+
+  update: (occurrenceId: string, id: string, body: { title: string }) =>
+    request<Occurrence>(`/api/occurrences/${occurrenceId}/subtasks/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  delete: (occurrenceId: string, id: string) =>
+    request<Occurrence>(`/api/occurrences/${occurrenceId}/subtasks/${id}`, { method: 'DELETE' }),
+}
+
+// Full subtask set for occurrence updates: id set = keep existing, id null = create new.
+// Existing subtasks missing from the list are deleted. Omit the field to leave subtasks untouched.
+export interface SubtaskInput {
+  id?: string | null
+  title: string
+}
+
 export const occurrencesApi = {
   list: (params?: { status?: string; startFrom?: string; endBefore?: string; floating?: boolean; goalId?: string; activityId?: string }) => {
     const q = new URLSearchParams()
@@ -114,7 +132,7 @@ export const occurrencesApi = {
   create: (body: { activityId: string; title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
     request<Occurrence>('/api/occurrences', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
+  update: (id: string, body: { title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null; subtasks?: SubtaskInput[] }) =>
     request<Occurrence>(`/api/occurrences/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (id: string) => request<void>(`/api/occurrences/${id}`, { method: 'DELETE' }),
@@ -128,7 +146,7 @@ export const occurrencesApi = {
   createEvent: (body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
     request<Occurrence>('/api/occurrences/event', { method: 'POST', body: JSON.stringify(body) }),
 
-  updateEvent: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
+  updateEvent: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null; subtasks?: SubtaskInput[] }) =>
     request<Occurrence>(`/api/occurrences/${id}/event`, { method: 'PUT', body: JSON.stringify(body) }),
 }
 
@@ -199,13 +217,13 @@ export const authApi = {
     request<AuthResponse>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ username, password, timezone }),
-    }),
+    }, false),
 
   login: (username: string, password: string) =>
     request<AuthResponse>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
-    }),
+    }, false),
 
   refresh: () =>
     request<AuthResponse>('/api/auth/refresh', { method: 'POST' }, false),

@@ -20,5 +20,5 @@ public class Occurrence
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public Activity Activity { get; set; } = null!;
-    public ICollection<OccurrenceSubtaskCompletion> SubtaskCompletions { get; set; } = [];
+    public List<OccurrenceSubtask> Subtasks { get; set; } = [];
 }

@@ -163,12 +163,13 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
     return order.map((label) => ({ label, items: map.get(label)! }))
   }, [recommendations])
 
-  // Floating occurrences not already in the recs list (recs are now all activities, so all floating show here)
+  // Planned floating occurrences not already in the recs list; unplanned
+  // floating ones live in the Daily Plan's Floating group instead.
   const floatingOnly = useMemo(() => {
     const recIds = new Set(
       recommendations.flatMap((r) => (r.type === 'occurrence' ? [r.occurrence.id] : [])),
     )
-    return allFloating.filter((o) => !recIds.has(o.id))
+    return allFloating.filter((o) => o.isPlanned && !recIds.has(o.id))
   }, [allFloating, recommendations])
 
   function renderBody() {

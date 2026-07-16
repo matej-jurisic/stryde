@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Plus } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
@@ -8,6 +8,12 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { occurrencesApi, activitiesApi, categoriesApi, goalsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import type { Activity, ActivityKind, Occurrence } from '@/lib/types'
+
+// Draft subtask row: id present = existing subtask, absent = added in this edit session.
+interface DraftSubtask {
+  id?: string
+  title: string
+}
 
 interface FormState {
   activityId: string
@@ -124,7 +130,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
       return 'due'
     }
     if (source) {
-      if (!source.startAt && !source.endAt && !source.isAllDay && !source.isPlanned) return 'floating'
+      if (!source.startAt && !source.endAt && !source.isAllDay) return 'floating'
       if (source.startAt && source.endAt) return 'scheduled'
       return 'due'
     }
@@ -146,6 +152,17 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
   const [newActivityTitle, setNewActivityTitle] = useState('')
   const [newActivityCategoryId, setNewActivityCategoryId] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [subtasks, setSubtasks] = useState<DraftSubtask[]>(
+    () => (occurrence?.subtasks ?? []).map((s) => ({ id: s.id, title: s.title })),
+  )
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      setSubtasks((occurrence?.subtasks ?? []).map((s) => ({ id: s.id, title: s.title })))
+      setNewSubtaskTitle('')
+    }
+  }, [open, occurrence?.id])
 
   useEffect(() => {
     if (open) setErrors({})
@@ -191,8 +208,13 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
         startAt: timeMode === 'floating' ? null : toIso(form.startAt),
         endAt: timeMode !== 'scheduled' || isAllDay ? null : toIso(form.endAt),
         isAllDay: timeMode === 'floating' ? false : isAllDay,
-        isPlanned: timeMode === 'floating' ? false : isPlanned,
+        isPlanned,
         durationMinutes,
+        // Subtasks are edited as a draft and applied here; omitted when the section
+        // is not shown so the server leaves them untouched.
+        subtasks: isEdit && !scheduleOnly
+          ? subtasks.map((s) => ({ id: s.id ?? null, title: s.title }))
+          : undefined,
       }
 
       if (kind === 'event') {
@@ -234,6 +256,17 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     onError: (err) => toastError(err, 'Could not delete the occurrence.'),
   })
 
+  function addSubtask() {
+    const title = newSubtaskTitle.trim()
+    if (!title) return
+    setSubtasks((prev) => [...prev, { title }])
+    setNewSubtaskTitle('')
+  }
+
+  function removeSubtask(index: number) {
+    setSubtasks((prev) => prev.filter((_, i) => i !== index))
+  }
+
   function handleSubmit() {
     const errs = validate(form, kind, timeMode, isPlanned)
     if (Object.keys(errs).length > 0) {
@@ -247,7 +280,6 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     setTimeMode(mode)
     if (mode === 'floating') {
       setIsAllDay(false)
-      setIsPlanned(false)
       setForm((f) => ({ ...f, startAt: '', endAt: '', durationHours: '', durationMins: '' }))
       setErrors({})
     } else if (mode === 'scheduled') {
@@ -602,17 +634,15 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                 <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(timeMode === 'scheduled')}>Scheduled</button>
                 <button type="button" onClick={() => switchMode('floating')} className={segmentClass(timeMode === 'floating')}>Floating</button>
               </div>
-              {timeMode !== 'floating' && (
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={isPlanned}
-                    onChange={(e) => setIsPlanned(e.target.checked)}
-                    className="h-4 w-4 rounded border-input accent-primary"
-                  />
-                  Planned
-                </label>
-              )}
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={isPlanned}
+                  onChange={(e) => setIsPlanned(e.target.checked)}
+                  className="h-4 w-4 rounded border-input accent-primary"
+                />
+                Planned
+              </label>
 
               {/* Scheduled: end time */}
               {timeMode === 'scheduled' && (
@@ -711,6 +741,45 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
             </>
           )}
 
+        </div>
+      )}
+
+      {isEdit && !scheduleOnly && (
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Subtasks</span>
+          {subtasks.length > 0 && (
+            <ul className="flex flex-col divide-y divide-border rounded-lg border border-border">
+              {subtasks.map((s, i) => (
+                <li key={s.id ?? `new-${i}`} className="flex items-center gap-3 px-3 py-2.5">
+                  <span className="flex-1 text-sm text-foreground">{s.title}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeSubtask(i)}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-2">
+            <input
+              value={newSubtaskTitle}
+              onChange={(e) => setNewSubtaskTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSubtask() } }}
+              placeholder="Add subtask..."
+              className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={addSubtask}
+              disabled={!newSubtaskTitle.trim()}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
       )}
 

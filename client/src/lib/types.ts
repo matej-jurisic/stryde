@@ -77,6 +77,14 @@ export interface ActivitySubtask {
   createdAt: string
 }
 
+export interface OccurrenceSubtask {
+  id: string
+  occurrenceId: string
+  title: string
+  isDone: boolean
+  createdAt: string
+}
+
 export interface Activity {
   id: string
   userId: string
@@ -104,7 +112,7 @@ export interface Occurrence {
   durationMinutes: number | null
   createdAt: string
   isOverdue: boolean
-  completedSubtaskIds: string[]
+  subtasks: OccurrenceSubtask[]
   activity: Activity
 }
 

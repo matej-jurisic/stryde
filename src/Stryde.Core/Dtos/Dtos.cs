@@ -49,7 +49,7 @@ public sealed record ActivityDto(
 public sealed record CreateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
 public sealed record UpdateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
 
-// Activity subtasks
+// Activity subtasks (template)
 public sealed record ActivitySubtaskDto(Guid Id, Guid ActivityId, string Title, DateTimeOffset CreatedAt)
 {
     public static ActivitySubtaskDto FromEntity(ActivitySubtask s) => new(s.Id, s.ActivityId, s.Title, s.CreatedAt);
@@ -57,6 +57,19 @@ public sealed record ActivitySubtaskDto(Guid Id, Guid ActivityId, string Title, 
 
 public sealed record CreateActivitySubtaskRequest(string Title);
 public sealed record UpdateActivitySubtaskRequest(string Title);
+
+// Occurrence subtasks (per-occurrence copy)
+public sealed record OccurrenceSubtaskDto(Guid Id, Guid OccurrenceId, string Title, bool IsDone, DateTimeOffset CreatedAt)
+{
+    public static OccurrenceSubtaskDto FromEntity(OccurrenceSubtask s) => new(s.Id, s.OccurrenceId, s.Title, s.IsDone, s.CreatedAt);
+}
+
+public sealed record CreateOccurrenceSubtaskRequest(string Title);
+public sealed record UpdateOccurrenceSubtaskRequest(string Title);
+
+// Full-set subtask input for occurrence updates: Id set = keep existing (IsDone preserved),
+// Id null = create new. Existing subtasks missing from the list are deleted. Null list = leave untouched.
+public sealed record OccurrenceSubtaskInput(Guid? Id, string Title);
 
 public sealed record CreateEventRequest(
     string Title,
@@ -76,7 +89,8 @@ public sealed record UpdateEventRequest(
     DateTimeOffset? EndAt,
     bool IsAllDay,
     bool IsPlanned,
-    int? DurationMinutes);
+    int? DurationMinutes,
+    List<OccurrenceSubtaskInput>? Subtasks = null);
 
 // Occurrences
 public sealed record OccurrenceDto(
@@ -96,7 +110,7 @@ public sealed record OccurrenceDto(
     DateTimeOffset? WindowStart,
     DateTimeOffset? WindowEnd,
     int? WindowDurationMinutes,
-    List<Guid> CompletedSubtaskIds,
+    List<OccurrenceSubtaskDto> Subtasks,
     ActivityDto Activity)
 {
     public static OccurrenceDto FromEntity(Occurrence o, DayContext ctx, DateTimeOffset nowUtc) => new(
@@ -108,7 +122,7 @@ public sealed record OccurrenceDto(
         o.IsAllDay,
         o.IsPlanned, o.DurationMinutes,
         o.WindowStart, o.WindowEnd, o.WindowDurationMinutes,
-        o.SubtaskCompletions.Select(c => c.SubtaskId).ToList(),
+        o.Subtasks.OrderBy(s => s.CreatedAt).Select(OccurrenceSubtaskDto.FromEntity).ToList(),
         ActivityDto.FromEntity(o.Activity));
 }
 
@@ -130,7 +144,8 @@ public sealed record UpdateOccurrenceRequest(
     DateTimeOffset? EndAt,
     bool IsAllDay,
     bool IsPlanned,
-    int? DurationMinutes);
+    int? DurationMinutes,
+    List<OccurrenceSubtaskInput>? Subtasks = null);
 
 public sealed record SetOccurrenceStatusRequest(EventStatus Status);
 

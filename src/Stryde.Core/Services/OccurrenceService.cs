@@ -40,18 +40,22 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             WindowDurationMinutes = req.WindowDurationMinutes,
         };
 
+        var subtaskCopies = activity.Subtasks
+            .OrderBy(s => s.CreatedAt)
+            .Select(s => new OccurrenceSubtask { OccurrenceId = o.Id, Title = s.Title })
+            .ToList();
+
         db.Occurrences.Add(o);
+        db.OccurrenceSubtasks.AddRange(subtaskCopies);
+        o.Subtasks = subtaskCopies;
+
         await db.SaveChangesAsync();
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
     }
 
     public async Task<Result<OccurrenceDto>> GetAsync(Guid id, Guid userId)
     {
-        var o = await db.Occurrences
-            .Include(o => o.Activity).ThenInclude(a => a.Category)
-            .Include(o => o.Activity).ThenInclude(a => a.Goal)
-            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
-            .Include(o => o.SubtaskCompletions)
+        var o = await WithFullIncludes()
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
@@ -66,15 +70,11 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         Guid? goalId = null,
         Guid? activityId = null)
     {
-        var query = db.Occurrences
-            .Include(o => o.Activity).ThenInclude(a => a.Category)
-            .Include(o => o.Activity).ThenInclude(a => a.Goal)
-            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
-            .Include(o => o.SubtaskCompletions)
+        var query = WithFullIncludes()
             .Where(o => o.UserId == userId);
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
-        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.EndAt == null && o.WindowStart == null && !o.IsAllDay && !o.IsPlanned);
+        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.EndAt == null && o.WindowStart == null && !o.IsAllDay);
         if (goalId.HasValue) query = query.Where(o => o.Activity.GoalId == goalId.Value);
         if (activityId.HasValue) query = query.Where(o => o.ActivityId == activityId.Value);
 
@@ -118,14 +118,11 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
     {
         var err = ValidateOptionalTitle(req.Title)
             ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
-            ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes);
+            ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes)
+            ?? ValidateSubtaskInputs(req.Subtasks);
         if (err is not null) return Result<OccurrenceDto>.Fail(err);
 
-        var o = await db.Occurrences
-            .Include(o => o.Activity).ThenInclude(a => a.Category)
-            .Include(o => o.Activity).ThenInclude(a => a.Goal)
-            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
-            .Include(o => o.SubtaskCompletions)
+        var o = await WithFullIncludes()
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
 
@@ -135,6 +132,9 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         o.IsAllDay = req.IsAllDay;
         o.IsPlanned = req.IsPlanned;
         o.DurationMinutes = req.DurationMinutes;
+
+        var subtaskErr = ApplySubtasks(o, req.Subtasks);
+        if (subtaskErr is not null) return Result<OccurrenceDto>.Fail(subtaskErr);
 
         await db.SaveChangesAsync();
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
@@ -209,14 +209,11 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
     {
         var err = Validators.ValidateTitle(req.Title, "Title")
             ?? Validators.ValidateDateRange(req.StartAt, req.EndAt)
-            ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes);
+            ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes)
+            ?? ValidateSubtaskInputs(req.Subtasks);
         if (err is not null) return Result<OccurrenceDto>.Fail(err);
 
-        var o = await db.Occurrences
-            .Include(o => o.Activity).ThenInclude(a => a.Category)
-            .Include(o => o.Activity).ThenInclude(a => a.Goal)
-            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
-            .Include(o => o.SubtaskCompletions)
+        var o = await WithFullIncludes()
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
         if (o.Activity.Kind != ActivityKind.@event)
@@ -256,17 +253,16 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         o.IsPlanned = req.IsPlanned;
         o.DurationMinutes = req.DurationMinutes;
 
+        var subtaskErr = ApplySubtasks(o, req.Subtasks);
+        if (subtaskErr is not null) return Result<OccurrenceDto>.Fail(subtaskErr);
+
         await db.SaveChangesAsync();
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
     }
 
     public async Task<Result<OccurrenceDto>> SetStatusAsync(Guid id, Guid userId, EventStatus status)
     {
-        var o = await db.Occurrences
-            .Include(o => o.Activity).ThenInclude(a => a.Category)
-            .Include(o => o.Activity).ThenInclude(a => a.Goal)
-            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
-            .Include(o => o.SubtaskCompletions)
+        var o = await WithFullIncludes()
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
         o.Status = status;
@@ -276,23 +272,63 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
 
     public async Task<Result<OccurrenceDto>> ToggleSubtaskAsync(Guid id, Guid subtaskId, Guid userId)
     {
-        var o = await db.Occurrences
-            .Include(o => o.Activity).ThenInclude(a => a.Category)
-            .Include(o => o.Activity).ThenInclude(a => a.Goal)
-            .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
-            .Include(o => o.SubtaskCompletions)
+        var o = await WithFullIncludes()
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
 
-        var subtask = o.Activity.Subtasks.FirstOrDefault(s => s.Id == subtaskId);
+        var subtask = o.Subtasks.FirstOrDefault(s => s.Id == subtaskId);
         if (subtask is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Subtask not found."));
 
-        var existing = o.SubtaskCompletions.FirstOrDefault(c => c.SubtaskId == subtaskId);
-        if (existing is not null)
-            db.OccurrenceSubtaskCompletions.Remove(existing);
-        else
-            db.OccurrenceSubtaskCompletions.Add(new OccurrenceSubtaskCompletion { OccurrenceId = id, SubtaskId = subtaskId });
+        subtask.IsDone = !subtask.IsDone;
+        await db.SaveChangesAsync();
+        return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
+    }
 
+    public async Task<Result<OccurrenceDto>> CreateSubtaskAsync(Guid id, Guid userId, CreateOccurrenceSubtaskRequest req)
+    {
+        var err = Validators.ValidateTitle(req.Title, "Title");
+        if (err is not null) return Result<OccurrenceDto>.Fail(err);
+
+        var o = await WithFullIncludes()
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+        if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
+
+        // Explicit Add forces the Added state (the pre-set Guid key would otherwise make
+        // change detection treat it as an existing row); fixup then puts it into o.Subtasks.
+        var subtask = new OccurrenceSubtask { OccurrenceId = id, Title = req.Title.Trim() };
+        db.OccurrenceSubtasks.Add(subtask);
+        await db.SaveChangesAsync();
+        return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
+    }
+
+    public async Task<Result<OccurrenceDto>> UpdateSubtaskAsync(Guid id, Guid subtaskId, Guid userId, UpdateOccurrenceSubtaskRequest req)
+    {
+        var err = Validators.ValidateTitle(req.Title, "Title");
+        if (err is not null) return Result<OccurrenceDto>.Fail(err);
+
+        var o = await WithFullIncludes()
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+        if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
+
+        var subtask = o.Subtasks.FirstOrDefault(s => s.Id == subtaskId);
+        if (subtask is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Subtask not found."));
+
+        subtask.Title = req.Title.Trim();
+        await db.SaveChangesAsync();
+        return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
+    }
+
+    public async Task<Result<OccurrenceDto>> DeleteSubtaskAsync(Guid id, Guid subtaskId, Guid userId)
+    {
+        var o = await WithFullIncludes()
+            .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
+        if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
+
+        var subtask = o.Subtasks.FirstOrDefault(s => s.Id == subtaskId);
+        if (subtask is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Subtask not found."));
+
+        o.Subtasks.Remove(subtask);
+        db.OccurrenceSubtasks.Remove(subtask);
         await db.SaveChangesAsync();
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
     }
@@ -308,7 +344,50 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             .Include(o => o.Activity).ThenInclude(a => a.Category)
             .Include(o => o.Activity).ThenInclude(a => a.Goal)
             .Include(o => o.Activity).ThenInclude(a => a.Subtasks)
-            .Include(o => o.SubtaskCompletions);
+            .Include(o => o.Subtasks);
+
+    private static Error? ValidateSubtaskInputs(List<OccurrenceSubtaskInput>? inputs)
+    {
+        if (inputs is null) return null;
+        foreach (var input in inputs)
+        {
+            var err = Validators.ValidateTitle(input.Title, "Subtask title");
+            if (err is not null) return err;
+        }
+        return null;
+    }
+
+    // Reconciles the occurrence's subtasks with the full set from the request:
+    // known ids are kept (title updated, IsDone preserved), missing ids are deleted,
+    // null-id entries are created. A null list leaves subtasks untouched.
+    private Error? ApplySubtasks(Occurrence o, List<OccurrenceSubtaskInput>? inputs)
+    {
+        if (inputs is null) return null;
+
+        var existing = o.Subtasks.ToDictionary(s => s.Id);
+        var keptIds = inputs.Where(i => i.Id.HasValue).Select(i => i.Id!.Value).ToHashSet();
+
+        if (!keptIds.All(existing.ContainsKey))
+            return new Error(ErrorType.NotFound, "Subtask not found.");
+
+        foreach (var removed in o.Subtasks.Where(s => !keptIds.Contains(s.Id)).ToList())
+        {
+            o.Subtasks.Remove(removed);
+            db.OccurrenceSubtasks.Remove(removed);
+        }
+
+        foreach (var input in inputs)
+        {
+            if (input.Id.HasValue)
+                existing[input.Id.Value].Title = input.Title.Trim();
+            else
+                // Explicit Add forces the Added state (the pre-set Guid key would otherwise
+                // make change detection treat it as an existing row); fixup adds it to o.Subtasks.
+                db.OccurrenceSubtasks.Add(new OccurrenceSubtask { OccurrenceId = o.Id, Title = input.Title.Trim() });
+        }
+
+        return null;
+    }
 
     private static Error? ValidateWindowAndStartAt(DateTimeOffset? startAt, DateTimeOffset? windowStart) =>
         startAt.HasValue && windowStart.HasValue
