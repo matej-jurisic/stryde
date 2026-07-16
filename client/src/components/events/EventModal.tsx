@@ -38,7 +38,6 @@ function validate(form: FormState, kind: ActivityKind, timeMode: TimeMode, isPla
   }
   if (form.durationHours || form.durationMins) {
     const totalMins = (parseInt(form.durationHours || '0') * 60) + parseInt(form.durationMins || '0')
-    if (totalMins <= 0) errs.duration = 'Duration must be greater than zero.'
     if (isPlanned && timeMode === 'scheduled' && form.startAt && form.endAt) {
       const windowMins = (new Date(form.endAt).getTime() - new Date(form.startAt).getTime()) / 60000
       if (totalMins > windowMins) errs.duration = 'Duration cannot exceed the length of the window.'
@@ -65,12 +64,16 @@ function toIso(local: string): string | null {
   return new Date(local).toISOString()
 }
 
-function addOneHour(dtLocal: string): string {
+function addMinutes(dtLocal: string, minutes: number): string {
   if (!dtLocal) return ''
   const d = new Date(dtLocal)
-  d.setHours(d.getHours() + 1)
+  d.setMinutes(d.getMinutes() + minutes)
   const z = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`
+}
+
+function addOneHour(dtLocal: string): string {
+  return addMinutes(dtLocal, 60)
 }
 
 function durationToHM(minutes: number | null): { h: string; m: string } {
@@ -106,7 +109,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     title: isEventKind ? (source?.activity.title ?? '') : (occurrence?.title ?? duplicateFrom?.title ?? ''),
     categoryId: source?.activity.categoryId ?? '',
     goalId: source?.activity.goalId ?? '',
-    startAt: occurrence ? toInputValue(occurrence.startAt) : (duplicateFrom ? toInputValue(duplicateFrom.startAt) : (defaultStartAt ?? todayLocal())),
+    startAt: occurrence ? (toInputValue(occurrence.startAt) || (scheduleOnly ? todayLocal() : '')) : (duplicateFrom ? toInputValue(duplicateFrom.startAt) : (defaultStartAt ?? todayLocal())),
     endAt: occurrence ? toInputValue(occurrence.endAt) : (duplicateFrom ? toInputValue(duplicateFrom.endAt) : (defaultEndAt ?? '')),
     durationHours: dur.h,
     durationMins: dur.m,
@@ -250,7 +253,8 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     } else if (mode === 'scheduled') {
       setIsAllDay(false)
       if (!form.endAt && form.startAt) {
-        setForm((f) => ({ ...f, endAt: addOneHour(f.startAt) }))
+        const durationMins = (parseInt(form.durationHours || '0') * 60) + parseInt(form.durationMins || '0')
+        setForm((f) => ({ ...f, endAt: durationMins > 0 ? addMinutes(f.startAt, durationMins) : addOneHour(f.startAt) }))
       }
       setErrors({})
     } else {
@@ -294,7 +298,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     ? (kind === 'event' ? 'Edit Event' : 'Edit Occurrence')
     : (kind === 'event' ? 'New Event' : 'New Occurrence')
 
-  const showDuration = !scheduleOnly && isPlanned && timeMode !== 'floating'
+  const showDuration = !scheduleOnly
 
   const allDayButton = (
     <button
@@ -621,11 +625,11 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                 />
               )}
 
-              {/* Duration estimate (planned only) */}
+              {/* Duration */}
               {showDuration && (
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium text-foreground">
-                    Duration estimate <span className="font-normal text-muted-foreground">(optional)</span>
+                    Duration <span className="font-normal text-muted-foreground">(optional)</span>
                   </label>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">

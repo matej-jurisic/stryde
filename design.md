@@ -150,6 +150,10 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - **Only `shadow-pop`** on floating elements: modals, dropdowns, popovers.
 - `shadow-pop: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.06)`.
 
+### Scrollbars
+
+- Internal scroll areas (sidebar category list, suggestions panel, calendar grid) use the `.scroll-slim` utility from `index.css`: a thin scrollbar whose thumb is invisible until the container is hovered, tinted from `--muted-foreground`. Never leave a default OS scrollbar visible inside a panel.
+
 ### Sidebar & Panel Animations
 
 The left sidebar and the middle recommendation panel slide in/out with CSS transitions when toggled. Use `transition-all duration-300` (or equivalent) on the width/transform; content fades with it. Never animate the canvas width directly — only the panel element.
@@ -186,7 +190,7 @@ Mobile: single column, agenda first, recommendations collapsed behind a toggle.
 ## Insights Page
 
 - **KPI row:** 4 stat tiles (2×2 on mobile, 1×4 on desktop): label in `text-xs text-muted-foreground`, value `text-2xl font-semibold`.
-- **14-day completion chart:** single-series column chart in `bg-primary` — no legend. Columns max 24px wide, 4px rounded top, square baseline on a hairline `border-border`; zero days show a 2px `bg-muted` stub. Weekday initials below, per-column hover tooltip (card + `shadow-pop`) with date and count. Values live in tooltips, not on every bar.
+- **14-day completion chart:** single-series column chart in `bg-primary` — no legend. Columns max 24px wide, 4px rounded top, square baseline on a hairline `border-border`; zero days show a 2px `bg-muted` stub. Per-column hover tooltip (card + `shadow-pop`) with date and count. Values live in tooltips, not on every column.
 - **Category breakdown:** rows with category icon + name (text tokens, never colored text), count right-aligned (`tabular-nums`), and a 4px proportional bar in the category's own color on a `bg-muted` track. Uncategorized uses `CircleDashed` + muted tones.
 
 ---

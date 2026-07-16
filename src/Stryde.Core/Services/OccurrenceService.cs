@@ -326,8 +326,6 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         DateTimeOffset? endAt,
         int? durationMinutes)
     {
-        if (durationMinutes.HasValue && durationMinutes.Value <= 0)
-            return new Error(ErrorType.Validation, "Duration must be greater than zero.");
         if (isPlanned && startAt.HasValue && endAt.HasValue && durationMinutes.HasValue)
         {
             var windowMinutes = (int)(endAt.Value - startAt.Value).TotalMinutes;

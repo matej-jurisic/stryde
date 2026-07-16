@@ -441,6 +441,18 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 
 ---
 
+## Unaccounted Time Breakdown (July 2026) ✅
+
+**Goal:** Make the unaccounted time insight actionable - a lone average said nothing about when the gaps are or whether things are improving.
+
+**Backend**
+- `InsightsDto` gains `prevAvgUnaccountedMinutesPerDay` (same stat over the immediately preceding window, for the trend), `largestGaps` (top 5 contiguous untracked stretches on tracked days; overnight occurrences cover the next morning) and `unusedBlocks` (top 3 runs of hour slots empty on a strict majority of tracked days) - rules in spec.md Insights table
+
+**Frontend**
+- Insights page: unaccounted stat tile replaced with a card - headline average, trend line vs the previous period, "Biggest empty blocks" list (date, time range, duration) and "Often empty" list (time range, empty on X of Y days). The "log sleep" hint text is gone. (A per-day column strip version was built and replaced with the gap lists in the same pass.)
+
+---
+
 ## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.

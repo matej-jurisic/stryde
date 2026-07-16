@@ -198,7 +198,19 @@ public sealed record InsightsActivityDto(Guid ActivityId, string Title, string? 
 
 public sealed record InsightsCategoryDto(Guid? CategoryId, string? Name, string? Color, string? Icon, int Done, int TimeMinutes);
 
-public sealed record InsightsDto(List<InsightsActivityDto> Activities, List<InsightsCategoryDto> Categories, int? AvgUnaccountedMinutesPerDay);
+// A contiguous stretch of a tracked day with nothing logged. Start/End are local clock times ("HH:mm").
+public sealed record InsightsGapDto(string Day, string Start, string End, int Minutes);
+
+// A run of hour slots that is empty on most tracked days. EmptyDays uses the run's weakest slot.
+public sealed record InsightsUnusedBlockDto(string Start, string End, int EmptyDays, int Days);
+
+public sealed record InsightsDto(
+    List<InsightsActivityDto> Activities,
+    List<InsightsCategoryDto> Categories,
+    int? AvgUnaccountedMinutesPerDay,
+    int? PrevAvgUnaccountedMinutesPerDay,
+    List<InsightsGapDto> LargestGaps,
+    List<InsightsUnusedBlockDto> UnusedBlocks);
 
 // UserSettings
 public sealed record UserSettingsDto(Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone)

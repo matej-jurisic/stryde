@@ -257,7 +257,7 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
           <h1 className="text-lg font-semibold text-foreground">Suggestions</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">What to add to your schedule today.</p>
         </div>
-        <div className="flex-1 overflow-y-auto px-3 pb-6">{renderBody()}</div>
+        <div className="scroll-slim flex-1 overflow-y-auto px-3 pb-6">{renderBody()}</div>
       </section>
 
       {/* Mobile drawer */}
@@ -277,7 +277,7 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
                 <X className="h-4 w-4" strokeWidth={2} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto px-3 pb-6">{renderBody()}</div>
+            <div className="scroll-slim flex-1 overflow-y-auto px-3 pb-6">{renderBody()}</div>
           </div>
         </div>
       )}

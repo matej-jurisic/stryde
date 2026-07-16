@@ -129,10 +129,27 @@ export interface InsightsCategory {
   timeMinutes: number
 }
 
+export interface InsightsGap {
+  day: string
+  start: string
+  end: string
+  minutes: number
+}
+
+export interface InsightsUnusedBlock {
+  start: string
+  end: string
+  emptyDays: number
+  days: number
+}
+
 export interface Insights {
   activities: InsightsActivity[]
   categories: InsightsCategory[]
   avgUnaccountedMinutesPerDay: number | null
+  prevAvgUnaccountedMinutesPerDay: number | null
+  largestGaps: InsightsGap[]
+  unusedBlocks: InsightsUnusedBlock[]
 }
 
 export interface UserSettings {

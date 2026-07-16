@@ -254,6 +254,9 @@ Read-only stats over **done occurrences**, computed server-side (`GET /api/insig
 | Current streak | Consecutive days with at least one completion, counting back from today. A today with no completion yet does not break the streak — it then counts back from yesterday. |
 | Daily series | Per-day done counts for the last 14 days. |
 | Category breakdown | Done counts per category over the last 30 days; completions of uncategorized activities appear as a "No category" bucket. |
+| Avg unaccounted time | Per day: `1440 − sum(durations)` of done occurrences (duration = `EndAt − StartAt`, else `DurationMinutes`), clamped at 0; averaged over "tracked days" (days with at least one timed occurrence starting that day), null when no such day exists. Also computed for the immediately preceding window of the same length, for the trend comparison. |
+| Largest gaps | Top 5 contiguous untracked stretches across the window's tracked days. Busy intervals come from all completed timed occurrences (so an overnight occurrence covers the next morning), clamped to each day's boundary-to-boundary span and merged before gaps are read off. Times are local clock strings. |
+| Unused blocks | Top 3 maximal runs of consecutive 1-hour slots (aligned to the day boundary) that are fully empty on a strict majority of tracked days, ranked by days-empty (a run's weakest slot) then length. |
 
 ---
 

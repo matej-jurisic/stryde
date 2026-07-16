@@ -4,7 +4,7 @@ import { CircleDashed } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { insightsApi } from '@/lib/api'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
-import type { InsightsActivity, InsightsCategory } from '@/lib/types'
+import type { InsightsActivity, InsightsCategory, InsightsGap, InsightsUnusedBlock } from '@/lib/types'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -14,6 +14,14 @@ function formatTime(minutes: number): string {
   if (h === 0) return `${m}min`
   if (m === 0) return `${h}h`
   return `${h}h ${m}min`
+}
+
+function formatDay(day: string): string {
+  return new Date(`${day}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 // ── sub-components ─────────────────────────────────────────────────────────
@@ -35,6 +43,97 @@ function PeriodToggle({ value, onChange }: { value: number; onChange: (v: number
         </button>
       ))}
     </div>
+  )
+}
+
+function trendLabel(avg: number, prevAvg: number, period: number): string {
+  const diff = avg - prevAvg
+  if (diff === 0) return `Same as the previous ${period} days`
+  const direction = diff < 0 ? 'less' : 'more'
+  return `${formatTime(Math.abs(diff))} ${direction} than the previous ${period} days`
+}
+
+function UnaccountedTimeSections({
+  avg,
+  prevAvg,
+  gaps,
+  blocks,
+  period,
+}: {
+  avg: number
+  prevAvg: number | null
+  gaps: InsightsGap[]
+  blocks: InsightsUnusedBlock[]
+  period: number
+}) {
+  return (
+    <>
+      <section>
+        <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Unaccounted time
+        </p>
+        <div className="overflow-hidden rounded-lg border border-border">
+          <div className="px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-foreground">Average per day</span>
+              <span className="ml-auto shrink-0 text-sm tabular-nums text-foreground">
+                {formatTime(avg)}
+              </span>
+            </div>
+            {prevAvg != null && (
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {trendLabel(avg, prevAvg, period)}
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {gaps.length > 0 && (
+        <section>
+          <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Biggest empty blocks
+          </p>
+          <div className="overflow-hidden rounded-lg border border-border">
+            <ul className="divide-y divide-border">
+              {gaps.map((g, i) => (
+                <li key={i} className="flex items-center gap-2 px-4 py-3">
+                  <span className="truncate text-sm text-foreground">{formatDay(g.day)}</span>
+                  <span className="shrink-0 text-sm tabular-nums text-muted-foreground">
+                    {g.start} - {g.end}
+                  </span>
+                  <span className="ml-auto shrink-0 text-sm tabular-nums text-foreground">
+                    {formatTime(g.minutes)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
+
+      {blocks.length > 0 && (
+        <section>
+          <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Often empty
+          </p>
+          <div className="overflow-hidden rounded-lg border border-border">
+            <ul className="divide-y divide-border">
+              {blocks.map((b, i) => (
+                <li key={i} className="flex items-center gap-2 px-4 py-3">
+                  <span className="text-sm tabular-nums text-foreground">
+                    {b.start} - {b.end}
+                  </span>
+                  <span className="ml-auto shrink-0 text-sm text-muted-foreground">
+                    empty on {b.emptyDays} of {b.days} days
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
+    </>
   )
 }
 
@@ -145,17 +244,13 @@ export function InsightsPage() {
               <PeriodToggle value={period} onChange={(v) => setPeriod(v as 7 | 30)} />
 
               {data.avgUnaccountedMinutesPerDay != null && (
-                <div className="rounded-lg border border-border bg-card px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-foreground">Avg unaccounted time per day</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Time with no logged occurrence - log sleep to reduce this
-                    </p>
-                  </div>
-                  <span className="text-lg font-semibold tabular-nums text-foreground">
-                    {formatTime(data.avgUnaccountedMinutesPerDay)}
-                  </span>
-                </div>
+                <UnaccountedTimeSections
+                  avg={data.avgUnaccountedMinutesPerDay}
+                  prevAvg={data.prevAvgUnaccountedMinutesPerDay}
+                  gaps={data.largestGaps}
+                  blocks={data.unusedBlocks}
+                  period={period}
+                />
               )}
 
               <section>

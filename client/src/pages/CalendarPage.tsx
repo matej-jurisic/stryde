@@ -120,7 +120,7 @@ function layoutDay(events: Occurrence[], day: Date, hourPx: number): LayoutEvent
     .filter((e) => !!e.startAt)
     .map((e) => {
       const startMs = new Date(e.startAt!).getTime()
-      const endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + 15 * 60 * 1000
+      const endMs = e.endAt ? new Date(e.endAt).getTime() : startMs + DUE_SPAN_MINUTES * 60 * 1000
       // Clip to this day's boundaries (handles cross-midnight events)
       const clipStartMin = Math.max((startMs - dayStartMs) / 60000, 0)
       const clipEndMin = Math.min((endMs - dayStartMs) / 60000, 24 * 60)
@@ -157,7 +157,10 @@ function layoutDay(events: Occurrence[], day: Date, hourPx: number): LayoutEvent
       col: colIdx[i],
       totalCols: maxC + 1,
       topPx: (s / 60) * hourPx,
-      heightPx: Math.max(((end - s) / 60) * hourPx, 28),
+      // Due pins keep their exact 30-minute height so they scale with zoom
+      heightPx: isDueOccurrence(event)
+        ? ((end - s) / 60) * hourPx
+        : Math.max(((end - s) / 60) * hourPx, 28),
       trueEndPx: (end / 60) * hourPx,
     }
   })
@@ -165,10 +168,22 @@ function layoutDay(events: Occurrence[], day: Date, hourPx: number): LayoutEvent
 
 // ── Due occurrence helper ───────────────────────────────────────────────────
 
-const DUE_PIN_HEIGHT = 18
+// Due pins render as a 30-minute block: the smallest span that stays readable
+// at max zoom out (30 min at MIN_HOUR_PX = 16px), scaling up with zoom.
+const DUE_SPAN_MINUTES = 30
+
+function duePinHeight(hourPx: number): number {
+  return (DUE_SPAN_MINUTES / 60) * hourPx
+}
 
 function isDueOccurrence(o: Occurrence): boolean {
   return !!o.startAt && !o.endAt
+}
+
+function isEODDue(o: Occurrence): boolean {
+  if (!isDueOccurrence(o)) return false
+  const d = new Date(o.startAt!)
+  return d.getHours() > 23 || (d.getHours() === 23 && d.getMinutes() >= 30)
 }
 
 // ── Event coloring ──────────────────────────────────────────────────────────
@@ -267,7 +282,7 @@ function EventBlock({
       data-true-end-px={trueEndPx}
       style={{
         top: topPx + GAP,
-        height: isDue ? DUE_PIN_HEIGHT : Math.max(heightPx - GAP, 20),
+        height: Math.max(heightPx - GAP, isDue ? 14 : 20),
         left: `calc(${leftPct}% + ${GAP}px)`,
         width: `calc(${widthPct}% - ${GAP * 2}px)`,
         zIndex: isResizing ? 25 : undefined,
@@ -276,7 +291,7 @@ function EventBlock({
       {isDue ? (
         /* Due pin — flat deadline marker, no resize handles */
         <button
-          className={`absolute inset-0 flex items-center overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : isSkipped ? 'opacity-25' : ''}`}
+          className={`absolute inset-0 flex items-start overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : isSkipped ? 'opacity-25' : ''}`}
           style={{
             border: isPlanned ? `1.5px dashed ${accentColor}` : `1px solid ${accentColor}`,
             backgroundColor: `${accentColor}18`,
@@ -286,7 +301,7 @@ function EventBlock({
           onClick={bodyPointerProps.onClick}
         >
           <div style={{ width: 3, minWidth: 3, alignSelf: 'stretch', background: leftColor }} className="shrink-0" />
-          <div className="flex min-w-0 flex-1 items-center gap-1 px-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-0.5">
             <p
               className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] font-medium leading-none ${isDone ? 'line-through text-muted-foreground' : isSkipped ? 'text-muted-foreground' : ''}`}
               style={isDone || isSkipped ? undefined : { color: accentColor }}
@@ -445,8 +460,10 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
     () =>
       allEvents.filter((e) => {
         if (!e.startAt) return false
+        // EOD due pins never render in the grid; they live in the sticky Due row
+        if (isEODDue(e)) return false
         const startMs = new Date(e.startAt).getTime()
-        // Events without endAt are point-in-time due pins — only show in the day their start falls in
+        // Due pins are point-in-time — only show in the day their start falls in
         if (!e.endAt) return startMs >= dayStart.getTime() && startMs < dayEnd.getTime()
         const endMs = new Date(e.endAt).getTime()
         return startMs < dayEnd.getTime() && endMs > dayStart.getTime()
@@ -464,8 +481,8 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
       className={`relative flex-1 ${borderLeft ? 'border-l border-border' : ''} ${borderRight ? 'border-r border-border' : ''}`}
       style={{ minHeight: hourPx * 24 }}
     >
-      {/* Hour lines — skip h=0, sticky header border-b already provides that separator */}
-      {Array.from({ length: 24 }, (_, h) => h > 0 && (
+      {/* Hour lines, incl. the 24:00 closing line — skip h=0, sticky header border-b already provides that separator */}
+      {Array.from({ length: 25 }, (_, h) => h > 0 && (
         <div
           key={h}
           className="absolute inset-x-0 border-t border-border"
@@ -652,7 +669,7 @@ function FloatingTasksRow({
                   className={`shrink-0 max-w-[160px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${movingEventId === o.id ? 'opacity-20' : pendingDragId === o.id ? 'opacity-50 scale-95' : ''} ${className}`}
                   style={{ touchAction: 'none', ...style }}
                 >
-                  {o.effectiveTitle}
+                  {o.effectiveTitle}{o.durationMinutes ? ` ~${o.durationMinutes >= 60 ? `${Math.floor(o.durationMinutes / 60)}h${o.durationMinutes % 60 ? `${o.durationMinutes % 60}m` : ''}` : `${o.durationMinutes}m`}` : ''}
                 </button>
               )
             })}
@@ -735,7 +752,7 @@ export function CalendarPage() {
     side: 'top' | 'bottom'
   } | null>(null)
   const swipeRef = useRef<{ direction: 'horizontal' | 'vertical'; startX: number } | null>(null)
-  const allDayDragStateRef = useRef<{ durationMinutes: number; curDayIdx: number } | null>(null)
+  const allDayDragStateRef = useRef<{ durationMinutes: number; curDayIdx: number; isDue: boolean } | null>(null)
   const allDayDragActiveRef = useRef(false)
   const floatRowRef = useRef<HTMLDivElement>(null)
   const allDayRowRef = useRef<HTMLDivElement>(null)
@@ -1039,8 +1056,8 @@ export function CalendarPage() {
     // Short events render with a minimum height that extends the block below
     // the event's true end time. A pointer landing in that overflow zone falls
     // through to the grid (no stopPropagation) so drag-to-create still works in
-    // the slot right after the event. Due pins are exempt: their fixed pin
-    // height routinely exceeds their 15-minute span.
+    // the slot right after the event. Due pins are exempt: their height always
+    // matches their 30-minute span exactly, so there is no overflow zone.
     if (!isDue) {
       const block = (e.target as Element).closest('[data-true-end-px]') as HTMLElement | null
       const trueEndPx = block ? parseFloat(block.dataset.trueEndPx ?? '') : NaN
@@ -1057,7 +1074,7 @@ export function CalendarPage() {
     e.stopPropagation()
 
     const startMs = new Date(event.startAt!).getTime()
-    const endMs = event.endAt ? new Date(event.endAt).getTime() : startMs + 15 * 60 * 1000
+    const endMs = event.endAt ? new Date(event.endAt).getTime() : startMs + DUE_SPAN_MINUTES * 60 * 1000
     const durationMs = endMs - startMs
     const isTouch = e.pointerType === 'touch'
     const pointerId = e.pointerId
@@ -1123,7 +1140,7 @@ export function CalendarPage() {
         setMoveOverlay({
           dayIdx: curDayIdx,
           topPx: (startMin / 60) * hourPxRef.current,
-          heightPx: isDue ? DUE_PIN_HEIGHT : Math.max((durationMin / 60) * hourPxRef.current, 20),
+          heightPx: isDue ? duePinHeight(hourPxRef.current) : Math.max((durationMin / 60) * hourPxRef.current, 20),
         })
         startAutoScroll(mv.clientX, mv.clientY)
       }
@@ -1420,9 +1437,12 @@ export function CalendarPage() {
     e.stopPropagation()
     suppressClickRef.current = false
 
+    // All-day events also have endAt null, so check isAllDay before treating as a due pin
+    const isDue = !event.isAllDay && isDueOccurrence(event)
+    const snap = isDue ? snapToGridDue : snapToGrid
     const durationMinutes = event.durationMinutes ?? 60
     const durationMs = durationMinutes * 60 * 1000
-    const heightPx = Math.max((durationMinutes / 60) * hourPxRef.current, 20)
+    const heightPx = isDue ? duePinHeight(hourPxRef.current) : Math.max((durationMinutes / 60) * hourPxRef.current, 20)
     const pointerId = e.pointerId
     const isTouch = e.pointerType === 'touch'
     const startClientX = e.clientX
@@ -1449,7 +1469,7 @@ export function CalendarPage() {
       }
 
       const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
-      allDayDragStateRef.current = { durationMinutes, curDayIdx }
+      allDayDragStateRef.current = { durationMinutes, curDayIdx, isDue }
 
       const dropTarget = getDropTarget(mv.clientY)
       if (dropTarget !== dragDropTargetRef.current) {
@@ -1469,7 +1489,7 @@ export function CalendarPage() {
         stopAutoScroll()
       } else if (isInGrid(mv.clientY)) {
         const curY = getYInGrid(mv.clientY)
-        const startSnapped = snapToGrid(days[curDayIdx], curY, hourPxRef.current)
+        const startSnapped = snap(days[curDayIdx], curY, hourPxRef.current)
         const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
         setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * hourPxRef.current, heightPx })
         startAutoScroll(mv.clientX, mv.clientY)
@@ -1515,7 +1535,7 @@ export function CalendarPage() {
       }
       if (!isInGrid(mu.clientY)) return
       const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
-      const newStart = snapToGrid(days[curDayIdx], getYInGrid(mu.clientY), hourPxRef.current)
+      const newStart = snap(days[curDayIdx], getYInGrid(mu.clientY), hourPxRef.current)
       const newEnd = new Date(newStart.getTime() + durationMs)
       ;(onDrop ?? rescheduleFromAllDay)(event, newStart, newEnd)
     }
@@ -1828,7 +1848,7 @@ export function CalendarPage() {
           setMoveOverlay({
             dayIdx: curDayIdx,
             topPx: (startMin / 60) * hp,
-            heightPx: isEvDue ? DUE_PIN_HEIGHT : Math.max((durationMin / 60) * hp, 20),
+            heightPx: isEvDue ? duePinHeight(hp) : Math.max((durationMin / 60) * hp, 20),
           })
         } else if (resizeDragActiveRef.current && resizeStateRef.current) {
           const rs = resizeStateRef.current
@@ -1840,13 +1860,13 @@ export function CalendarPage() {
             setResizeOverlay(computeResizeOverlays(rs.origStartMs, Math.max(snappedMs, rs.origStartMs + 15 * 60 * 1000)))
           }
         } else if (allDayDragActiveRef.current && allDayDragStateRef.current) {
-          const { durationMinutes: dur, curDayIdx } = allDayDragStateRef.current
+          const { durationMinutes: dur, curDayIdx, isDue: isPillDue } = allDayDragStateRef.current
           if (gridRef.current && state.clientY >= gridRef.current.getBoundingClientRect().top) {
             const curY = getYInGrid(state.clientY)
-            const startSnapped = snapToGrid(days[curDayIdx], curY, hourPxRef.current)
+            const startSnapped = isPillDue ? snapToGridDue(days[curDayIdx], curY, hourPxRef.current) : snapToGrid(days[curDayIdx], curY, hourPxRef.current)
             const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
             const hp = hourPxRef.current
-            setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * hp, heightPx: Math.max((dur / 60) * hp, 20) })
+            setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * hp, heightPx: isPillDue ? duePinHeight(hp) : Math.max((dur / 60) * hp, 20) })
           }
         }
       }
@@ -1979,21 +1999,22 @@ export function CalendarPage() {
     return allDayEvents.filter((e) => { const t = new Date(e.startAt!).getTime(); return t >= ds && t < ds + 86400000 })
   }, [allDayEvents, days])
 
-  const belowFoldDuePins = useMemo(() => {
-    // Compute the scroll-content position of the time grid's top edge:
-    // viewport_pos + scrollTop = scroll_content_pos (works even when the grid has scrolled above the viewport)
+  const duePinsForRow = useMemo(() => {
+    const allDue = calendarEvents.filter((e) => isDueOccurrence(e) && e.status === 'pending')
+    // EOD pins (23:xx) are always shown in the sticky row
+    const eod = allDue.filter(isEODDue)
+    // Non-EOD pins only appear in the sticky row when scrolled below the fold
     const scrollRefTop = scrollRef.current?.getBoundingClientRect().top ?? 0
     const gridTop = timeGridRef.current?.getBoundingClientRect().top ?? scrollRefTop
     const gridOffset = gridTop - scrollRefTop + scrollTop
     const visibleBottom = scrollTop + (scrollRef.current?.clientHeight ?? 600)
-    return calendarEvents
-      .filter((e) => isDueOccurrence(e) && e.status === 'pending')
-      .filter((e) => {
-        const d = new Date(e.startAt!)
-        const pinScrollPos = gridOffset + (d.getHours() + d.getMinutes() / 60) * hourPx
-        return pinScrollPos > visibleBottom - DUE_PIN_HEIGHT
-      })
-      .sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime())
+    const belowFold = allDue.filter((e) => {
+      if (isEODDue(e)) return false
+      const d = new Date(e.startAt!)
+      const pinScrollPos = gridOffset + (d.getHours() + d.getMinutes() / 60) * hourPx
+      return pinScrollPos > visibleBottom - duePinHeight(hourPx)
+    })
+    return [...eod, ...belowFold].sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime())
   }, [calendarEvents, scrollTop, hourPx])
 
   return (
@@ -2100,7 +2121,7 @@ export function CalendarPage() {
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       ) : (
-        <div ref={scrollRef} className="flex-1 overflow-y-auto flex flex-col" style={{ WebkitTouchCallout: 'none' }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+        <div ref={scrollRef} className="scroll-slim flex-1 overflow-y-auto flex flex-col" style={{ WebkitTouchCallout: 'none' }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
           {/* Multi-day headers + all-day row — sticky, inside scroll container to share column widths */}
           {view !== 'day' && (
             <div className="sticky top-0 z-40 bg-background">
@@ -2119,7 +2140,7 @@ export function CalendarPage() {
               </div>
               <FloatingTasksRow
                 tasks={floatingTasks}
-                onSchedule={(o) => { if (!suppressClickRef.current) openSchedule(o) }}
+                onSchedule={(o) => { if (!suppressClickRef.current) openDetail(o) }}
                 onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, scheduleFloating)}
                 rowRef={floatRowRef}
                 isHighlighted={dragDropTarget === 'float'}
@@ -2156,7 +2177,7 @@ export function CalendarPage() {
             <div className="sticky top-0 z-40 bg-background">
               <FloatingTasksRow
                 tasks={floatingTasks}
-                onSchedule={(o) => { if (!suppressClickRef.current) openSchedule(o) }}
+                onSchedule={(o) => { if (!suppressClickRef.current) openDetail(o) }}
                 onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, scheduleFloating)}
                 rowRef={floatRowRef}
                 isHighlighted={dragDropTarget === 'float'}
@@ -2227,14 +2248,14 @@ export function CalendarPage() {
               ))}
             </div>
           </div>
-          {belowFoldDuePins.length > 0 && (
+          {duePinsForRow.length > 0 && (
             <div className="sticky bottom-0 z-40 flex border-t border-border bg-background">
               <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
                 <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Due</span>
               </div>
               {days.map((day, idx) => {
                 const ds = sod(day).getTime()
-                const dayPins = belowFoldDuePins.filter((o) => {
+                const dayPins = duePinsForRow.filter((o) => {
                   const t = new Date(o.startAt!).getTime()
                   return t >= ds && t < ds + 86400000
                 })
@@ -2249,9 +2270,10 @@ export function CalendarPage() {
                       return (
                         <button
                           key={o.id}
-                          onClick={() => openDetail(o)}
-                          className="flex w-full items-center overflow-hidden rounded-[3px] text-left text-[10px] font-medium leading-tight transition-opacity hover:opacity-80"
-                          style={{ border: `1px solid ${accentColor}`, backgroundColor: bgColor }}
+                          onPointerDown={(ev) => handleAllDayPillMoveStart(ev, o, rescheduleEvent)}
+                          onClick={() => { if (!suppressClickRef.current) openDetail(o) }}
+                          className={`flex w-full items-center overflow-hidden rounded-[3px] text-left text-[10px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${movingEventId === o.id ? 'opacity-20' : pendingAllDayDragId === o.id ? 'opacity-50 scale-95' : ''}`}
+                          style={{ border: `1px solid ${accentColor}`, backgroundColor: bgColor, touchAction: 'none' }}
                         >
                           <div style={{ width: 3, minWidth: 3, alignSelf: 'stretch', background: leftColor }} className="shrink-0" />
                           <div className="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-0.5">

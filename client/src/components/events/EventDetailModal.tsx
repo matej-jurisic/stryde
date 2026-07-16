@@ -177,6 +177,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
   if (!occurrence) return null
 
   const isPending = occurrence.status === 'pending'
+  const isFloat = !occurrence.startAt && !occurrence.endAt && !occurrence.isAllDay
   // SkipRescheduleModal rendered outside the main Modal so it layers on top
   if (skipOpen) return (
     <SkipRescheduleModal
@@ -248,7 +249,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
                   Duplicate
                 </button>
               )}
-              {isPending && occurrence.isPlanned && onSchedule && (
+              {isPending && (occurrence.isPlanned || isFloat) && onSchedule && (
                 <button
                   onClick={() => { setMoreOpen(false); onClose(); onSchedule(occurrence) }}
                   className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
@@ -275,7 +276,7 @@ export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onS
                   </button>
                 </>
               )}
-              {isPending && (
+              {isPending && !isFloat && (
                 <button
                   onClick={() => { setMoreOpen(false); setSkipOpen(true) }}
                   className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"

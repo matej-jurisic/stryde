@@ -137,6 +137,22 @@ body {
   min-height: 100vh;
 }
 
+/* Slim overlay-style scrollbar: invisible until the container is hovered. */
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.scroll-slim:hover {
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 40%, transparent) transparent;
+}
+/* Safari (ignores scrollbar-color) */
+.scroll-slim::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-slim::-webkit-scrollbar-track { background: transparent; }
+.scroll-slim::-webkit-scrollbar-thumb { background: transparent; border-radius: 9999px; }
+.scroll-slim:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted-foreground) 40%, transparent);
+}
+
 .notes-content p { margin: 0 0 0.5em; }
 .notes-content p:last-child { margin-bottom: 0; }
 .notes-content h1, .notes-content h2, .notes-content h3,

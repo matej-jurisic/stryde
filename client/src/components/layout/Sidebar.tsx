@@ -208,7 +208,7 @@ export function Sidebar() {
           Categories
         </p>
 
-        <ul className="flex flex-col gap-0.5 min-h-0 overflow-y-auto">
+        <ul className="scroll-slim flex flex-col gap-0.5 min-h-0 overflow-y-auto">
           <li><AllCategoriesItem /></li>
           <li><NoCategoryItem /></li>
           {categories.map((cat) => (
