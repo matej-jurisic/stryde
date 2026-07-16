@@ -106,6 +106,10 @@ Floating and planned occurrences are never overdue.
 
 Scheduling an occurrence means setting its start datetime (and optionally end datetime). An occurrence can be rescheduled by updating these fields.
 
+### Skipping with Reschedule
+
+When marking an occurrence skipped, the user may optionally reschedule it: a modal lets them pick a new date (default: next day after the occurrence date). Confirming skips the original and creates a new pending copy with the start/end dates shifted to the chosen date. The rescheduled copy is otherwise identical to the original.
+
 ### Creation
 
 Occurrences are created via a modal. Creating an occurrence requires selecting an Activity (or quick-creating one inline).
@@ -134,6 +138,7 @@ A goal represents a sustained intention with measurable progress.
 |---|---|
 | Title | Required |
 | Description | Optional |
+| Notes | Optional — freeform markdown text; rendered in GoalDetailPage |
 | Status | `focus`, `active`, `bench`, `closed` |
 | Checkpoints | Ordered list of milestones (see below) |
 
@@ -160,6 +165,10 @@ Checkpoints are self-defined milestones that indicate planned progress.
 | Status | `pending`, `reached` |
 
 Checkpoints have no required order — they can be reached in any sequence.
+
+### Occurrence Stats
+
+For goals with `Kind = ongoing`, `GoalDto.OccurrenceStats` carries aggregate done/skipped/pending counts across all activities linked to the goal. Displayed as a proportional bar (`OccurrenceBar`) on the Goals page.
 
 ### Progress Model
 

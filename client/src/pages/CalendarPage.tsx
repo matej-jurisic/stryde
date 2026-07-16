@@ -124,8 +124,8 @@ function layoutDay(events: Occurrence[], day: Date, hourPx: number): LayoutEvent
       // Clip to this day's boundaries (handles cross-midnight events)
       const clipStartMin = Math.max((startMs - dayStartMs) / 60000, 0)
       const clipEndMin = Math.min((endMs - dayStartMs) / 60000, 24 * 60)
-      const s = clipStartMin
-      const end = Math.max(clipEndMin, s + 15)
+      const s = Math.round(clipStartMin)
+      const end = Math.max(Math.round(clipEndMin), s + 15)
       return { event: e, s, end: Math.min(end, 24 * 60) }
     })
     .filter((it) => it.s < 24 * 60 && it.end > it.s)
@@ -744,6 +744,7 @@ export function CalendarPage() {
   const [dragDropTarget, setDragDropTarget] = useState<'float' | 'allday' | null>(null)
   const [dragDropDayIdx, setDragDropDayIdx] = useState<number | null>(null)
   const [isDraggingGridEvent, setIsDraggingGridEvent] = useState(false)
+  const [isDraggingPill, setIsDraggingPill] = useState(false)
 
   const [hourPx, setHourPx] = useState(() => {
     const saved = localStorage.getItem('stryde-calendar-zoom')
@@ -1384,10 +1385,21 @@ export function CalendarPage() {
   function makeEventAllDay(ev: Occurrence, day: Date) {
     const startAt = sod(day).toISOString()
     queryClient.cancelQueries({ queryKey: ['events'] })
-    queryClient.setQueryData<Occurrence[]>(
-      ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
-      (old) => old?.map((o) => o.id === ev.id ? { ...o, startAt, endAt: null, isAllDay: true } : o),
-    )
+    if (ev.startAt === null) {
+      queryClient.setQueryData<Occurrence[]>(
+        ['events', 'floating'],
+        (old) => old?.filter((o) => o.id !== ev.id),
+      )
+      queryClient.setQueryData<Occurrence[]>(
+        ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
+        (old) => [...(old ?? []), { ...ev, startAt, endAt: null, isAllDay: true }],
+      )
+    } else {
+      queryClient.setQueryData<Occurrence[]>(
+        ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
+        (old) => old?.map((o) => o.id === ev.id ? { ...o, startAt, endAt: null, isAllDay: true } : o),
+      )
+    }
     occurrencesApi.update(ev.id, {
       title: ev.title,
       startAt,
@@ -1432,22 +1444,39 @@ export function CalendarPage() {
         isDragging = true
         allDayDragActiveRef.current = true
         setMovingEventId(event.id)
+        setIsDraggingPill(true)
         if (!isTouch) document.body.style.cursor = 'grabbing'
       }
 
       const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
       allDayDragStateRef.current = { durationMinutes, curDayIdx }
 
-      if (isInGrid(mv.clientY)) {
+      const dropTarget = getDropTarget(mv.clientY)
+      if (dropTarget !== dragDropTargetRef.current) {
+        dragDropTargetRef.current = dropTarget
+        setDragDropTarget(dropTarget)
+      }
+      if (dropTarget === 'allday') {
+        const di = Math.max(0, Math.min(getDayIdxFromX(mv.clientX), days.length - 1))
+        if (di !== dragDropDayIdxRef.current) {
+          dragDropDayIdxRef.current = di
+          setDragDropDayIdx(di)
+        }
+      }
+
+      if (dropTarget) {
+        setMoveOverlay(null)
+        stopAutoScroll()
+      } else if (isInGrid(mv.clientY)) {
         const curY = getYInGrid(mv.clientY)
         const startSnapped = snapToGrid(days[curDayIdx], curY, hourPxRef.current)
         const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
         setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * hourPxRef.current, heightPx })
+        startAutoScroll(mv.clientX, mv.clientY)
       } else {
         setMoveOverlay(null)
+        stopAutoScroll()
       }
-
-      startAutoScroll(mv.clientX, mv.clientY)
     }
 
     function cleanup() {
@@ -1459,15 +1488,31 @@ export function CalendarPage() {
       document.body.style.cursor = ''
       stopAutoScroll()
       setPendingAllDayDragId(null)
+      dragDropTargetRef.current = null
+      dragDropDayIdxRef.current = null
+      setDragDropTarget(null)
+      setDragDropDayIdx(null)
+      setIsDraggingPill(false)
     }
 
     function onPointerUp(mu: PointerEvent) {
       if (isTouch && mu.pointerId !== pointerId) return
+      const capturedDropTarget = dragDropTargetRef.current
+      const capturedDropDayIdx = dragDropDayIdxRef.current
       cleanup()
       setMoveOverlay(null)
       setMovingEventId(null)
       if (!isDragging) return
       suppressClickRef.current = true
+      if (capturedDropTarget === 'float') {
+        makeEventFloat(event)
+        return
+      }
+      if (capturedDropTarget === 'allday') {
+        const dropDayIdx = capturedDropDayIdx ?? Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
+        makeEventAllDay(event, days[dropDayIdx])
+        return
+      }
       if (!isInGrid(mu.clientY)) return
       const curDayIdx = Math.max(0, Math.min(getDayIdxFromX(mu.clientX), days.length - 1))
       const newStart = snapToGrid(days[curDayIdx], getYInGrid(mu.clientY), hourPxRef.current)
@@ -2078,11 +2123,11 @@ export function CalendarPage() {
                 onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, scheduleFloating)}
                 rowRef={floatRowRef}
                 isHighlighted={dragDropTarget === 'float'}
-                forceVisible={isDraggingGridEvent}
+                forceVisible={isDraggingGridEvent || isDraggingPill}
                 movingEventId={movingEventId}
                 pendingDragId={pendingAllDayDragId}
               />
-              {(allDayEvents.length > 0 || isDraggingGridEvent) && (
+              {(allDayEvents.length > 0 || isDraggingGridEvent || isDraggingPill) && (
                 <div ref={allDayRowRef} className="flex border-b border-border">
                   <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
                     <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Today</span>
@@ -2115,7 +2160,7 @@ export function CalendarPage() {
                 onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, scheduleFloating)}
                 rowRef={floatRowRef}
                 isHighlighted={dragDropTarget === 'float'}
-                forceVisible={isDraggingGridEvent}
+                forceVisible={isDraggingGridEvent || isDraggingPill}
                 movingEventId={movingEventId}
                 pendingDragId={pendingAllDayDragId}
               />

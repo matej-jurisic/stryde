@@ -391,6 +391,56 @@ The Inbox is renamed to the Categories page (`/categories`, old `/inbox` redirec
 
 ---
 
+## Goal Notes & Occurrence Stats (July 2026) ✅
+
+**Goal notes**
+- `Goal.Notes` nullable text field added to entity, DTO, `CreateGoalRequest`, and `UpdateGoalRequest`; migration `AddGoalNotes`
+- `GoalDetailPage`: inline notes editor with markdown rendering (`marked`) — view mode shows rendered HTML; "Add / Edit" toggle switches to a textarea; saved via `goalsApi.update`
+
+**Occurrence stats bar (ongoing goals)**
+- `GoalOccurrenceStats(Done, Skipped, Pending)` DTO computed by `GoalService.GetOccurrenceStatsAsync` — only for goals with `Kind = ongoing`; included in `GoalDto.OccurrenceStats`
+- `OccurrenceBar` component on `GoalsPage`: shows done/skipped/pending counts as a proportional bar per ongoing goal
+
+---
+
+## Skip + Reschedule (July 2026) ✅
+
+When skipping an occurrence the user can optionally reschedule it: a `SkipRescheduleModal` opens, defaulting to the next day after the occurrence's date. Confirming marks the occurrence skipped and creates a new pending copy with start/end dates shifted to the chosen date.
+
+---
+
+## Calendar Improvements (July 2026) ✅
+
+- **Calendar zoom:** adjustable time-slot height via zoom in/out controls on the calendar header
+- **Floating row:** floating occurrences appear in a dedicated all-day row pinned above the time grid; can be dragged from the floating row into a time slot (schedules them) or dragged between day columns within the floating row
+- **Sticky due tasks:** overdue occurrences are pinned (sticky) at the top of the calendar scroll container so they remain visible while scrolling through the day
+- **Sidebar animations:** left sidebar and middle recommendation panel use CSS slide-in/out transitions when toggling visibility
+
+---
+
+## Motivational Quotes (July 2026) ✅
+
+A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quotes.ts` — local array, no backend). The quote cycles by day-of-year so it is consistent within a day.
+
+---
+
+## Intervals.icu Sleep Sync (July 2026) ✅
+
+**Goal:** Auto-import sleep occurrences from Garmin via Intervals.icu so unaccounted time in Insights is meaningful.
+
+**Backend**
+- `UserSettings` entity: three new nullable fields - `IntervalsIcuAthleteId`, `IntervalsIcuApiKey`, `IntervalsIcuSyncFromDate`; migration `AddIntervalsIcuSettings`
+- `PUT /api/settings/intervals` - stores credentials + sync start date
+- `IntervalsIcuService` - calls `intervals.icu/api/v1/athlete/{id}/wellness` (Basic auth, `API_KEY:{key}`); parses `sleepStart`/`sleepEnd` datetimes as user's local timezone; auto-creates a "Sleep" activity on first sync; idempotent (skips days already having a sleep occurrence)
+- `POST /api/integrations/intervals/sync` - triggers the sync, returns `{ created, skipped }`
+- `InsightsService`: adds `avgUnaccountedMinutesPerDay` to `InsightsDto` - 1440 minus sum of durations per day, averaged over days with at least one timed occurrence; DurationOf now accepts StartAt+EndAt span or DurationMinutes
+
+**Frontend**
+- Settings page: "Integrations" section - athlete ID, API key, sync-from date, Save + "Sync now" button with result feedback
+- Insights page: stat tile showing average unaccounted time per day (hidden when no data)
+
+---
+
 ## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.

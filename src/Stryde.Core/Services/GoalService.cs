@@ -34,7 +34,11 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
             .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
         if (goal is null) return Result<GoalDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
         var stats = goal.Kind == GoalKind.ongoing ? await GetOccurrenceStatsAsync([goal.Id], userId) : [];
-        return Result<GoalDto>.Success(GoalDto.FromEntity(goal, stats.GetValueOrDefault(goal.Id)));
+        var lastAt = await GetLastOccurrenceAtAsync([goal.Id], userId);
+        return Result<GoalDto>.Success(GoalDto.FromEntity(
+            goal,
+            stats.GetValueOrDefault(goal.Id),
+            lastAt.TryGetValue(goal.Id, out var lat) ? lat : null));
     }
 
     public async Task<List<GoalDto>> ListAsync(Guid userId, GoalStatus? status = null)
@@ -51,11 +55,46 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
         var ongoingIds = goals.Where(g => g.Kind == GoalKind.ongoing).Select(g => g.Id).ToList();
         var stats = ongoingIds.Count > 0 ? await GetOccurrenceStatsAsync(ongoingIds, userId) : [];
 
+        var allGoalIds = goals.Select(g => g.Id).ToList();
+        var lastAt = allGoalIds.Count > 0 ? await GetLastOccurrenceAtAsync(allGoalIds, userId) : [];
+
         return goals
             .OrderBy(g => g.Status)
             .ThenBy(g => g.CreatedAt)
-            .Select(g => GoalDto.FromEntity(g, stats.GetValueOrDefault(g.Id)))
+            .Select(g => GoalDto.FromEntity(
+                g,
+                stats.GetValueOrDefault(g.Id),
+                lastAt.TryGetValue(g.Id, out var lat) ? lat : null))
             .ToList();
+    }
+
+    private async Task<Dictionary<Guid, DateTimeOffset>> GetLastOccurrenceAtAsync(List<Guid> goalIds, Guid userId)
+    {
+        var activityGoalMap = await db.Activities
+            .Where(a => a.UserId == userId && a.GoalId != null && goalIds.Contains(a.GoalId.Value))
+            .Select(a => new { a.Id, GoalId = a.GoalId!.Value })
+            .ToListAsync();
+
+        if (activityGoalMap.Count == 0) return [];
+
+        var activityIds = activityGoalMap.Select(a => a.Id).ToList();
+        var doneOccs = await db.Occurrences
+            .Where(o => activityIds.Contains(o.ActivityId) && o.Status == EventStatus.done)
+            .Select(o => new { o.ActivityId, o.StartAt, o.CreatedAt })
+            .ToListAsync();
+
+        var lookup = activityGoalMap.ToDictionary(a => a.Id, a => a.GoalId);
+        var result = new Dictionary<Guid, DateTimeOffset>();
+
+        foreach (var occ in doneOccs)
+        {
+            var goalId = lookup[occ.ActivityId];
+            var at = occ.StartAt ?? occ.CreatedAt;
+            if (!result.TryGetValue(goalId, out var current) || at > current)
+                result[goalId] = at;
+        }
+
+        return result;
     }
 
     private async Task<Dictionary<Guid, GoalOccurrenceStats>> GetOccurrenceStatsAsync(List<Guid> goalIds, Guid userId)

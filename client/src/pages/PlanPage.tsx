@@ -97,13 +97,27 @@ function believedProgress(checkpoints: Checkpoint[]): number {
 
 // ── Goal health row ────────────────────────────────────────────────────────
 
+function formatLastOccurrence(lastAt: string | null): string {
+  if (!lastAt) return 'no sessions yet'
+  const days = Math.floor((Date.now() - new Date(lastAt).getTime()) / (1000 * 60 * 60 * 24))
+  if (days === 0) return 'last done today'
+  if (days === 1) return 'last done yesterday'
+  if (days < 7) return `last done ${days}d ago`
+  if (days < 30) return `last done ${Math.floor(days / 7)}w ago`
+  const months = Math.floor(days / 30)
+  return `last done ${months}mo ago`
+}
+
 function GoalHealthRow({ goal }: { goal: Goal }) {
   const progress = believedProgress(goal.checkpoints)
   const isMilestone = goal.kind === 'milestone'
   return (
     <div className="flex items-center gap-3 py-1.5">
       <div className="h-2 w-2 shrink-0 rounded-full bg-goal-focus" />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{goal.title}</span>
+      <div className="min-w-0 flex-1">
+        <span className="block truncate text-sm text-foreground">{goal.title}</span>
+        <span className="text-[10px] text-muted-foreground/70">{formatLastOccurrence(goal.lastOccurrenceAt)}</span>
+      </div>
       {isMilestone ? (
         <>
           <div className="w-28 shrink-0">

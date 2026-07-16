@@ -147,13 +147,14 @@ public sealed record GoalDto(
     string Kind,
     DateTimeOffset CreatedAt,
     List<CheckpointDto> Checkpoints,
-    GoalOccurrenceStats? OccurrenceStats = null)
+    GoalOccurrenceStats? OccurrenceStats = null,
+    DateTimeOffset? LastOccurrenceAt = null)
 {
-    public static GoalDto FromEntity(Goal g, GoalOccurrenceStats? stats = null) => new(
+    public static GoalDto FromEntity(Goal g, GoalOccurrenceStats? stats = null, DateTimeOffset? lastOccurrenceAt = null) => new(
         g.Id, g.UserId, g.Title, g.Description, g.Notes,
         g.Status.ToString(), g.Kind.ToString(), g.CreatedAt,
         g.Checkpoints.Select(CheckpointDto.FromEntity).ToList(),
-        stats);
+        stats, lastOccurrenceAt);
 }
 
 public sealed record CreateGoalRequest(string Title, string? Description, GoalKind Kind = GoalKind.milestone, string? Notes = null);
@@ -197,7 +198,7 @@ public sealed record InsightsActivityDto(Guid ActivityId, string Title, string? 
 
 public sealed record InsightsCategoryDto(Guid? CategoryId, string? Name, string? Color, string? Icon, int Done, int TimeMinutes);
 
-public sealed record InsightsDto(List<InsightsActivityDto> Activities, List<InsightsCategoryDto> Categories);
+public sealed record InsightsDto(List<InsightsActivityDto> Activities, List<InsightsCategoryDto> Categories, int? AvgUnaccountedMinutesPerDay);
 
 // UserSettings
 public sealed record UserSettingsDto(Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone)

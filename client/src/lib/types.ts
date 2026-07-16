@@ -51,6 +51,7 @@ export interface Goal {
   createdAt: string
   checkpoints: Checkpoint[]
   occurrenceStats: GoalOccurrenceStats | null
+  lastOccurrenceAt: string | null
 }
 
 export interface CategorySummary {
@@ -131,6 +132,7 @@ export interface InsightsCategory {
 export interface Insights {
   activities: InsightsActivity[]
   categories: InsightsCategory[]
+  avgUnaccountedMinutesPerDay: number | null
 }
 
 export interface UserSettings {

@@ -105,6 +105,7 @@ export function SettingsPage() {
     },
   })
 
+
   async function handleLogout() {
     try { await authApi.logout() } finally { clear() }
   }

@@ -20,14 +20,18 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
             .Where(o => o.UserId == userId && o.Status == EventStatus.done && o.StartAt != null)
             .ToListAsync();
 
-        // Only occurrences with both timestamps and positive elapsed time contribute.
-        var timed = completed
-            .Where(o =>
-            {
-                if (!o.StartAt.HasValue || !o.EndAt.HasValue) return false;
-                var day = DayMath.DayOf(o.StartAt.Value, ctx);
-                return day >= windowStart && day <= today;
-            })
+        static int? DurationOf(Entities.Occurrence o) =>
+            o.StartAt.HasValue && o.EndAt.HasValue
+                ? (int)(o.EndAt.Value - o.StartAt.Value).TotalMinutes
+                : o.DurationMinutes;
+
+        var inWindow = completed
+            .Where(o => { var day = DayMath.DayOf(o.StartAt!.Value, ctx); return day >= windowStart && day <= today; })
+            .ToList();
+
+        // Only occurrences with both timestamps and positive elapsed time contribute to activity/category breakdown.
+        var timed = inWindow
+            .Where(o => o.StartAt.HasValue && o.EndAt.HasValue)
             .Select(o => (Occurrence: o, Minutes: (int)(o.EndAt!.Value - o.StartAt!.Value).TotalMinutes))
             .Where(x => x.Minutes > 0)
             .ToList();
@@ -62,6 +66,17 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
             .ThenBy(c => c.Name)
             .ToList();
 
-        return new InsightsDto(activities, categories);
+        // Unaccounted time: 1440 - sum(durations) per day, averaged over days with at least one timed occurrence.
+        var minutesByDay = inWindow
+            .Select(o => (Day: DayMath.DayOf(o.StartAt!.Value, ctx), Minutes: DurationOf(o)))
+            .Where(x => x.Minutes is > 0)
+            .GroupBy(x => x.Day)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Minutes!.Value));
+
+        int? avgUnaccounted = minutesByDay.Count > 0
+            ? (int)minutesByDay.Values.Select(m => Math.Max(0, 1440 - m)).Average()
+            : null;
+
+        return new InsightsDto(activities, categories, avgUnaccounted);
     }
 }

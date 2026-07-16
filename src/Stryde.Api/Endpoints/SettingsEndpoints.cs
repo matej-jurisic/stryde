@@ -25,5 +25,6 @@ public static class SettingsEndpoints
             var result = await svc.UpdateAsync(userId.Value, req);
             return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
         });
+
     }
 }

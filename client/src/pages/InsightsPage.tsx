@@ -144,6 +144,20 @@ export function InsightsPage() {
             <div className="flex flex-col gap-6">
               <PeriodToggle value={period} onChange={(v) => setPeriod(v as 7 | 30)} />
 
+              {data.avgUnaccountedMinutesPerDay != null && (
+                <div className="rounded-lg border border-border bg-card px-4 py-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-foreground">Avg unaccounted time per day</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Time with no logged occurrence - log sleep to reduce this
+                    </p>
+                  </div>
+                  <span className="text-lg font-semibold tabular-nums text-foreground">
+                    {formatTime(data.avgUnaccountedMinutesPerDay)}
+                  </span>
+                </div>
+              )}
+
               <section>
                 <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Time by activity

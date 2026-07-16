@@ -81,6 +81,7 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
                 v => v.ToString("HH:mm:ss"),
                 v => TimeOnly.ParseExact(v, "HH:mm:ss"));
 
+
         modelBuilder.Entity<Checkpoint>()
             .HasOne(c => c.Goal)
             .WithMany(g => g.Checkpoints)

@@ -85,8 +85,11 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `store/toasts.ts` — Zustand toast store; `toastError(err)` for mutation failures without inline error display.
 - `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field, ConfirmDialog, ActionMenu, Toasts`.
 - `components/events/OccurrenceListRow.tsx` — shared occurrence list row (Plan + Categories): optimistic status toggle, action menu, confirmed delete.
+- `components/events/SkipRescheduleModal.tsx` — opened after skipping; lets user pick a date and creates a new pending copy on that date.
+- `components/goals/OccurrenceBar.tsx` — done/skipped/pending counts bar for ongoing goals on GoalsPage; data from `GoalDto.OccurrenceStats`.
 - `components/layout/useUncategorizedCount.ts` — shared nav badge hook (shares `['events', 'all']` cache with CategoriesPage; predicate in `lib/categories.ts`).
 - `components/layout/BottomNav.tsx` — mobile nav: 4 tabs + "More" bottom sheet (Activities, Insights, Settings). Max 5 slots; new pages go in the sheet.
+- `lib/quotes.ts` — local array of motivational quotes; Plan page picks one by day-of-year.
 
 **Tests**
 - `Unit/TestContext.cs` — in-memory SQLite + real services. Naming: `Method_scenario`.

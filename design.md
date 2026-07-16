@@ -83,7 +83,8 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 ### 3. Right Canvas (fluid)
 
 - White background.
-- **Top bar:** Current date, prev/next arrows, view toggle.
+- **Top bar:** Current date, prev/next arrows, view toggle, zoom in/out controls (adjusts pixel-per-hour scale).
+- **Floating row:** All-day row pinned above the time grid — shows floating occurrences as compact chips. Overdue occurrences are rendered in a separate sticky band at the top of the scroll container so they stay visible while scrolling.
 - **Content:** Time-based vertical grid. Hours listed on the far left. Event blocks placed in their time slots.
 - **Event blocks:** Light-tinted background + solid 1px colored left border, matching the event's goal color. Title + time range inside.
 
@@ -148,6 +149,10 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - **No `shadow-card`** on any internal element (cards, list rows, panels, sidebar).
 - **Only `shadow-pop`** on floating elements: modals, dropdowns, popovers.
 - `shadow-pop: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.06)`.
+
+### Sidebar & Panel Animations
+
+The left sidebar and the middle recommendation panel slide in/out with CSS transitions when toggled. Use `transition-all duration-300` (or equivalent) on the width/transform; content fades with it. Never animate the canvas width directly — only the panel element.
 
 ---
 
