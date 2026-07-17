@@ -158,12 +158,10 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
 
   const [showAdvanced, setShowAdvanced] = useState(() => {
     if (isEdit || scheduleOnly) return true
-    if (!source && defaultEndAt) return true
     if (!source) return false
-    if (source.isPlanned) return true
+    if (source.durationMinutes) return true
     if (source.title) return true
     if (source.activity?.categoryId || source.activity?.goalId) return true
-    if (source.startAt && source.endAt) return true
     return false
   })
 
@@ -526,36 +524,148 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
         </div>
       )}
 
-      {/* Primary date: shown for non-scheduleOnly when not floating */}
-      {!scheduleOnly && timeMode !== 'floating' && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-foreground">
-              {timeMode === 'scheduled' ? (isPlanned ? 'Window start' : 'Start') : 'Due date'}
-            </label>
-            {timeMode === 'due' && <div className="flex gap-1.5">{allDayButton}{endOfDayButton}</div>}
-            {timeMode === 'scheduled' && <div className="flex gap-1.5">{allDayButton}</div>}
+      {/* Scheduling (When) */}
+      {!scheduleOnly && (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+            <button type="button" onClick={() => switchMode('due')} className={segmentClass(timeMode === 'due')}>Due</button>
+            <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(timeMode === 'scheduled')}>Scheduled</button>
+            <button type="button" onClick={() => switchMode('floating')} className={segmentClass(timeMode === 'floating')}>Floating</button>
           </div>
-          <input
-            type={isAllDay ? 'date' : 'datetime-local'}
-            value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
-            onChange={(e) => {
-              if (isAllDay) {
-                setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
-              } else {
-                setForm((f) => ({ ...f, startAt: e.target.value }))
-              }
-            }}
-            autoFocus={focusStartAt}
-            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+
+          {timeMode === 'due' && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-foreground">Due date</label>
+                <div className="flex gap-1.5">{allDayButton}{endOfDayButton}</div>
+              </div>
+              <input
+                type={isAllDay ? 'date' : 'datetime-local'}
+                value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
+                onChange={(e) => {
+                  if (isAllDay) {
+                    setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
+                  } else {
+                    setForm((f) => ({ ...f, startAt: e.target.value }))
+                  }
+                }}
+                autoFocus={focusStartAt}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+          )}
+
+          {timeMode === 'scheduled' && (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-foreground">{isPlanned ? 'Window start' : 'Start'}</label>
+                  {allDayButton}
+                </div>
+                <input
+                  type={isAllDay ? 'date' : 'datetime-local'}
+                  value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
+                  onChange={(e) => {
+                    if (isAllDay) {
+                      setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
+                    } else {
+                      setForm((f) => ({ ...f, startAt: e.target.value }))
+                    }
+                  }}
+                  autoFocus={focusStartAt}
+                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <Field
+                label={isAllDay ? 'End date' : (isPlanned ? 'Window end' : 'End')}
+                type={isAllDay ? 'date' : 'datetime-local'}
+                value={isAllDay ? (form.endAt ? form.endAt.substring(0, 10) : '') : form.endAt}
+                onChange={(e) => setForm((f) => ({ ...f, endAt: isAllDay ? (e.target.value ? e.target.value + 'T00:00' : '') : e.target.value }))}
+                error={errors.endAt}
+              />
+            </div>
+          )}
+
+          {timeMode === 'floating' && (
+            <p className="rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground">
+              No date - floats freely in your plan
+            </p>
+          )}
+
+          {timeMode !== 'floating' && (
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={isPlanned}
+                onChange={(e) => setIsPlanned(e.target.checked)}
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              Planned
+            </label>
+          )}
         </div>
       )}
 
-      {/* Floating indicator when advanced is closed */}
-      {!scheduleOnly && timeMode === 'floating' && !showAdvanced && (
-        <div className="flex items-center rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground">
-          No date - floating
+      {/* scheduleOnly: full scheduling controls */}
+      {scheduleOnly && (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+            <button type="button" onClick={() => switchMode('due')} className={segmentClass(timeMode === 'due')}>Due</button>
+            <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(timeMode === 'scheduled')}>Scheduled</button>
+          </div>
+
+          {timeMode === 'due' && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-foreground">Date</label>
+                <div className="flex gap-1.5">{allDayButton}{endOfDayButton}</div>
+              </div>
+              <input
+                type={isAllDay ? 'date' : 'datetime-local'}
+                value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
+                onChange={(e) => {
+                  if (isAllDay) {
+                    setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
+                  } else {
+                    setForm((f) => ({ ...f, startAt: e.target.value }))
+                  }
+                }}
+                autoFocus={focusStartAt}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+          )}
+
+          {timeMode === 'scheduled' && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field
+                label="Window start"
+                type="datetime-local"
+                value={form.startAt}
+                onChange={(e) => setForm((f) => ({ ...f, startAt: e.target.value }))}
+                autoFocus={focusStartAt}
+              />
+              <Field
+                label="Window end"
+                type="datetime-local"
+                value={form.endAt}
+                onChange={(e) => setForm((f) => ({ ...f, endAt: e.target.value }))}
+                error={errors.endAt}
+              />
+            </div>
+          )}
+
+          {timeMode !== 'floating' && (
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={isPlanned}
+                onChange={(e) => setIsPlanned(e.target.checked)}
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              Keep as planned
+            </label>
+          )}
         </div>
       )}
 
@@ -579,188 +689,92 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
         </button>
       )}
 
-      {/* Advanced / scheduleOnly section */}
-      {(showAdvanced || scheduleOnly) && (
+      {/* Details */}
+      {!scheduleOnly && showAdvanced && (
         <div className="flex flex-col gap-3">
-
-          {/* scheduleOnly: full scheduling controls */}
-          {scheduleOnly && (
-            <>
-              <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
-                <button type="button" onClick={() => switchMode('due')} className={segmentClass(timeMode === 'due')}>Due</button>
-                <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(timeMode === 'scheduled')}>Scheduled</button>
-              </div>
-
-              {timeMode === 'due' && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Date</label>
-                    <div className="flex gap-1.5">{allDayButton}{endOfDayButton}</div>
-                  </div>
-                  <input
-                    type={isAllDay ? 'date' : 'datetime-local'}
-                    value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
-                    onChange={(e) => {
-                      if (isAllDay) {
-                        setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
-                      } else {
-                        setForm((f) => ({ ...f, startAt: e.target.value }))
-                      }
-                    }}
-                    autoFocus={focusStartAt}
-                    className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-              )}
-
-              {timeMode === 'scheduled' && (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field
-                    label="Window start"
-                    type="datetime-local"
-                    value={form.startAt}
-                    onChange={(e) => setForm((f) => ({ ...f, startAt: e.target.value }))}
-                    autoFocus={focusStartAt}
-                  />
-                  <Field
-                    label="Window end"
-                    type="datetime-local"
-                    value={form.endAt}
-                    onChange={(e) => setForm((f) => ({ ...f, endAt: e.target.value }))}
-                    error={errors.endAt}
-                  />
-                </div>
-              )}
-
-              {timeMode !== 'floating' && (
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={isPlanned}
-                    onChange={(e) => setIsPlanned(e.target.checked)}
-                    className="h-4 w-4 rounded border-input accent-primary"
-                  />
-                  Keep as planned
-                </label>
-              )}
-            </>
-          )}
-
-          {/* Non-scheduleOnly: time mode + planned + extras */}
-          {!scheduleOnly && (
-            <>
-              <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
-                <button type="button" onClick={() => switchMode('due')} className={segmentClass(timeMode === 'due')}>Due</button>
-                <button type="button" onClick={() => switchMode('scheduled')} className={segmentClass(timeMode === 'scheduled')}>Scheduled</button>
-                <button type="button" onClick={() => switchMode('floating')} className={segmentClass(timeMode === 'floating')}>Floating</button>
-              </div>
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={isPlanned}
-                  onChange={(e) => setIsPlanned(e.target.checked)}
-                  className="h-4 w-4 rounded border-input accent-primary"
-                />
-                Planned
+          {/* Duration */}
+          {showDuration && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Duration <span className="font-normal text-muted-foreground">(optional)</span>
               </label>
-
-              {/* Scheduled: end time / end date */}
-              {timeMode === 'scheduled' && (
-                <Field
-                  label={isAllDay ? 'End date' : (isPlanned ? 'Window end' : 'End')}
-                  type={isAllDay ? 'date' : 'datetime-local'}
-                  value={isAllDay ? (form.endAt ? form.endAt.substring(0, 10) : '') : form.endAt}
-                  onChange={(e) => setForm((f) => ({ ...f, endAt: isAllDay ? (e.target.value ? e.target.value + 'T00:00' : '') : e.target.value }))}
-                  error={errors.endAt}
-                />
-              )}
-
-              {/* Duration */}
-              {showDuration && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-medium text-foreground">
-                    Duration <span className="font-normal text-muted-foreground">(optional)</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder="0"
-                        value={form.durationHours}
-                        onChange={(e) => setForm((f) => ({ ...f, durationHours: e.target.value }))}
-                        className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
-                      />
-                      <span className="shrink-0 text-sm text-muted-foreground">h</span>
-                    </div>
-                    <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
-                      <input
-                        type="number"
-                        min="0"
-                        max="59"
-                        placeholder="0"
-                        value={form.durationMins}
-                        onChange={(e) => setForm((f) => ({ ...f, durationMins: e.target.value }))}
-                        className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
-                      />
-                      <span className="shrink-0 text-sm text-muted-foreground">min</span>
-                    </div>
-                  </div>
-                  {errors.duration && <p className="text-xs text-destructive">{errors.duration}</p>}
-                </div>
-              )}
-
-              {/* Activity: title override */}
-              {kind === 'activity' && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-medium text-foreground">
-                    Title <span className="font-normal text-muted-foreground">(optional)</span>
-                  </label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
                   <input
-                    type="text"
-                    placeholder={selectedActivity ? selectedActivity.title : 'Override activity title...'}
-                    value={form.title}
-                    onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
-                    className="h-11 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={form.durationHours}
+                    onChange={(e) => setForm((f) => ({ ...f, durationHours: e.target.value }))}
+                    className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
                   />
+                  <span className="shrink-0 text-sm text-muted-foreground">h</span>
                 </div>
-              )}
-
-              {/* Event: category + goal */}
-              {kind === 'event' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-sm font-medium text-foreground">Category</label>
-                    <select
-                      value={form.categoryId}
-                      onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
-                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      <option value="">No category</option>
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-sm font-medium text-foreground">Goal <span className="font-normal text-muted-foreground">(optional)</span></label>
-                    <select
-                      value={form.goalId}
-                      onChange={(e) => setForm((f) => ({ ...f, goalId: e.target.value }))}
-                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      <option value="">No goal</option>
-                      {goals.map((g) => (
-                        <option key={g.id} value={g.id}>{g.title}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3">
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    placeholder="0"
+                    value={form.durationMins}
+                    onChange={(e) => setForm((f) => ({ ...f, durationMins: e.target.value }))}
+                    className="min-w-0 flex-1 bg-transparent text-sm text-foreground focus:outline-none"
+                  />
+                  <span className="shrink-0 text-sm text-muted-foreground">min</span>
                 </div>
-              )}
-            </>
+              </div>
+              {errors.duration && <p className="text-xs text-destructive">{errors.duration}</p>}
+            </div>
           )}
 
+          {/* Activity: title override */}
+          {kind === 'activity' && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Title <span className="font-normal text-muted-foreground">(optional)</span>
+              </label>
+              <input
+                type="text"
+                placeholder={selectedActivity ? selectedActivity.title : 'Override activity title...'}
+                value={form.title}
+                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
+                className="h-11 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+          )}
+
+          {/* Event: category + goal */}
+          {kind === 'event' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-foreground">Category</label>
+                <select
+                  value={form.categoryId}
+                  onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
+                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">No category</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-foreground">Goal <span className="font-normal text-muted-foreground">(optional)</span></label>
+                <select
+                  value={form.goalId}
+                  onChange={(e) => setForm((f) => ({ ...f, goalId: e.target.value }))}
+                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">No goal</option>
+                  {goals.map((g) => (
+                    <option key={g.id} value={g.id}>{g.title}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
