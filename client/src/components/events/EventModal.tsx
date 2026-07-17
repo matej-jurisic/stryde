@@ -399,76 +399,82 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
         </>
       }
     >
-      {/* Kind picker */}
-      {!scheduleOnly && !isEdit && (
-        <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
-          <button
-            type="button"
-            onClick={() => { setKind('activity'); setErrors({}) }}
-            className={segmentClass(kind === 'activity')}
-          >
-            Activity
-          </button>
-          <button
-            type="button"
-            onClick={() => { setKind('event'); setErrors({}) }}
-            className={segmentClass(kind === 'event')}
-          >
-            Event
-          </button>
-        </div>
-      )}
-
-      {/* Event: title (primary required field) */}
-      {kind === 'event' && !scheduleOnly && (
+      {/* Primary field row: activity select or event title, with kind picker on the right */}
+      {!scheduleOnly && (
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-foreground">Title</label>
-          <input
-            type="text"
-            placeholder="Event title"
-            value={form.title}
-            onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
-            autoFocus
-            className={`h-11 rounded-lg border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring ${errors.title ? 'border-destructive' : 'border-input'}`}
-          />
-          {errors.title && <p className="text-xs text-destructive">{errors.title}</p>}
-        </div>
-      )}
-
-      {/* Activity: picker (primary required field) */}
-      {kind === 'activity' && !scheduleOnly && (
-        <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-foreground">Activity</label>
-          {isEdit ? (
-            <div className="flex h-10 items-center rounded-lg border border-border bg-muted/40 px-3 text-sm text-foreground">
-              {occurrence?.activity.title}
+          <div className="flex items-end gap-2">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              {kind === 'event' ? (
+                <>
+                  <label className="text-sm font-medium text-foreground">Title</label>
+                  <input
+                    type="text"
+                    placeholder="Event title"
+                    value={form.title}
+                    onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
+                    autoFocus
+                    className={`h-10 rounded-lg border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring ${errors.title ? 'border-destructive' : 'border-input'}`}
+                  />
+                </>
+              ) : (
+                <>
+                  <label className="text-sm font-medium text-foreground">Activity</label>
+                  {isEdit ? (
+                    <div className="flex h-10 items-center rounded-lg border border-border bg-muted/40 px-3 text-sm text-foreground">
+                      {occurrence?.activity.title}
+                    </div>
+                  ) : (
+                    <select
+                      value={form.activityId}
+                      onChange={(e) => {
+                        if (e.target.value === '__new__') {
+                          setShowNewActivity(true)
+                        } else {
+                          setForm((f) => ({ ...f, activityId: e.target.value }))
+                          setShowNewActivity(false)
+                        }
+                      }}
+                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring ${errors.activityId ? 'border-destructive' : 'border-input'}`}
+                    >
+                      <option value="">Select an activity...</option>
+                      {activities.map((a) => (
+                        <option key={a.id} value={a.id}>{a.title}{a.goal ? ` (${a.goal.title})` : ''}</option>
+                      ))}
+                      <option value="__new__">+ Create new activity</option>
+                    </select>
+                  )}
+                </>
+              )}
             </div>
-          ) : (
-            <>
-              <select
-                value={form.activityId}
-                onChange={(e) => {
-                  if (e.target.value === '__new__') {
-                    setShowNewActivity(true)
-                  } else {
-                    setForm((f) => ({ ...f, activityId: e.target.value }))
-                    setShowNewActivity(false)
-                  }
-                }}
-                className={`h-10 w-full rounded-lg border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring ${errors.activityId ? 'border-destructive' : 'border-input'}`}
-              >
-                <option value="">Select an activity...</option>
-                {activities.map((a) => (
-                  <option key={a.id} value={a.id}>{a.title}{a.goal ? ` (${a.goal.title})` : ''}</option>
-                ))}
-                <option value="__new__">+ Create new activity</option>
-              </select>
-              {errors.activityId && <p className="text-xs text-destructive">{errors.activityId}</p>}
-            </>
-          )}
 
-          {showNewActivity && !isEdit && (
+            {!isEdit && (
+              <div className="flex shrink-0 flex-col gap-1.5">
+                <span className="invisible text-sm font-medium">T</span>
+                <div className="flex h-10 gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => { setKind('activity'); setErrors({}) }}
+                    className={`flex flex-1 items-center justify-center rounded-md px-3 text-sm font-medium transition-colors ${kind === 'activity' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    Activity
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setKind('event'); setErrors({}) }}
+                    className={`flex flex-1 items-center justify-center rounded-md px-3 text-sm font-medium transition-colors ${kind === 'event' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    Event
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {kind === 'event' && errors.title && <p className="text-xs text-destructive">{errors.title}</p>}
+          {kind === 'activity' && errors.activityId && <p className="text-xs text-destructive">{errors.activityId}</p>}
+
+          {kind === 'activity' && showNewActivity && !isEdit && (
             <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3">
               <input
                 type="text"
@@ -511,7 +517,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
             </div>
           )}
 
-          {selectedActivity && (selectedActivity.goal || selectedActivity.category) && (
+          {kind === 'activity' && selectedActivity && (selectedActivity.goal || selectedActivity.category) && (
             <div className="flex flex-wrap gap-2 px-1">
               {selectedActivity.goal && (
                 <span className="text-xs text-muted-foreground">Goal: {selectedActivity.goal.title}</span>
