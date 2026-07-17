@@ -43,6 +43,35 @@ function isSameDay(a: Date, b: Date): boolean {
   )
 }
 
+function effectiveAllDayEnd(e: { startAt: string | null; endAt: string | null }): number {
+  return e.endAt ? new Date(e.endAt).getTime() : new Date(e.startAt!).getTime() + 86400000
+}
+
+function getEventDayRange(e: { startAt: string | null; endAt: string | null }, days: Date[]): { startIdx: number; endIdx: number } {
+  const startMs = new Date(e.startAt!).getTime()
+  const endMs = effectiveAllDayEnd(e)
+  const viewStart = days[0].getTime()
+  const dayMs = 86400000
+  const startIdx = Math.max(0, Math.round((startMs - viewStart) / dayMs))
+  const endIdx = Math.min(days.length, Math.round((endMs - viewStart) / dayMs))
+  return { startIdx, endIdx }
+}
+
+function assignAllDayRows(events: { id: string; startAt: string | null; endAt: string | null }[], days: Date[]): Array<{ id: string; row: number; startIdx: number; endIdx: number }> {
+  const rowEnds: number[] = []
+  return events.map((e) => {
+    const { startIdx, endIdx } = getEventDayRange(e, days)
+    let row = rowEnds.findIndex((end) => end <= startIdx)
+    if (row === -1) {
+      row = rowEnds.length
+      rowEnds.push(endIdx)
+    } else {
+      rowEnds[row] = endIdx
+    }
+    return { id: e.id, row, startIdx, endIdx }
+  })
+}
+
 function formatDatetimeLocal(d: Date): string {
   const z = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`
@@ -1406,7 +1435,12 @@ export function CalendarPage() {
   }
 
   function makeEventAllDay(ev: Occurrence, day: Date) {
-    const startAt = sod(day).toISOString()
+    const newStart = sod(day)
+    const startAt = newStart.toISOString()
+    // Preserve span for multi-day all-day events
+    const endAt = ev.isAllDay && ev.startAt && ev.endAt
+      ? new Date(newStart.getTime() + (new Date(ev.endAt).getTime() - new Date(ev.startAt).getTime())).toISOString()
+      : null
     queryClient.cancelQueries({ queryKey: ['events'] })
     if (ev.startAt === null) {
       queryClient.setQueryData<Occurrence[]>(
@@ -1415,18 +1449,18 @@ export function CalendarPage() {
       )
       queryClient.setQueryData<Occurrence[]>(
         ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
-        (old) => [...(old ?? []), { ...ev, startAt, endAt: null, isAllDay: true }],
+        (old) => [...(old ?? []), { ...ev, startAt, endAt, isAllDay: true }],
       )
     } else {
       queryClient.setQueryData<Occurrence[]>(
         ['events', 'calendar', rangeStart.toISOString(), rangeEnd.toISOString()],
-        (old) => old?.map((o) => o.id === ev.id ? { ...o, startAt, endAt: null, isAllDay: true } : o),
+        (old) => old?.map((o) => o.id === ev.id ? { ...o, startAt, endAt, isAllDay: true } : o),
       )
     }
     occurrencesApi.update(ev.id, {
       title: ev.title,
       startAt,
-      endAt: null,
+      endAt,
       isAllDay: true,
       isPlanned: ev.isPlanned,
       durationMinutes: ev.durationMinutes,
@@ -2002,8 +2036,21 @@ export function CalendarPage() {
   const calendarEvents = events.filter((e) => !e.isAllDay && e.status !== 'skipped')
   const dayAllDayEvents = useMemo(() => {
     const ds = sod(days[0]).getTime()
-    return allDayEvents.filter((e) => { const t = new Date(e.startAt!).getTime(); return t >= ds && t < ds + 86400000 })
+    const de = ds + 86400000
+    return allDayEvents.filter((e) => {
+      const startMs = new Date(e.startAt!).getTime()
+      const endMs = effectiveAllDayEnd(e)
+      return startMs < de && endMs > ds
+    })
   }, [allDayEvents, days])
+
+  const allDayLayout = useMemo(() => {
+    if (view === 'day') return []
+    const sorted = [...allDayEvents].sort((a, b) =>
+      new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime()
+    )
+    return assignAllDayRows(sorted, days)
+  }, [allDayEvents, days, view])
 
   const duePinsForRow = useMemo(() => {
     const allDue = calendarEvents.filter((e) => isDueOccurrence(e) && e.status === 'pending')
@@ -2159,20 +2206,44 @@ export function CalendarPage() {
                   <div className="flex w-12 shrink-0 items-center justify-end pr-2 py-0.5">
                     <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Today</span>
                   </div>
-                  {days.map((day, idx) => {
-                    const ds = sod(day); const de = addDays(ds, 1)
-                    const dayAll = allDayEvents.filter((e) => { const t = new Date(e.startAt!).getTime(); return t >= ds.getTime() && t < de.getTime() })
-                    const isColHighlighted = dragDropTarget === 'allday' && dragDropDayIdx === idx
-                    return (
-                      <div key={day.toISOString()} className={`flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden px-0.5 py-0.5 min-h-[26px] transition-colors ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'} ${isColHighlighted ? 'bg-primary/10' : ''}`}>
-                        {dayAll.map((e) => (
-                          <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status === 'done' ? 'opacity-50 line-through' : e.status === 'skipped' ? 'opacity-30' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style, ...(e.isPlanned ? { border: `1px dashed ${e.activity.category?.color ?? 'var(--color-primary)'}` } : undefined) }}>
-                            {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
-                          </button>
-                        ))}
-                      </div>
-                    )
-                  })}
+                  <div
+                    className="relative flex-1"
+                    style={{ height: Math.max(26, (allDayLayout.reduce((m, r) => Math.max(m, r.row), -1) + 1) * 24 + 4) }}
+                  >
+                    <div className="pointer-events-none absolute inset-0 flex">
+                      {days.map((day, idx) => (
+                        <div
+                          key={day.toISOString()}
+                          className={`flex-1 transition-colors ${idx === 0 ? 'border-l border-r border-border' : 'border-r border-border'} ${dragDropTarget === 'allday' && dragDropDayIdx === idx ? 'bg-primary/10' : ''}`}
+                        />
+                      ))}
+                    </div>
+                    {allDayLayout.map(({ id, row, startIdx, endIdx }) => {
+                      const e = allDayEvents.find((ev) => ev.id === id)!
+                      const n = days.length
+                      const durationLabel = e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''
+                      return (
+                        <button
+                          key={e.id}
+                          onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)}
+                          onClick={() => { if (!suppressClickRef.current) openDetail(e) }}
+                          style={{
+                            position: 'absolute',
+                            left: `calc(${(startIdx / n) * 100}% + 2px)`,
+                            width: `calc(${((endIdx - startIdx) / n) * 100}% - 4px)`,
+                            top: row * 24 + 2,
+                            height: 20,
+                            touchAction: 'none',
+                            ...eventAllDayColors(e).style,
+                            ...(e.isPlanned ? { border: `1px dashed ${e.activity.category?.color ?? 'var(--color-primary)'}` } : undefined),
+                          }}
+                          className={`truncate rounded-[3px] px-1.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status === 'done' ? 'opacity-50 line-through' : e.status === 'skipped' ? 'opacity-30' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`}
+                        >
+                          {e.effectiveTitle}{durationLabel}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
             </div>

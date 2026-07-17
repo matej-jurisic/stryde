@@ -43,6 +43,18 @@ function formatOccurrenceTime(o: Occurrence): string {
   else dateLabel = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 
   if (o.isAllDay) {
+    if (o.endAt) {
+      // endAt is exclusive; inclusive end = endAt - 1 day
+      const endInclusive = new Date(new Date(o.endAt).getTime() - 86400000)
+      if (!sameDay(d, endInclusive)) {
+        let endLabel: string
+        if (sameDay(endInclusive, today)) endLabel = 'Today'
+        else if (sameDay(endInclusive, tomorrow)) endLabel = 'Tomorrow'
+        else endLabel = endInclusive.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+        const dur = formatDuration(o.durationMinutes)
+        return dur ? `${dateLabel} - ${endLabel} ~${dur}` : `${dateLabel} - ${endLabel}`
+      }
+    }
     const dur = formatDuration(o.durationMinutes)
     return dur ? `${dateLabel}, Date only ~${dur}` : `${dateLabel}, Date only`
   }
@@ -136,7 +148,7 @@ const statusMutation = useMutation({
     mutationFn: () => {
       const d = new Date(occurrence!.startAt!)
       d.setHours(0, 0, 0, 0)
-      return occurrencesApi.update(occurrence!.id, { title: occurrence!.title, startAt: d.toISOString(), endAt: null, isAllDay: true, isPlanned: true })
+      return occurrencesApi.update(occurrence!.id, { title: occurrence!.title, startAt: d.toISOString(), endAt: null, isAllDay: true, isPlanned: true, durationMinutes: occurrence!.durationMinutes })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
@@ -147,7 +159,7 @@ const statusMutation = useMutation({
   })
 
   const floatMutation = useMutation({
-    mutationFn: () => occurrencesApi.update(occurrence!.id, { title: occurrence!.title, startAt: null, endAt: null, isAllDay: false, isPlanned: false }),
+    mutationFn: () => occurrencesApi.update(occurrence!.id, { title: occurrence!.title, startAt: null, endAt: null, isAllDay: false, isPlanned: false, durationMinutes: occurrence!.durationMinutes }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
@@ -254,23 +266,23 @@ const statusMutation = useMutation({
                   Schedule
                 </button>
               )}
+              {isPending && occurrence.startAt && !(occurrence.isAllDay && occurrence.isPlanned) && (
+                <button
+                  onClick={() => { setMoreOpen(false); planMutation.mutate() }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                >
+                  <Pin className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                  Plan
+                </button>
+              )}
               {isPending && occurrence.startAt && (
-                <>
-                  <button
-                    onClick={() => { setMoreOpen(false); planMutation.mutate() }}
-                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                  >
-                    <Pin className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
-                    Plan
-                  </button>
-                  <button
-                    onClick={() => { setMoreOpen(false); floatMutation.mutate() }}
-                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                  >
-                    <PinOff className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
-                    Float
-                  </button>
-                </>
+                <button
+                  onClick={() => { setMoreOpen(false); floatMutation.mutate() }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                >
+                  <PinOff className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                  Float
+                </button>
               )}
               {isPending && !isFloat && (
                 <button

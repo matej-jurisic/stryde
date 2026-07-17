@@ -35,12 +35,15 @@ interface Errors {
 
 type TimeMode = 'due' | 'scheduled' | 'floating'
 
-function validate(form: FormState, kind: ActivityKind, timeMode: TimeMode, isPlanned: boolean): Errors {
+function validate(form: FormState, kind: ActivityKind, timeMode: TimeMode, isPlanned: boolean, isAllDay: boolean): Errors {
   const errs: Errors = {}
   if (kind === 'activity' && !form.activityId) errs.activityId = 'Please select an activity.'
   if (kind === 'event' && !form.title.trim()) errs.title = 'Title is required.'
-  if (timeMode === 'scheduled' && form.startAt && form.endAt && form.endAt <= form.startAt) {
+  if (timeMode === 'scheduled' && !isAllDay && form.startAt && form.endAt && form.endAt <= form.startAt) {
     errs.endAt = 'End time must be after start time.'
+  }
+  if (timeMode === 'scheduled' && isAllDay && form.startAt && form.endAt && form.endAt.substring(0, 10) < form.startAt.substring(0, 10)) {
+    errs.endAt = 'End date must be on or after the start date.'
   }
   if (form.durationHours || form.durationMins) {
     const totalMins = (parseInt(form.durationHours || '0') * 60) + parseInt(form.durationMins || '0')
@@ -82,6 +85,20 @@ function addOneHour(dtLocal: string): string {
   return addMinutes(dtLocal, 60)
 }
 
+function toAllDayEndInput(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  d.setDate(d.getDate() - 1)
+  const z = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`
+}
+
+function toAllDayExclusiveEndIso(displayDate: string): string {
+  const d = new Date(displayDate + 'T00:00:00')
+  d.setDate(d.getDate() + 1)
+  return d.toISOString()
+}
+
 function durationToHM(minutes: number | null): { h: string; m: string } {
   if (!minutes) return { h: '', m: '' }
   return { h: String(Math.floor(minutes / 60)), m: String(minutes % 60) }
@@ -116,7 +133,9 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     categoryId: source?.activity.categoryId ?? '',
     goalId: source?.activity.goalId ?? '',
     startAt: occurrence ? (toInputValue(occurrence.startAt) || (scheduleOnly ? todayLocal() : '')) : (duplicateFrom ? toInputValue(duplicateFrom.startAt) : (defaultStartAt ?? todayLocal())),
-    endAt: occurrence ? toInputValue(occurrence.endAt) : (duplicateFrom ? toInputValue(duplicateFrom.endAt) : (defaultEndAt ?? '')),
+    endAt: source?.isAllDay && source?.endAt
+      ? toAllDayEndInput(source.endAt)
+      : (occurrence ? toInputValue(occurrence.endAt) : (duplicateFrom ? toInputValue(duplicateFrom.endAt) : (defaultEndAt ?? ''))),
     durationHours: dur.h,
     durationMins: dur.m,
   }))
@@ -206,7 +225,9 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
 
       const schedulePayload = {
         startAt: timeMode === 'floating' ? null : toIso(form.startAt),
-        endAt: timeMode !== 'scheduled' || isAllDay ? null : toIso(form.endAt),
+        endAt: isAllDay
+          ? (form.endAt ? toAllDayExclusiveEndIso(form.endAt.substring(0, 10)) : null)
+          : (timeMode !== 'scheduled' ? null : toIso(form.endAt)),
         isAllDay: timeMode === 'floating' ? false : isAllDay,
         isPlanned,
         durationMinutes,
@@ -268,7 +289,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
   }
 
   function handleSubmit() {
-    const errs = validate(form, kind, timeMode, isPlanned)
+    const errs = validate(form, kind, timeMode, isPlanned, isAllDay)
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
       return
@@ -283,8 +304,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
       setForm((f) => ({ ...f, startAt: '', endAt: '', durationHours: '', durationMins: '' }))
       setErrors({})
     } else if (mode === 'scheduled') {
-      setIsAllDay(false)
-      if (!form.endAt && form.startAt) {
+      if (!form.endAt && form.startAt && !isAllDay) {
         const durationMins = (parseInt(form.durationHours || '0') * 60) + parseInt(form.durationMins || '0')
         setForm((f) => ({ ...f, endAt: durationMins > 0 ? addMinutes(f.startAt, durationMins) : addOneHour(f.startAt) }))
       }
@@ -299,7 +319,6 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     if (!isAllDay) {
       const dateOnly = form.startAt ? form.startAt.substring(0, 10) : ''
       setForm((f) => ({ ...f, startAt: dateOnly ? dateOnly + 'T00:00' : '', endAt: '' }))
-      if (timeMode === 'scheduled') setTimeMode('due')
       setErrors((e) => ({ ...e, endAt: undefined }))
     }
     setIsAllDay((v) => !v)
@@ -515,6 +534,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
               {timeMode === 'scheduled' ? (isPlanned ? 'Window start' : 'Start') : 'Due date'}
             </label>
             {timeMode === 'due' && <div className="flex gap-1.5">{allDayButton}{endOfDayButton}</div>}
+            {timeMode === 'scheduled' && <div className="flex gap-1.5">{allDayButton}</div>}
           </div>
           <input
             type={isAllDay ? 'date' : 'datetime-local'}
@@ -644,13 +664,13 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                 Planned
               </label>
 
-              {/* Scheduled: end time */}
+              {/* Scheduled: end time / end date */}
               {timeMode === 'scheduled' && (
                 <Field
-                  label={isPlanned ? 'Window end' : 'End'}
-                  type="datetime-local"
-                  value={form.endAt}
-                  onChange={(e) => setForm((f) => ({ ...f, endAt: e.target.value }))}
+                  label={isAllDay ? 'End date' : (isPlanned ? 'Window end' : 'End')}
+                  type={isAllDay ? 'date' : 'datetime-local'}
+                  value={isAllDay ? (form.endAt ? form.endAt.substring(0, 10) : '') : form.endAt}
+                  onChange={(e) => setForm((f) => ({ ...f, endAt: isAllDay ? (e.target.value ? e.target.value + 'T00:00' : '') : e.target.value }))}
                   error={errors.endAt}
                 />
               )}

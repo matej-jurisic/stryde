@@ -31,7 +31,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             Activity = activity,
             Title = string.IsNullOrWhiteSpace(req.Title) ? null : req.Title.Trim(),
             StartAt = req.StartAt,
-            EndAt = req.IsAllDay ? null : req.EndAt,
+            EndAt = req.EndAt,
             IsAllDay = req.IsAllDay,
             IsPlanned = req.IsPlanned,
             DurationMinutes = req.DurationMinutes,
@@ -128,7 +128,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
 
         o.Title = string.IsNullOrWhiteSpace(req.Title) ? null : req.Title.Trim();
         o.StartAt = req.StartAt;
-        o.EndAt = req.IsAllDay ? null : req.EndAt;
+        o.EndAt = req.EndAt;
         o.IsAllDay = req.IsAllDay;
         o.IsPlanned = req.IsPlanned;
         o.DurationMinutes = req.DurationMinutes;
@@ -195,7 +195,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             ActivityId = a.Id,
             Activity = a,
             StartAt = req.StartAt,
-            EndAt = req.IsAllDay ? null : req.EndAt,
+            EndAt = req.EndAt,
             IsAllDay = req.IsAllDay,
             IsPlanned = req.IsPlanned,
             DurationMinutes = req.DurationMinutes,
@@ -248,7 +248,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         }
 
         o.StartAt = req.StartAt;
-        o.EndAt = req.IsAllDay ? null : req.EndAt;
+        o.EndAt = req.EndAt;
         o.IsAllDay = req.IsAllDay;
         o.IsPlanned = req.IsPlanned;
         o.DurationMinutes = req.DurationMinutes;
