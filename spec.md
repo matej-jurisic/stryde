@@ -251,7 +251,7 @@ Additional views (Cockpit, Lab) are deferred — defined during development if n
 
 ## Insights
 
-Read-only stats over **done occurrences**, computed server-side (`GET /api/insights`) using the user's day context (timezone + day boundary). Occurrences without a `StartAt` (floating) are excluded — they have no day to count on. All windows end on the user's current day.
+Read-only stats over **done occurrences**, computed server-side (`GET /api/insights`) using the user's day context (timezone + day boundary). Occurrences without a `StartAt` (floating) are excluded — they have no day to count on. All windows end on the user's current day, except the unaccounted-time stats (average, largest gaps, unused blocks): today is still in progress, so their window is the N full days before today, and the trend's previous window shifts back accordingly.
 
 | Stat | Rule |
 |---|---|

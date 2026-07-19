@@ -134,14 +134,14 @@ public class InsightsServiceTests : IDisposable
     {
         var userId = await CreateUserAsync();
         var run = await AddActivityAsync(userId, "run");
-        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 10));
-        await AddOccurrenceAsync(userId, run, At(7, 12), At(7, 14));
+        await AddOccurrenceAsync(userId, run, At(6, 9), At(6, 10));
+        await AddOccurrenceAsync(userId, run, At(6, 12), At(6, 14));
 
         var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
 
         // Untracked days contribute no gaps; the tracked day yields 14:00-24:00, 00:00-09:00, 10:00-12:00.
         Assert.Equal(3, insights.LargestGaps.Count);
-        Assert.All(insights.LargestGaps, g => Assert.Equal("2026-07-07", g.Day));
+        Assert.All(insights.LargestGaps, g => Assert.Equal("2026-07-06", g.Day));
         Assert.Equal(("14:00", "00:00", 600), (insights.LargestGaps[0].Start, insights.LargestGaps[0].End, insights.LargestGaps[0].Minutes));
         Assert.Equal(("00:00", "09:00", 540), (insights.LargestGaps[1].Start, insights.LargestGaps[1].End, insights.LargestGaps[1].Minutes));
         Assert.Equal(("10:00", "12:00", 120), (insights.LargestGaps[2].Start, insights.LargestGaps[2].End, insights.LargestGaps[2].Minutes));
@@ -153,15 +153,15 @@ public class InsightsServiceTests : IDisposable
         var userId = await CreateUserAsync();
         var sleep = await AddActivityAsync(userId, "sleep");
         var run = await AddActivityAsync(userId, "run");
-        await AddOccurrenceAsync(userId, sleep, At(6, 23), At(7, 7)); // 23:00 -> 07:00 next day
-        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 10));
+        await AddOccurrenceAsync(userId, sleep, At(5, 23), At(6, 7)); // 23:00 -> 07:00 next day
+        await AddOccurrenceAsync(userId, run, At(6, 9), At(6, 10));
 
         var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
 
-        var day7Gaps = insights.LargestGaps.Where(g => g.Day == "2026-07-07").ToList();
-        Assert.Equal(2, day7Gaps.Count);
-        Assert.Contains(day7Gaps, g => g is { Start: "07:00", End: "09:00", Minutes: 120 });
-        Assert.Contains(day7Gaps, g => g is { Start: "10:00", End: "00:00", Minutes: 840 });
+        var day6Gaps = insights.LargestGaps.Where(g => g.Day == "2026-07-06").ToList();
+        Assert.Equal(2, day6Gaps.Count);
+        Assert.Contains(day6Gaps, g => g is { Start: "07:00", End: "09:00", Minutes: 120 });
+        Assert.Contains(day6Gaps, g => g is { Start: "10:00", End: "00:00", Minutes: 840 });
     }
 
     [Fact]
@@ -169,7 +169,7 @@ public class InsightsServiceTests : IDisposable
     {
         var userId = await CreateUserAsync();
         var busy = await AddActivityAsync(userId, "busy");
-        foreach (var day in new[] { 6, 7 })
+        foreach (var day in new[] { 5, 6 })
         {
             await AddOccurrenceAsync(userId, busy, At(day, 0), At(day, 14));
             await AddOccurrenceAsync(userId, busy, At(day, 16), At(day + 1, 0));
@@ -182,11 +182,26 @@ public class InsightsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_unaccounted_stats_exclude_today()
+    {
+        var userId = await CreateUserAsync();
+        var run = await AddActivityAsync(userId, "run");
+        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 10)); // today only
+
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
+
+        Assert.Null(insights.AvgUnaccountedMinutesPerDay);
+        Assert.Empty(insights.LargestGaps);
+        Assert.Empty(insights.UnusedBlocks);
+        Assert.Single(insights.Activities); // activity/category breakdown still includes today
+    }
+
+    [Fact]
     public async Task GetAsync_prev_average_uses_previous_window_only()
     {
         var userId = await CreateUserAsync();
         var run = await AddActivityAsync(userId, "run");
-        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 10));                                                // current window: 60 min
+        await AddOccurrenceAsync(userId, run, At(6, 9), At(6, 10));                                                // current window: 60 min
         await AddOccurrenceAsync(userId, run, new DateTimeOffset(2026, 6, 28, 9, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2026, 6, 28, 12, 0, 0, TimeSpan.Zero));                                             // previous window: 180 min
 
@@ -201,7 +216,7 @@ public class InsightsServiceTests : IDisposable
     {
         var userId = await CreateUserAsync();
         var run = await AddActivityAsync(userId, "run");
-        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 10));
+        await AddOccurrenceAsync(userId, run, At(6, 9), At(6, 10));
 
         var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
 

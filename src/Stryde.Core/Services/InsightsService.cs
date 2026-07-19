@@ -67,6 +67,8 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
             .ToList();
 
         // Unaccounted time: 1440 - sum(durations) per day, averaged over days with at least one timed occurrence.
+        // Today is excluded (still in progress, its remaining hours would read as unaccounted): the window is
+        // the windowDays full days before today, and the previous window shifts back accordingly.
         Dictionary<DateOnly, int> TrackedByDay(DateOnly from, DateOnly to) => completed
             .Select(o => (Day: DayMath.DayOf(o.StartAt!.Value, ctx), Minutes: DurationOf(o)))
             .Where(x => x.Minutes is > 0 && x.Day >= from && x.Day <= to)
@@ -77,8 +79,9 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
             ? (int)byDay.Values.Select(m => Math.Max(0, 1440 - m)).Average()
             : null;
 
-        var trackedByDay = TrackedByDay(windowStart, today);
-        var prevTrackedByDay = TrackedByDay(windowStart.AddDays(-windowDays), windowStart.AddDays(-1));
+        var trackedEnd = today.AddDays(-1);
+        var trackedByDay = TrackedByDay(trackedEnd.AddDays(-(windowDays - 1)), trackedEnd);
+        var prevTrackedByDay = TrackedByDay(trackedEnd.AddDays(-(2 * windowDays - 1)), trackedEnd.AddDays(-windowDays));
 
         // Gap analysis runs only over tracked days (>=1 timed occurrence starting that day), but busy
         // intervals come from all completed occurrences so overnight spans cover the following morning.
