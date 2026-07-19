@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
-import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivitySubtask, Occurrence, Insights } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -210,6 +210,7 @@ export const recommendationsApi = {
 
 export const insightsApi = {
   get: (period: number = 30) => request<Insights>(`/api/insights?period=${period}`),
+  emptyProfile: () => request<InsightsEmptyProfile>('/api/insights/empty-profile'),
 }
 
 export const authApi = {

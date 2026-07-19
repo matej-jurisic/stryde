@@ -8,6 +8,11 @@ namespace Stryde.Core.Services;
 
 public class InsightsService(StrydeDbContext db, UserSettingsService settings)
 {
+    private static int? DurationOf(Entities.Occurrence o) =>
+        o.StartAt.HasValue && o.EndAt.HasValue
+            ? (int)(o.EndAt.Value - o.StartAt.Value).TotalMinutes
+            : o.DurationMinutes;
+
     public async Task<InsightsDto> GetAsync(Guid userId, int windowDays = 30, DateTimeOffset? nowUtc = null)
     {
         var now = nowUtc ?? DateTimeOffset.UtcNow;
@@ -19,11 +24,6 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
             .Include(o => o.Activity).ThenInclude(a => a.Category)
             .Where(o => o.UserId == userId && o.Status == EventStatus.done && o.StartAt != null)
             .ToListAsync();
-
-        static int? DurationOf(Entities.Occurrence o) =>
-            o.StartAt.HasValue && o.EndAt.HasValue
-                ? (int)(o.EndAt.Value - o.StartAt.Value).TotalMinutes
-                : o.DurationMinutes;
 
         var inWindow = completed
             .Where(o => { var day = DayMath.DayOf(o.StartAt!.Value, ctx); return day >= windowStart && day <= today; })
@@ -165,5 +165,88 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
             activities, categories,
             AvgUnaccounted(trackedByDay), AvgUnaccounted(prevTrackedByDay),
             largestGaps, unusedBlocks);
+    }
+
+    /// <summary>
+    /// Likely-free profile for the calendar overlay: per weekday, the 1-hour slots that were empty
+    /// on a strict majority of that weekday's tracked days over the last 8 weeks. Unlike the other
+    /// insights, days here are midnight-to-midnight local calendar dates, because that is the grid the
+    /// calendar renders. A day is tracked when at least one completed timed occurrence overlaps it.
+    /// Today is excluded (still in progress). Weekdays with fewer than 3 tracked days fall back to the
+    /// all-days profile.
+    /// </summary>
+    public async Task<InsightsEmptyProfileDto> GetEmptyProfileAsync(Guid userId, DateTimeOffset? nowUtc = null)
+    {
+        const int lookbackDays = 56;
+        const int slotMinutes = 60;
+        const int slotsPerDay = 1440 / slotMinutes;
+        const int minWeekdaySamples = 3;
+
+        var now = nowUtc ?? DateTimeOffset.UtcNow;
+        var ctx = await settings.GetDayContextAsync(userId);
+        var localToday = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, ctx.TimeZone).DateTime);
+        var windowStart = localToday.AddDays(-lookbackDays);
+        var windowEnd = localToday.AddDays(-1);
+
+        var completed = await db.Occurrences
+            .Where(o => o.UserId == userId && o.Status == EventStatus.done && o.StartAt != null)
+            .ToListAsync();
+
+        var intervals = completed
+            .Select(o => (o.StartAt, Minutes: DurationOf(o)))
+            .Where(x => x.Minutes is > 0)
+            .Select(x => (
+                Start: TimeZoneInfo.ConvertTime(x.StartAt!.Value, ctx.TimeZone).DateTime,
+                End: TimeZoneInfo.ConvertTime(x.StartAt!.Value.AddMinutes(x.Minutes!.Value), ctx.TimeZone).DateTime));
+
+        var busyByDay = new Dictionary<DateOnly, bool[]>();
+        foreach (var (start, end) in intervals)
+        {
+            for (var date = DateOnly.FromDateTime(start); date <= DateOnly.FromDateTime(end); date = date.AddDays(1))
+            {
+                if (date < windowStart || date > windowEnd) continue;
+                var dayStart = date.ToDateTime(TimeOnly.MinValue);
+                var s = start > dayStart ? start : dayStart;
+                var e = end < dayStart.AddDays(1) ? end : dayStart.AddDays(1);
+                if (e <= s) continue;
+                if (!busyByDay.TryGetValue(date, out var slots)) busyByDay[date] = slots = new bool[slotsPerDay];
+                var first = (int)(s - dayStart).TotalMinutes / slotMinutes;
+                var last = ((int)Math.Ceiling((e - dayStart).TotalMinutes) - 1) / slotMinutes;
+                for (var i = first; i <= last && i < slotsPerDay; i++) slots[i] = true;
+            }
+        }
+
+        static List<(int StartMinute, int EndMinute)> FreeRanges(List<bool[]> daySlots)
+        {
+            var threshold = daySlots.Count / 2 + 1;
+            var ranges = new List<(int, int)>();
+            for (var i = 0; i < slotsPerDay;)
+            {
+                if (daySlots.Count(d => !d[i]) < threshold) { i++; continue; }
+                var startSlot = i;
+                while (i < slotsPerDay && daySlots.Count(d => !d[i]) >= threshold) i++;
+                ranges.Add((startSlot * slotMinutes, i * slotMinutes));
+            }
+            return ranges;
+        }
+
+        var ranges = new List<InsightsFreeRangeDto>();
+        if (busyByDay.Count > 0)
+        {
+            var byWeekday = busyByDay
+                .GroupBy(kv => kv.Key.DayOfWeek)
+                .ToDictionary(g => g.Key, g => g.Select(kv => kv.Value).ToList());
+            var fallback = FreeRanges(busyByDay.Values.ToList());
+
+            for (var weekday = 0; weekday < 7; weekday++)
+            {
+                var dayRanges = byWeekday.TryGetValue((DayOfWeek)weekday, out var slots) && slots.Count >= minWeekdaySamples
+                    ? FreeRanges(slots)
+                    : fallback;
+                ranges.AddRange(dayRanges.Select(r => new InsightsFreeRangeDto(weekday, r.StartMinute, r.EndMinute)));
+            }
+        }
+
+        return new InsightsEmptyProfileDto(ranges);
     }
 }

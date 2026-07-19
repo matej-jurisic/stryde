@@ -468,6 +468,18 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 
 ---
 
+## Likely-Free Calendar Overlay (July 2026) ✅
+
+**Goal:** Surface the unaccounted-time insight where planning happens - the calendar grid shows which times of each weekday usually stay empty, so free stretches are visible while scheduling.
+
+**Backend**
+- `InsightsService.GetEmptyProfileAsync` + `GET /api/insights/empty-profile`: per weekday, 30-minute slots (from local midnight - the calendar's grid, unlike the day-boundary-based stats) empty on a strict majority of that weekday's tracked days over the last 8 weeks; weekdays with fewer than 3 tracked days fall back to the all-days profile; today excluded - rules in spec.md Insights section
+
+**Frontend**
+- Calendar day/3-day/week views: hatched primary-tint overlay behind events on today and future days marking the likely-free ranges for that weekday; on by default, no interaction (drag-create/drag-move work through it); query key `['insights', 'empty-profile']`
+
+---
+
 ## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.

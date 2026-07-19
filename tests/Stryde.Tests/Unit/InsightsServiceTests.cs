@@ -244,4 +244,69 @@ public class InsightsServiceTests : IDisposable
         Assert.Null(insights.Categories[1].CategoryId);
         Assert.Equal(60, insights.Categories[1].TimeMinutes);
     }
+
+    // Now (2026-07-07) is a Tuesday; Mondays in the lookback window include Jun 22, Jun 29, Jul 6.
+
+    [Fact]
+    public async Task GetEmptyProfileAsync_weekday_profile_marks_majority_empty_slots()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "work");
+        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 22, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 22, 17, 0, 0, TimeSpan.Zero));
+        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 29, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 29, 17, 0, 0, TimeSpan.Zero));
+        await AddOccurrenceAsync(userId, work, At(6, 9), At(6, 17));
+
+        var profile = await _ctx.InsightsService.GetEmptyProfileAsync(userId, Now);
+
+        var monday = profile.Ranges.Where(r => r.Weekday == 1).OrderBy(r => r.StartMinute).ToList();
+        Assert.Equal(2, monday.Count);
+        Assert.Equal((0, 540), (monday[0].StartMinute, monday[0].EndMinute));
+        Assert.Equal((1020, 1440), (monday[1].StartMinute, monday[1].EndMinute));
+    }
+
+    [Fact]
+    public async Task GetEmptyProfileAsync_thin_weekday_falls_back_to_all_days_profile()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "work");
+        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 22, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 22, 17, 0, 0, TimeSpan.Zero));
+        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 29, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 29, 17, 0, 0, TimeSpan.Zero));
+        await AddOccurrenceAsync(userId, work, At(6, 9), At(6, 17));
+        // A single fully busy Tuesday: below the 3-sample minimum, so Tuesday uses the all-days profile.
+        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
+
+        var profile = await _ctx.InsightsService.GetEmptyProfileAsync(userId, Now);
+
+        var tuesday = profile.Ranges.Where(r => r.Weekday == 2).OrderBy(r => r.StartMinute).ToList();
+        Assert.Equal(2, tuesday.Count);
+        Assert.Equal((0, 540), (tuesday[0].StartMinute, tuesday[0].EndMinute));
+        Assert.Equal((1020, 1440), (tuesday[1].StartMinute, tuesday[1].EndMinute));
+    }
+
+    [Fact]
+    public async Task GetEmptyProfileAsync_excludes_today()
+    {
+        var userId = await CreateUserAsync();
+        var run = await AddActivityAsync(userId, "run");
+        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 10)); // today only
+
+        var profile = await _ctx.InsightsService.GetEmptyProfileAsync(userId, Now);
+
+        Assert.Empty(profile.Ranges);
+    }
+
+    [Fact]
+    public async Task GetEmptyProfileAsync_overnight_interval_covers_both_days()
+    {
+        var userId = await CreateUserAsync();
+        var sleep = await AddActivityAsync(userId, "sleep");
+        await AddOccurrenceAsync(userId, sleep, At(5, 23), At(6, 7)); // Sun 23:00 -> Mon 07:00
+
+        var profile = await _ctx.InsightsService.GetEmptyProfileAsync(userId, Now);
+
+        // Two tracked days, each a 1-sample weekday, so every weekday uses the all-days profile:
+        // free only where both days were empty, 07:00-23:00.
+        Assert.Equal(7, profile.Ranges.Count);
+        Assert.All(profile.Ranges, r => Assert.Equal((420, 1380), (r.StartMinute, r.EndMinute)));
+    }
 }

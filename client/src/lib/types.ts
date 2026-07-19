@@ -151,6 +151,17 @@ export interface InsightsUnusedBlock {
   days: number
 }
 
+// Calendar overlay: minutes from local midnight; weekday 0 = Sunday (matches Date.getDay)
+export interface InsightsFreeRange {
+  weekday: number
+  startMinute: number
+  endMinute: number
+}
+
+export interface InsightsEmptyProfile {
+  ranges: InsightsFreeRange[]
+}
+
 export interface Insights {
   activities: InsightsActivity[]
   categories: InsightsCategory[]

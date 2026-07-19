@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, Menu, Plus, LayoutGrid, CalendarCheck } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { occurrencesApi, settingsApi } from '@/lib/api'
+import { occurrencesApi, settingsApi, insightsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
-import type { Activity, Occurrence } from '@/lib/types'
+import type { Activity, Occurrence, InsightsFreeRange } from '@/lib/types'
 import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
 import { EventModal } from '@/components/events/EventModal'
 import { EventDetailModal } from '@/components/events/EventDetailModal'
@@ -479,9 +479,10 @@ interface DayColumnProps {
   movingEventId: string | null
   resizingEventId: string | null
   hourPx: number
+  likelyFree: InsightsFreeRange[]
 }
 
-function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx }: DayColumnProps) {
+function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx, likelyFree }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
@@ -510,6 +511,18 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
       className={`relative flex-1 ${borderLeft ? 'border-l border-border' : ''} ${borderRight ? 'border-r border-border' : ''}`}
       style={{ minHeight: hourPx * 24 }}
     >
+      {/* Likely-free overlay: hatched stretches that are usually empty at this time on this weekday */}
+      {likelyFree.map((r, i) => (
+        <div
+          key={`lf${i}`}
+          className="pointer-events-none absolute inset-x-0"
+          style={{
+            top: (r.startMinute / 60) * hourPx,
+            height: ((r.endMinute - r.startMinute) / 60) * hourPx,
+            background: 'var(--calendar-free-hatch)',
+          }}
+        />
+      ))}
       {/* Hour lines, incl. the 24:00 closing line — skip h=0, sticky header border-b already provides that separator */}
       {Array.from({ length: 25 }, (_, h) => h > 0 && (
         <div
@@ -843,6 +856,22 @@ export function CalendarPage() {
     queryFn: () => occurrencesApi.list({ floating: true, status: 'pending' }),
     staleTime: 30 * 1000,
   })
+
+  const { data: emptyProfile } = useQuery({
+    queryKey: ['insights', 'empty-profile'],
+    queryFn: insightsApi.emptyProfile,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const likelyFreeByWeekday = useMemo(() => {
+    const map = new Map<number, InsightsFreeRange[]>()
+    for (const r of emptyProfile?.ranges ?? []) {
+      const list = map.get(r.weekday)
+      if (list) list.push(r)
+      else map.set(r.weekday, [r])
+    }
+    return map
+  }, [emptyProfile])
 
   // The FLOAT row shows planned floating tasks before unplanned ones.
   const floatingTasks = useMemo(
@@ -2321,6 +2350,7 @@ export function CalendarPage() {
                   movingEventId={movingEventId}
                   resizingEventId={resizingEventId}
                   hourPx={hourPx}
+                  likelyFree={day.getTime() >= effectiveToday.getTime() ? (likelyFreeByWeekday.get(day.getDay()) ?? []) : []}
                 />
               ))}
             </div>

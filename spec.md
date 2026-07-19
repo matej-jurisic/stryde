@@ -263,6 +263,8 @@ Read-only stats over **done occurrences**, computed server-side (`GET /api/insig
 | Largest gaps | Top 5 contiguous untracked stretches across the window's tracked days. Busy intervals come from all completed timed occurrences (so an overnight occurrence covers the next morning), clamped to each day's boundary-to-boundary span and merged before gaps are read off. Times are local clock strings. |
 | Unused blocks | Top 3 maximal runs of consecutive 1-hour slots (aligned to the day boundary) that are fully empty on a strict majority of tracked days, ranked by days-empty (a run's weakest slot) then length. |
 
+**Likely-free profile** (`GET /api/insights/empty-profile`) - powers the calendar overlay of times that usually stay empty. Unlike the stats above, days here are midnight-to-midnight local calendar dates (the grid the calendar renders), not day-boundary days. Over the last 8 full weeks (today excluded), a day is "tracked" when at least one completed timed occurrence overlaps it; per weekday, a 1-hour slot is likely free when it was empty on a strict majority of that weekday's tracked days. Weekdays with fewer than 3 tracked days fall back to the profile over all tracked days. Consecutive free slots merge into ranges, returned as minutes from local midnight with weekday 0 = Sunday. The client renders the ranges as a hatched background on today and future day columns only; unaccounted time is by definition genuinely free time (everything is assumed logged), so the overlay reads "your usual free time", not "missing data".
+
 ---
 
 ## Settings

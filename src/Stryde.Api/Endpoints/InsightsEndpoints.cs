@@ -17,5 +17,14 @@ public static class InsightsEndpoints
             var insights = await svc.GetAsync(userId.Value, period ?? 30);
             return Results.Ok(insights);
         }).RequireAuthorization();
+
+        app.MapGet("/api/insights/empty-profile", async (
+            ClaimsPrincipal principal,
+            InsightsService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            return Results.Ok(await svc.GetEmptyProfileAsync(userId.Value));
+        }).RequireAuthorization();
     }
 }

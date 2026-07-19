@@ -219,6 +219,11 @@ public sealed record InsightsGapDto(string Day, string Start, string End, int Mi
 // A run of hour slots that is empty on most tracked days. EmptyDays uses the run's weakest slot.
 public sealed record InsightsUnusedBlockDto(string Start, string End, int EmptyDays, int Days);
 
+// Calendar overlay: minutes from local midnight; weekday 0 = Sunday (matches both .NET DayOfWeek and JS getDay).
+public sealed record InsightsFreeRangeDto(int Weekday, int StartMinute, int EndMinute);
+
+public sealed record InsightsEmptyProfileDto(List<InsightsFreeRangeDto> Ranges);
+
 public sealed record InsightsDto(
     List<InsightsActivityDto> Activities,
     List<InsightsCategoryDto> Categories,
