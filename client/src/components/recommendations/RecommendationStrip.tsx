@@ -292,9 +292,7 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
             <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-4">
               <div className="flex items-baseline gap-2">
                 <span className="text-sm font-semibold text-foreground">Suggestions</span>
-                {label !== 'today' && (
-                  <span className="text-xs text-muted-foreground">{label}</span>
-                )}
+                <span className="text-xs text-muted-foreground">{label}</span>
               </div>
               <button
                 onClick={onMobileClose}
