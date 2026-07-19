@@ -213,6 +213,11 @@ export const insightsApi = {
   emptyProfile: () => request<InsightsEmptyProfile>('/api/insights/empty-profile'),
 }
 
+// Full data snapshot for external analysis; shape mirrors ExportDto and is not pinned in types.ts.
+export const exportApi = {
+  get: () => request<Record<string, unknown>>('/api/export'),
+}
+
 export const authApi = {
   register: (username: string, password: string, timezone: string) =>
     request<AuthResponse>('/api/auth/register', {

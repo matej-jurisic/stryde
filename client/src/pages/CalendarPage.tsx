@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, Menu, Plus, LayoutGrid, CalendarCheck } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Menu, Plus, LayoutGrid, CalendarCheck } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, settingsApi, insightsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
@@ -12,6 +12,10 @@ import { RecommendationPanel } from '@/components/recommendations/Recommendation
 const DEFAULT_HOUR_PX = 64
 const MIN_HOUR_PX = 32
 const MAX_HOUR_PX = 128
+// Visual floor for short events. 16px = 30 min at MIN_HOUR_PX, so at max
+// zoom-out a half-hour block still matches its true span and only shorter
+// events get inflated.
+const MIN_EVENT_PX = 16
 
 // ── Date utilities ─────────────────────────────────────────────────────────
 
@@ -189,7 +193,7 @@ function layoutDay(events: Occurrence[], day: Date, hourPx: number): LayoutEvent
       // Due pins keep their exact 30-minute height so they scale with zoom
       heightPx: isDueOccurrence(event)
         ? ((end - s) / 60) * hourPx
-        : Math.max(((end - s) / 60) * hourPx, 28),
+        : Math.max(((end - s) / 60) * hourPx, MIN_EVENT_PX),
       trueEndPx: (end / 60) * hourPx,
     }
   })
@@ -287,6 +291,10 @@ function EventBlock({
   // Handles show always when resizing (touch mode), or on mouse hover via CSS
   const handleVisibility = isResizing ? 'flex' : 'hidden group-hover/calev:flex'
 
+  // Below this height the normal padding + line-height overflow the block, so
+  // drop to a single tightly-packed text line.
+  const compact = heightPx < 20
+
   function stopAll(e: React.SyntheticEvent) {
     e.stopPropagation()
   }
@@ -311,7 +319,7 @@ function EventBlock({
       data-true-end-px={trueEndPx}
       style={{
         top: topPx + GAP,
-        height: Math.max(heightPx - GAP, isDue ? 14 : 20),
+        height: Math.max(heightPx - GAP, 14),
         left: `calc(${leftPct}% + ${GAP}px)`,
         width: `calc(${widthPct}% - ${GAP * 2}px)`,
         zIndex: isResizing ? 25 : undefined,
@@ -323,7 +331,8 @@ function EventBlock({
           className={`absolute inset-0 flex items-start overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : isSkipped ? 'opacity-25' : ''}`}
           style={{
             border: isPlanned ? `1.5px dashed ${accentColor}` : `1px solid ${accentColor}`,
-            backgroundColor: `${accentColor}18`,
+            // Opaque card base so the likely-free hatch never bleeds through
+            background: `linear-gradient(${accentColor}18, ${accentColor}18), var(--color-card)`,
             touchAction: 'pan-y',
           }}
           onPointerDown={bodyPointerProps.onPointerDown}
@@ -359,21 +368,24 @@ function EventBlock({
           {/* Event body */}
           {isPlanned ? (
             <button
-              className={`absolute inset-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : isSkipped ? 'opacity-25' : 'opacity-70'}`}
+              className={`absolute inset-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-80 cursor-grab active:cursor-grabbing ${isDone ? 'opacity-40' : isSkipped ? 'opacity-25' : ''}`}
               style={{
-                background: `repeating-linear-gradient(135deg, transparent, transparent 4px, ${accentFaded} 4px, ${accentFaded} 8px)`,
+                // Opaque card base so the likely-free hatch (same stripe pattern)
+                // never shows through a planned block
+                background: `repeating-linear-gradient(135deg, transparent, transparent 4px, ${accentFaded} 4px, ${accentFaded} 8px), var(--color-card)`,
                 border: `1.5px dashed ${accentMid}`,
                 touchAction: 'pan-y',
               }}
               onPointerDown={bodyPointerProps.onPointerDown}
               onClick={bodyPointerProps.onClick}
             >
-              <div className="px-1.5 py-0.5">
-                {heightPx >= 20 && (
-                  <p className="overflow-hidden whitespace-nowrap text-[10px] font-medium leading-tight" style={{ color: accentColor }}>
-                    {event.effectiveTitle}{durationLabel ? ` ${durationLabel}` : ''}
-                  </p>
-                )}
+              <div className={compact ? 'px-1.5 py-px' : 'px-1.5 py-0.5'}>
+                <p
+                  className={`overflow-hidden whitespace-nowrap text-[10px] font-medium ${compact ? 'leading-none' : 'leading-tight'}`}
+                  style={{ color: accentColor }}
+                >
+                  {event.effectiveTitle}{durationLabel ? ` ${durationLabel}` : ''}
+                </p>
               </div>
             </button>
           ) : (
@@ -387,16 +399,16 @@ function EventBlock({
               />
               <div className="relative flex h-full">
                 <div style={{ width: 3, minWidth: 3, background: leftColor }} className="shrink-0" />
-                <div className="@container min-w-0 flex-1 px-1.5 py-0.5">
-                  {heightPx >= 20 && (
-                    <p
-                      className={`@max-[10px]:hidden break-all overflow-hidden text-[11px] font-medium leading-tight ${
-                        isDone ? 'line-through text-muted-foreground' : isSkipped ? 'text-muted-foreground/60' : textClass
-                      }`}
-                    >
-                      {event.effectiveTitle}
-                    </p>
-                  )}
+                <div className={`@container min-w-0 flex-1 px-1.5 ${compact ? 'py-px' : 'py-0.5'}`}>
+                  <p
+                    className={`@max-[10px]:hidden overflow-hidden font-medium ${
+                      compact ? 'whitespace-nowrap text-[10px] leading-none' : 'break-all text-[11px] leading-tight'
+                    } ${
+                      isDone ? 'line-through text-muted-foreground' : isSkipped ? 'text-muted-foreground/60' : textClass
+                    }`}
+                  >
+                    {event.effectiveTitle}
+                  </p>
                   {heightPx >= 44 && timeText && (
                     <p className={`@max-[10px]:hidden overflow-hidden whitespace-nowrap text-[10px] leading-tight opacity-70 ${isDone ? 'text-muted-foreground' : textClass}`}>
                       {timeText}
@@ -737,9 +749,13 @@ export function CalendarPage() {
   const [viewDropOpen, setViewDropOpen] = useState(false)
   const viewDropRef = useRef<HTMLDivElement>(null)
   const [current, setCurrent] = useState(() => {
-    const saved = localStorage.getItem('stryde-calendar-view')
-    const d = new Date()
-    return saved === 'week' ? startOfWeek(d) : d
+    const savedView = localStorage.getItem('stryde-calendar-view')
+    // Session-scoped on purpose: coming back mid-session restores the viewed
+    // day, but a fresh launch always starts on today.
+    const savedDate = sessionStorage.getItem('stryde-calendar-date')
+    let d = savedDate ? new Date(savedDate + 'T00:00:00') : new Date()
+    if (isNaN(d.getTime())) d = new Date()
+    return savedView === 'week' ? startOfWeek(d) : d
   })
   const [modalOpen, setModalOpen] = useState(false)
   const [editingOccurrence, setEditingOccurrence] = useState<Occurrence | undefined>()
@@ -902,6 +918,10 @@ export function CalendarPage() {
   }, [isLoading])
 
   useEffect(() => {
+    sessionStorage.setItem('stryde-calendar-date', formatDateInput(current))
+  }, [current])
+
+  useEffect(() => {
     const el = dateInputRef.current
     if (!el) return
     const handler = (e: WheelEvent) => e.preventDefault()
@@ -1029,6 +1049,14 @@ export function CalendarPage() {
   function next() {
     const step = view === 'day' ? 1 : view === '3day' ? 3 : 7
     setCurrent((d) => addDays(d, step))
+  }
+
+  function prevDay() {
+    setCurrent((d) => addDays(d, -1))
+  }
+
+  function nextDay() {
+    setCurrent((d) => addDays(d, 1))
   }
 
   function goToday() {
@@ -1211,7 +1239,7 @@ export function CalendarPage() {
         setMoveOverlay({
           dayIdx: curDayIdx,
           topPx: (startMin / 60) * hourPxRef.current,
-          heightPx: isDue ? duePinHeight(hourPxRef.current) : Math.max((durationMin / 60) * hourPxRef.current, 20),
+          heightPx: isDue ? duePinHeight(hourPxRef.current) : Math.max((durationMin / 60) * hourPxRef.current, MIN_EVENT_PX),
         })
         startAutoScroll(mv.clientX, mv.clientY)
       }
@@ -1518,7 +1546,7 @@ export function CalendarPage() {
     const snap = isDue ? snapToGridDue : snapToGrid
     const durationMinutes = event.durationMinutes ?? 60
     const durationMs = durationMinutes * 60 * 1000
-    const heightPx = isDue ? duePinHeight(hourPxRef.current) : Math.max((durationMinutes / 60) * hourPxRef.current, 20)
+    const heightPx = isDue ? duePinHeight(hourPxRef.current) : Math.max((durationMinutes / 60) * hourPxRef.current, MIN_EVENT_PX)
     const pointerId = e.pointerId
     const isTouch = e.pointerType === 'touch'
     const startClientX = e.clientX
@@ -1773,7 +1801,7 @@ export function CalendarPage() {
       const endMin = (segEndMs - dayStartMs) / 60000
       result.set(i, {
         topPx: (startMin / 60) * hourPxRef.current,
-        heightPx: Math.max(((endMin - startMin) / 60) * hourPxRef.current, 20),
+        heightPx: Math.max(((endMin - startMin) / 60) * hourPxRef.current, MIN_EVENT_PX),
       })
     }
     return result
@@ -1924,7 +1952,7 @@ export function CalendarPage() {
           setMoveOverlay({
             dayIdx: curDayIdx,
             topPx: (startMin / 60) * hp,
-            heightPx: isEvDue ? duePinHeight(hp) : Math.max((durationMin / 60) * hp, 20),
+            heightPx: isEvDue ? duePinHeight(hp) : Math.max((durationMin / 60) * hp, MIN_EVENT_PX),
           })
         } else if (resizeDragActiveRef.current && resizeStateRef.current) {
           const rs = resizeStateRef.current
@@ -1942,7 +1970,7 @@ export function CalendarPage() {
             const startSnapped = isPillDue ? snapToGridDue(days[curDayIdx], curY, hourPxRef.current) : snapToGrid(days[curDayIdx], curY, hourPxRef.current)
             const startMin = startSnapped.getHours() * 60 + startSnapped.getMinutes()
             const hp = hourPxRef.current
-            setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * hp, heightPx: isPillDue ? duePinHeight(hp) : Math.max((dur / 60) * hp, 20) })
+            setMoveOverlay({ dayIdx: curDayIdx, topPx: (startMin / 60) * hp, heightPx: isPillDue ? duePinHeight(hp) : Math.max((dur / 60) * hp, MIN_EVENT_PX) })
           }
         }
       }
@@ -1960,8 +1988,8 @@ export function CalendarPage() {
     const startY = getYInGrid(startClientY)
     if ((e.target as Element).closest('button')) {
       // Allow drag creation in the minimum-height overflow zone below the event's true end time.
-      // Short events get a visual minimum height (28px) that extends their button below their
-      // actual end time; without this check the next 15-min slot appears unreachable.
+      // Short events get a visual minimum height (MIN_EVENT_PX) that extends their button below
+      // their actual end time; without this check the next 15-min slot appears unreachable.
       const block = (e.target as Element).closest('[data-true-end-px]') as HTMLElement | null
       const trueEndPx = block ? parseFloat(block.dataset.trueEndPx ?? '99999') : 99999
       if (startY < trueEndPx) return
@@ -2131,15 +2159,43 @@ export function CalendarPage() {
         <div className="flex items-center gap-0.5">
           <button
             onClick={prev}
+            aria-label={view === 'day' ? 'Previous day' : view === '3day' ? 'Back 3 days' : 'Back 7 days'}
             className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
-            <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+            {view === 'day' ? (
+              <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+            ) : (
+              <ChevronsLeft className="h-4 w-4" strokeWidth={2} />
+            )}
           </button>
+          {view !== 'day' && (
+            <>
+              <button
+                onClick={prevDay}
+                aria-label="Back 1 day"
+                className="hidden md:flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+              </button>
+              <button
+                onClick={nextDay}
+                aria-label="Forward 1 day"
+                className="hidden md:flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <ChevronRight className="h-4 w-4" strokeWidth={2} />
+              </button>
+            </>
+          )}
           <button
             onClick={next}
+            aria-label={view === 'day' ? 'Next day' : view === '3day' ? 'Forward 3 days' : 'Forward 7 days'}
             className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
-            <ChevronRight className="h-4 w-4" strokeWidth={2} />
+            {view === 'day' ? (
+              <ChevronRight className="h-4 w-4" strokeWidth={2} />
+            ) : (
+              <ChevronsRight className="h-4 w-4" strokeWidth={2} />
+            )}
           </button>
         </div>
 

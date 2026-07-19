@@ -480,6 +480,18 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 
 ---
 
+## Data Export (July 2026) ✅
+
+**Goal:** One-click JSON export of all user data from Settings, good enough to hand to someone (or an LLM) for analysis. Not a backup: no import path, shape may change freely.
+
+**Backend**
+- `ExportService.GetAsync` + `GET /api/export`: single `ExportDto` with user, settings, categories, goals (with checkpoints), activities (with subtasks), and lean flat occurrences (`ExportOccurrenceDto` - effective title, no nested activity)
+
+**Frontend**
+- Settings page "Data" section: Export button downloads `stryde-export-<date>.json` via `exportApi.get` + blob download
+
+---
+
 ## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.

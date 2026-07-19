@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
+import { Download, LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
-import { settingsApi, authApi, ApiError } from '@/lib/api'
+import { settingsApi, authApi, exportApi, ApiError } from '@/lib/api'
+import { toastError } from '@/store/toasts'
 import { useAuthStore } from '@/store/auth'
 import { getThemePref, setThemePref, type ThemePref } from '@/lib/theme'
 import { isNative, getServerUrl, setServerUrl } from '@/lib/server-config'
@@ -108,6 +109,26 @@ export function SettingsPage() {
 
   async function handleLogout() {
     try { await authApi.logout() } finally { clear() }
+  }
+
+  const [exporting, setExporting] = useState(false)
+
+  async function handleExport() {
+    setExporting(true)
+    try {
+      const data = await exportApi.get()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `stryde-export-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toastError(err)
+    } finally {
+      setExporting(false)
+    }
   }
 
   function selectTheme(pref: ThemePref) {
@@ -216,6 +237,15 @@ export function SettingsPage() {
                   />
                 </SettingSection>
               )}
+
+              <SettingSection label="Data">
+                <SettingRow label="Export data" hint="Download everything as JSON: goals, checkpoints, categories, activities, occurrences.">
+                  <Button variant="outline" size="sm" onClick={handleExport} loading={exporting}>
+                    <Download className="mr-1.5 h-3.5 w-3.5" strokeWidth={2} />
+                    Export
+                  </Button>
+                </SettingRow>
+              </SettingSection>
 
               <SettingSection label="Account">
                 <SettingRow label={user?.username ?? ''} hint="Signed in">

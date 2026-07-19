@@ -243,7 +243,7 @@ Only these views are in scope for v1:
 | Goals | Goal list with progress insight per goal. Checkpoint management. |
 | Activities | Manage activity definitions: create, edit, delete activities grouped by goal. |
 | Insights | Completion stats: headline counts, streak, 14-day chart, category breakdown. |
-| Settings | Timezone, day boundary, max Focus goals, appearance, sign out. |
+| Settings | Timezone, day boundary, max Focus goals, appearance, JSON data export, sign out. |
 
 Additional views (Cockpit, Lab) are deferred — defined during development if needed.
 

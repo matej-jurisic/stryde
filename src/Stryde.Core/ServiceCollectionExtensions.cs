@@ -28,6 +28,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<RecommendationService>();
         services.AddScoped<CategoryService>();
         services.AddScoped<InsightsService>();
+        services.AddScoped<ExportService>();
 
         return services;
     }
