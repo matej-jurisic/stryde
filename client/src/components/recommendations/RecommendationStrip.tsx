@@ -12,10 +12,25 @@ export interface ActivityTiming {
 
 interface RecommendationPanelProps {
   date: string
+  /** The user's current day (boundary-adjusted, computed by the page) as YYYY-MM-DD. */
+  today: string
   onOccurrenceClick: (o: Occurrence) => void
   onActivityClick: (a: Activity, timing: ActivityTiming) => void
   mobileOpen?: boolean
   onMobileClose?: () => void
+}
+
+// 'today' / 'tomorrow' / 'yesterday', or a short date like 'Tue, Jul 21'
+function dayLabel(date: string, today: string): string {
+  const parse = (s: string) => {
+    const [y, m, d] = s.split('-').map(Number)
+    return { utc: Date.UTC(y, m - 1, d), local: new Date(y, m - 1, d) }
+  }
+  const diff = Math.round((parse(date).utc - parse(today).utc) / 86400000)
+  if (diff === 0) return 'today'
+  if (diff === 1) return 'tomorrow'
+  if (diff === -1) return 'yesterday'
+  return parse(date).local.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
 function tierLabel(tier: number): string {
@@ -136,7 +151,10 @@ function ActivityRecItem({
   )
 }
 
-export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, mobileOpen, onMobileClose }: RecommendationPanelProps) {
+export function RecommendationPanel({ date, today, onOccurrenceClick, onActivityClick, mobileOpen, onMobileClose }: RecommendationPanelProps) {
+  const label = dayLabel(date, today)
+  const isNamedDay = label === 'today' || label === 'tomorrow' || label === 'yesterday'
+
   const { data: recommendations = [], isLoading } = useQuery({
     queryKey: ['recommendations', date],
     queryFn: () => recommendationsApi.list(date),
@@ -256,7 +274,9 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
       <section className="hidden md:flex w-80 shrink-0 flex-col overflow-hidden border-r border-border bg-background">
         <div className="shrink-0 px-5 py-5">
           <h1 className="text-lg font-semibold text-foreground">Suggestions</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">What to add to your schedule today.</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            What to add to your schedule {isNamedDay ? label : `on ${label}`}.
+          </p>
         </div>
         <div className="scroll-slim flex-1 overflow-y-auto px-3 pb-6">{renderBody()}</div>
       </section>
@@ -270,7 +290,12 @@ export function RecommendationPanel({ date, onOccurrenceClick, onActivityClick, 
           />
           <div className="relative z-10 flex w-72 shrink-0 flex-col overflow-hidden border-r border-border bg-background animate-modal-panel-left">
             <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-4">
-              <span className="text-sm font-semibold text-foreground">Suggestions</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-sm font-semibold text-foreground">Suggestions</span>
+                {label !== 'today' && (
+                  <span className="text-xs text-muted-foreground">{label}</span>
+                )}
+              </div>
               <button
                 onClick={onMobileClose}
                 className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"

@@ -293,7 +293,7 @@ export function PlanPage() {
 
     if (timing?.startTime) {
       const [h, m] = timing.startTime.split(':').map(Number)
-      const start = new Date()
+      const start = new Date(current)
       start.setHours(h, m, 0, 0)
       const z = (n: number) => String(n).padStart(2, '0')
       const fmt = (d: Date) =>
@@ -325,6 +325,7 @@ export function PlanPage() {
     <div className="flex flex-1 overflow-hidden">
       <RecommendationPanel
         date={dateStr}
+        today={formatDateInput(effectiveToday)}
         onOccurrenceClick={openSchedule}
         onActivityClick={openFromActivity}
         mobileOpen={drawerOpen}

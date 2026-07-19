@@ -513,6 +513,7 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 - Free slot awareness: activities are only suggested if their typical duration fits at least one free gap on the target day (today: from now; future day: whole day; past day: no filtering); no history = always included
 - Cadence ranking: tiers 1/2/4 rank by overdueness (days since last completion / median gap between completion days), so just-done activities sink and past-rhythm ones float up; activities whose typical start time is already occupied or past are downranked
 - Stats windowing: timing hints and cadence derive from the last 90 days of completed history only
+- Date-aware suggestions on the Calendar page: the sidebar targets the viewed day (multi-day views: today while visible, otherwise the first visible day) instead of always today; the panel header names the target day, and clicking a suggestion pre-fills that day's date on both Calendar and Plan pages
 
 **UX hardening** (shipped ahead of the Polish phase)
 - Toast notifications (`store/toasts.ts` + `components/ui/Toasts.tsx`): every mutation without inline error display now reports failures via `toastError`

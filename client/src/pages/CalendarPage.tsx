@@ -839,6 +839,13 @@ export function CalendarPage() {
     return Array.from({ length: 7 }, (_, i) => addDays(sod(current), i))
   }, [view, current])
 
+  // Day the suggestions sidebar targets: the viewed day in day view; in
+  // multi-day views, today while it is visible, otherwise the first visible day.
+  const suggestionsDay = useMemo(() => {
+    if (view === 'day') return sod(current)
+    return days.some((d) => isSameDay(d, effectiveToday)) ? effectiveToday : days[0]
+  }, [view, current, days, effectiveToday])
+
   const rangeStart = days[0]
   const rangeEnd = addDays(days[days.length - 1], 1)
 
@@ -1037,7 +1044,7 @@ export function CalendarPage() {
 
     if (timing?.startTime) {
       const [h, m] = timing.startTime.split(':').map(Number)
-      const start = new Date()
+      const start = new Date(suggestionsDay)
       start.setHours(h, m, 0, 0)
       const startStr = formatDatetimeLocal(start)
       setDefaultStartAt(startStr)
@@ -2102,7 +2109,8 @@ export function CalendarPage() {
   return (
     <div className="flex flex-1 overflow-hidden">
       <RecommendationPanel
-        date={formatDateInput(effectiveToday)}
+        date={formatDateInput(suggestionsDay)}
+        today={formatDateInput(effectiveToday)}
         onOccurrenceClick={openSchedule}
         onActivityClick={openFromActivity}
         mobileOpen={drawerOpen}
