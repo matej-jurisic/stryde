@@ -3,8 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Trash2, Plus } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
-import { Field } from '@/components/ui/Field'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Select } from '@/components/ui/Select'
+import { DateTimePicker } from '@/components/ui/DateTimePicker'
 import { occurrencesApi, activitiesApi, categoriesApi, goalsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import type { Activity, ActivityKind, Occurrence } from '@/lib/types'
@@ -425,24 +426,22 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                       {occurrence?.activity.title}
                     </div>
                   ) : (
-                    <select
+                    <Select
                       value={form.activityId}
-                      onChange={(e) => {
-                        if (e.target.value === '__new__') {
-                          setShowNewActivity(true)
-                        } else {
-                          setForm((f) => ({ ...f, activityId: e.target.value }))
-                          setShowNewActivity(false)
-                        }
+                      onChange={(v) => {
+                        setForm((f) => ({ ...f, activityId: v }))
+                        setShowNewActivity(false)
                       }}
-                      className={`h-10 w-full rounded-lg border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring ${errors.activityId ? 'border-destructive' : 'border-input'}`}
-                    >
-                      <option value="">Select an activity...</option>
-                      {activities.map((a) => (
-                        <option key={a.id} value={a.id}>{a.title}{a.goal ? ` (${a.goal.title})` : ''}</option>
-                      ))}
-                      <option value="__new__">+ Create new activity</option>
-                    </select>
+                      options={activities.map((a) => ({
+                        value: a.id,
+                        label: a.title,
+                        sublabel: a.goal?.title,
+                      }))}
+                      placeholder="Select an activity..."
+                      error={Boolean(errors.activityId)}
+                      onCreateNew={() => setShowNewActivity(true)}
+                      createNewLabel="+ Create new activity"
+                    />
                   )}
                 </>
               )}
@@ -488,16 +487,14 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                 autoFocus
                 className="h-8 min-w-0 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
-              <select
+              <Select
                 value={newActivityCategoryId}
-                onChange={(e) => setNewActivityCategoryId(e.target.value)}
-                className="h-8 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">No category</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+                onChange={setNewActivityCategoryId}
+                options={[
+                  { value: '', label: 'No category' },
+                  ...categories.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+              />
               <div className="flex gap-2">
                 <Button
                   size="sm"
@@ -545,18 +542,11 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                 <label className="text-sm font-medium text-foreground">Due date</label>
                 <div className="flex gap-1.5">{allDayButton}{endOfDayButton}</div>
               </div>
-              <input
-                type={isAllDay ? 'date' : 'datetime-local'}
-                value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
-                onChange={(e) => {
-                  if (isAllDay) {
-                    setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
-                  } else {
-                    setForm((f) => ({ ...f, startAt: e.target.value }))
-                  }
-                }}
+              <DateTimePicker
+                value={form.startAt}
+                onChange={(v) => setForm((f) => ({ ...f, startAt: v }))}
+                mode={isAllDay ? 'date' : 'datetime'}
                 autoFocus={focusStartAt}
-                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
           )}
@@ -568,27 +558,25 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                   <label className="text-sm font-medium text-foreground">{isPlanned ? 'Window start' : 'Start'}</label>
                   {allDayButton}
                 </div>
-                <input
-                  type={isAllDay ? 'date' : 'datetime-local'}
-                  value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
-                  onChange={(e) => {
-                    if (isAllDay) {
-                      setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
-                    } else {
-                      setForm((f) => ({ ...f, startAt: e.target.value }))
-                    }
-                  }}
+                <DateTimePicker
+                  value={form.startAt}
+                  onChange={(v) => setForm((f) => ({ ...f, startAt: v }))}
+                  mode={isAllDay ? 'date' : 'datetime'}
                   autoFocus={focusStartAt}
-                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
-              <Field
-                label={isAllDay ? 'End date' : (isPlanned ? 'Window end' : 'End')}
-                type={isAllDay ? 'date' : 'datetime-local'}
-                value={isAllDay ? (form.endAt ? form.endAt.substring(0, 10) : '') : form.endAt}
-                onChange={(e) => setForm((f) => ({ ...f, endAt: isAllDay ? (e.target.value ? e.target.value + 'T00:00' : '') : e.target.value }))}
-                error={errors.endAt}
-              />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-foreground">
+                  {isAllDay ? 'End date' : (isPlanned ? 'Window end' : 'End')}
+                </label>
+                <DateTimePicker
+                  value={form.endAt}
+                  onChange={(v) => setForm((f) => ({ ...f, endAt: v }))}
+                  mode={isAllDay ? 'date' : 'datetime'}
+                  error={Boolean(errors.endAt)}
+                />
+                {errors.endAt && <p className="text-xs text-destructive">{errors.endAt}</p>}
+              </div>
             </div>
           )}
 
@@ -626,38 +614,34 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
                 <label className="text-sm font-medium text-foreground">Date</label>
                 <div className="flex gap-1.5">{allDayButton}{endOfDayButton}</div>
               </div>
-              <input
-                type={isAllDay ? 'date' : 'datetime-local'}
-                value={isAllDay ? (form.startAt ? form.startAt.substring(0, 10) : '') : form.startAt}
-                onChange={(e) => {
-                  if (isAllDay) {
-                    setForm((f) => ({ ...f, startAt: e.target.value ? e.target.value + 'T00:00' : '' }))
-                  } else {
-                    setForm((f) => ({ ...f, startAt: e.target.value }))
-                  }
-                }}
+              <DateTimePicker
+                value={form.startAt}
+                onChange={(v) => setForm((f) => ({ ...f, startAt: v }))}
+                mode={isAllDay ? 'date' : 'datetime'}
                 autoFocus={focusStartAt}
-                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
           )}
 
           {timeMode === 'scheduled' && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field
-                label="Window start"
-                type="datetime-local"
-                value={form.startAt}
-                onChange={(e) => setForm((f) => ({ ...f, startAt: e.target.value }))}
-                autoFocus={focusStartAt}
-              />
-              <Field
-                label="Window end"
-                type="datetime-local"
-                value={form.endAt}
-                onChange={(e) => setForm((f) => ({ ...f, endAt: e.target.value }))}
-                error={errors.endAt}
-              />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-foreground">Window start</label>
+                <DateTimePicker
+                  value={form.startAt}
+                  onChange={(v) => setForm((f) => ({ ...f, startAt: v }))}
+                  autoFocus={focusStartAt}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-foreground">Window end</label>
+                <DateTimePicker
+                  value={form.endAt}
+                  onChange={(v) => setForm((f) => ({ ...f, endAt: v }))}
+                  error={Boolean(errors.endAt)}
+                />
+                {errors.endAt && <p className="text-xs text-destructive">{errors.endAt}</p>}
+              </div>
             </div>
           )}
 
@@ -755,29 +739,27 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium text-foreground">Category</label>
-                <select
+                <Select
                   value={form.categoryId}
-                  onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
-                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="">No category</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setForm((f) => ({ ...f, categoryId: v }))}
+                  options={[
+                    { value: '', label: 'No category' },
+                    ...categories.map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-foreground">Goal <span className="font-normal text-muted-foreground">(optional)</span></label>
-                <select
+                <label className="text-sm font-medium text-foreground">
+                  Goal <span className="font-normal text-muted-foreground">(optional)</span>
+                </label>
+                <Select
                   value={form.goalId}
-                  onChange={(e) => setForm((f) => ({ ...f, goalId: e.target.value }))}
-                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="">No goal</option>
-                  {goals.map((g) => (
-                    <option key={g.id} value={g.id}>{g.title}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setForm((f) => ({ ...f, goalId: v }))}
+                  options={[
+                    { value: '', label: 'No goal' },
+                    ...goals.map((g) => ({ value: g.id, label: g.title })),
+                  ]}
+                />
               </div>
             </div>
           )}
