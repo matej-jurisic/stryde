@@ -171,20 +171,19 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_tier4_bench_surfaces_only_when_tiers_1_to_3_empty()
+    public async Task GetAsync_bench_goal_activity_never_surfaces()
     {
         var userId = await CreateUserAsync();
-        var bench = await AddActivityAsync(userId, "bench task", GoalStatus.bench);
+        await AddActivityAsync(userId, "bench task", GoalStatus.bench);
 
         var alone = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
-        Assert.Single(alone);
-        Assert.Equal(4, alone[0].Tier);
-        Assert.Equal(bench.Id, alone[0].Activity!.Id);
+        Assert.Empty(alone);
 
         await AddActivityAsync(userId, "focus task", GoalStatus.focus);
 
         var withFocus = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
-        Assert.DoesNotContain(withFocus, r => r.Activity?.Id == bench.Id);
+        Assert.Single(withFocus);
+        Assert.Equal(1, withFocus[0].Tier);
     }
 
     [Fact]

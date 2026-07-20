@@ -80,7 +80,7 @@ export const activitiesApi = {
   create: (body: { title: string; categoryId?: string | null; goalId?: string | null }) =>
     request<Activity>('/api/activities', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null }) =>
+  update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; excludeFromRecommendations?: boolean }) =>
     request<Activity>(`/api/activities/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (id: string) => request<void>(`/api/activities/${id}`, { method: 'DELETE' }),

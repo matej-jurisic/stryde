@@ -520,7 +520,8 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 - Restart policies on all services
 
 **Recommendation engine improvements** (shipped ahead of Phase 12)
-- Goal-linked tiers (1/2/4) now surface **activities**, not individual floating occurrences - floating occurrences remain visible in the "Floating" section of the panel
+- Bench goal activities hidden from suggestions and calendar float row: activities linked to a benched goal no longer appear in any recommendation tier or the FLOAT row (previously tier 4 surfaced them as a fallback when no other suggestions existed)
+- Goal-linked tiers (1/2) now surface **activities**, not individual floating occurrences - floating occurrences remain visible in the "Floating" section of the panel
 - Timing hints: each suggestion displays the activity's median duration and most common start time from completed history (rounded to 15 min); clicking "schedule" pre-fills the modal with start + end time
 - Free slot awareness: activities are only suggested if their typical duration fits at least one free gap on the target day (today: from now; future day: whole day; past day: no filtering); no history = always included
 - Cadence ranking: tiers 1/2/4 rank by overdueness (days since last completion / median gap between completion days), so just-done activities sink and past-rhythm ones float up; activities whose typical start time is already occupied or past are downranked

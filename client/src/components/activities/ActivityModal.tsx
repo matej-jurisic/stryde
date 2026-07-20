@@ -20,6 +20,7 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
   const [title, setTitle] = useState(activity?.title ?? '')
   const [goalId, setGoalId] = useState(activity?.goalId ?? '')
   const [categoryId, setCategoryId] = useState(activity?.categoryId ?? '')
+  const [excludeFromRecommendations, setExcludeFromRecommendations] = useState(activity?.excludeFromRecommendations ?? false)
   const [titleError, setTitleError] = useState('')
   const [subtasks, setSubtasks] = useState(activity?.subtasks ?? [])
   const [newSubtask, setNewSubtask] = useState('')
@@ -29,7 +30,7 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
     mutationFn: () => {
       const body = { title: title.trim(), goalId: goalId || null, categoryId: categoryId || null }
       return isEdit
-        ? activitiesApi.update(activity!.id, body)
+        ? activitiesApi.update(activity!.id, { ...body, excludeFromRecommendations })
         : activitiesApi.create(body)
     },
     onSuccess: () => {
@@ -122,6 +123,19 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
           </select>
         </div>
       )}
+
+      <label className="flex cursor-pointer items-center gap-3">
+        <input
+          type="checkbox"
+          checked={excludeFromRecommendations}
+          onChange={(e) => setExcludeFromRecommendations(e.target.checked)}
+          className="h-4 w-4 rounded border-input accent-primary"
+        />
+        <span className="text-sm text-foreground">
+          Exclude from suggestions
+          <span className="ml-1 text-muted-foreground">(auto-logged externally)</span>
+        </span>
+      </label>
 
       {isEdit && (
         <div className="flex flex-col gap-2">

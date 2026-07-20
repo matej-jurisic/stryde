@@ -92,6 +92,7 @@ export interface Activity {
   categoryId: string | null
   goalId: string | null
   kind: ActivityKind
+  excludeFromRecommendations: boolean
   createdAt: string
   category: CategorySummary | null
   goal: GoalSummary | null

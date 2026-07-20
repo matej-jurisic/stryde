@@ -151,7 +151,7 @@ A goal represents a sustained intention with measurable progress.
 
 - **Focus** — goal is active and weighted highly in Daily Plan recommendations.
 - **Active** — goal is tracked but not prioritized in recommendations.
-- **Bench** — goal is deprioritized. Surfaces in recommendations only when nothing more relevant exists.
+- **Bench** — goal is deprioritized. Activities linked to it are hidden from recommendations and from the calendar float row.
 - **Closed** — goal is archived. Not recommended, not shown in active views.
 
 The maximum number of Focus goals at one time is a user-configurable setting. It is a hard boundary — setting a goal to Focus when the limit is reached is blocked until another is moved out of Focus.
@@ -217,11 +217,10 @@ Recommendations are ranked — all tiers surface **activities** (not occurrences
 1. Activities linked to Focus goals
 2. Activities linked to Active goals
 3. Activities with a day-of-week pattern matching today (>=2 completions on this weekday in the past 6 weeks), where no instance is already on today's schedule — sorted by frequency descending
-4. Activities linked to Bench goals (only if tiers 1-3 are empty)
 
-Activities already scheduled today are excluded from all tiers. An activity appears at most once.
+Activities already scheduled today are excluded from all tiers. Activities linked to Bench or Closed goals never appear. An activity appears at most once.
 
-**Ranking within tiers:** Tiers 1, 2, and 4 rank by overdueness relative to the activity's own rhythm: days since last completion divided by the median gap between completion days. An activity completed today scores ~0 and sinks (natural cooldown); one past its usual gap floats up. A single completion assumes a weekly cadence; no history scores neutral (1.0). An activity whose typical start time falls inside already-occupied or past time is downranked (score halved). Tier 3 keeps its frequency-descending sort.
+**Ranking within tiers:** Tiers 1 and 2 rank by overdueness relative to the activity's own rhythm: days since last completion divided by the median gap between completion days. An activity completed today scores ~0 and sinks (natural cooldown); one past its usual gap floats up. A single completion assumes a weekly cadence; no history scores neutral (1.0). An activity whose typical start time falls inside already-occupied or past time is downranked (score halved). Tier 3 keeps its frequency-descending sort.
 
 **Timing hints:** Each recommendation is enriched with the activity's median duration and most common start time (rounded to 15 min, in user's timezone) from completed history in the **last 90 days** - older habits age out of both timing hints and cadence. When the user schedules from a suggestion, these values pre-fill the modal (start time + computed end time if both are available).
 

@@ -43,7 +43,7 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
       aria-labelledby="modal-title"
     >
       <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-modal-overlay"
+        className="absolute inset-0 bg-black/40 animate-modal-overlay"
         onClick={onClose}
         aria-hidden="true"
       />

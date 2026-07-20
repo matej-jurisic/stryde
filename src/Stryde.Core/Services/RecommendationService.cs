@@ -102,12 +102,12 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             return score;
         }
 
-        // Load all goal-linked activities for tiers 1/2/4
+        // Load all goal-linked activities for tiers 1/2
         var goalActivities = await db.Activities
             .Include(a => a.Goal)
             .Include(a => a.Category)
-            .Where(a => a.UserId == userId && a.Goal != null &&
-                (a.Goal.Status == GoalStatus.focus || a.Goal.Status == GoalStatus.active || a.Goal.Status == GoalStatus.bench))
+            .Where(a => a.UserId == userId && !a.ExcludeFromRecommendations && a.Goal != null &&
+                (a.Goal.Status == GoalStatus.focus || a.Goal.Status == GoalStatus.active))
             .ToListAsync();
 
         var goalTierActivities = new List<(int tier, Activity activity)>();
@@ -147,7 +147,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             var activities = await db.Activities
                 .Include(a => a.Category)
                 .Include(a => a.Goal)
-                .Where(a => ids.Contains(a.Id))
+                .Where(a => ids.Contains(a.Id) && !a.ExcludeFromRecommendations)
                 .ToListAsync();
 
             habitRecs = patternedActivityIds
@@ -158,13 +158,6 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
                 .ToList();
         }
 
-        // Tier 4: bench goal activities — only when tiers 1-3 are all empty
-        if (goalTierActivities.Count == 0 && habitRecs.Count == 0)
-        {
-            foreach (var a in goalActivities.Where(a => a.Goal!.Status == GoalStatus.bench))
-                AddActivity(4, a);
-        }
-
         RecommendationDto MakeActivityRec(int tier, Guid activityId, ActivityDto dto)
         {
             statsByActivity.TryGetValue(activityId, out var s);
@@ -173,17 +166,13 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
 
         var result = new List<RecommendationDto>();
 
-        // Tiers 1/2/4 rank by overdueness within the tier; tier 3 keeps its frequency order (spec).
-        foreach (var (tier, activity) in goalTierActivities.Where(x => x.tier < 3)
+        // Tiers 1/2 rank by overdueness within the tier; tier 3 keeps its frequency order (spec).
+        foreach (var (tier, activity) in goalTierActivities
             .OrderBy(x => x.tier).ThenByDescending(x => Score(x.activity.Id)))
             result.Add(MakeActivityRec(tier, activity.Id, ActivityDto.FromEntity(activity)));
 
         foreach (var a in habitRecs)
             result.Add(MakeActivityRec(3, a.Id, a));
-
-        foreach (var (tier, activity) in goalTierActivities.Where(x => x.tier == 4)
-            .OrderByDescending(x => Score(x.activity.Id)))
-            result.Add(MakeActivityRec(tier, activity.Id, ActivityDto.FromEntity(activity)));
 
         return result;
     }

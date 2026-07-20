@@ -74,7 +74,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             .Where(o => o.UserId == userId);
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
-        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.EndAt == null && o.WindowStart == null && !o.IsAllDay);
+        if (floatingOnly) query = query.Where(o => o.StartAt == null && o.EndAt == null && o.WindowStart == null && !o.IsAllDay
+            && (o.Activity.GoalId == null || o.Activity.Goal!.Status != GoalStatus.bench));
         if (goalId.HasValue) query = query.Where(o => o.Activity.GoalId == goalId.Value);
         if (activityId.HasValue) query = query.Where(o => o.ActivityId == activityId.Value);
 
@@ -266,6 +267,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
         o.Status = status;
+        if (status == EventStatus.done) o.IsPlanned = false;
         await db.SaveChangesAsync();
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
     }

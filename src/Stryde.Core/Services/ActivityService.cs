@@ -76,6 +76,7 @@ public class ActivityService(StrydeDbContext db)
         if (a is null) return Result<ActivityDto>.Fail(new Error(ErrorType.NotFound, "Activity not found."));
 
         a.Title = req.Title.Trim();
+        a.ExcludeFromRecommendations = req.ExcludeFromRecommendations;
 
         if (req.CategoryId.HasValue)
         {

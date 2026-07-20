@@ -34,20 +34,21 @@ public sealed record ActivityDto(
     Guid? CategoryId,
     Guid? GoalId,
     string Kind,
+    bool ExcludeFromRecommendations,
     DateTimeOffset CreatedAt,
     CategorySummaryDto? Category,
     GoalSummaryDto? Goal,
     List<ActivitySubtaskDto> Subtasks)
 {
     public static ActivityDto FromEntity(Activity a) => new(
-        a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.Kind.ToString(), a.CreatedAt,
+        a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.Kind.ToString(), a.ExcludeFromRecommendations, a.CreatedAt,
         a.Category is not null ? CategorySummaryDto.FromEntity(a.Category) : null,
         a.Goal is not null ? GoalSummaryDto.FromEntity(a.Goal) : null,
         a.Subtasks.OrderBy(s => s.CreatedAt).Select(ActivitySubtaskDto.FromEntity).ToList());
 }
 
 public sealed record CreateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
-public sealed record UpdateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId);
+public sealed record UpdateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId, bool ExcludeFromRecommendations = false);
 
 // Activity subtasks (template)
 public sealed record ActivitySubtaskDto(Guid Id, Guid ActivityId, string Title, DateTimeOffset CreatedAt)

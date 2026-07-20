@@ -10,6 +10,7 @@ public class Activity
     public Guid? CategoryId { get; set; }
     public Guid? GoalId { get; set; }
     public ActivityKind Kind { get; set; } = ActivityKind.activity;
+    public bool ExcludeFromRecommendations { get; set; } = false;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public User User { get; set; } = null!;
