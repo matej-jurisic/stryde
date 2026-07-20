@@ -46,7 +46,8 @@ export function Select({
 
   useEffect(() => {
     if (open) {
-      setTimeout(() => searchRef.current?.focus(), 0)
+      const isTouchDevice = window.matchMedia('(pointer: coarse)').matches
+      if (!isTouchDevice) setTimeout(() => searchRef.current?.focus(), 0)
     } else {
       setSearch('')
       setHighlighted(0)
@@ -95,12 +96,34 @@ export function Select({
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current || !dropdownRef.current) return
-    const rect = triggerRef.current.getBoundingClientRect()
-    const dropHeight = dropdownRef.current.offsetHeight
-    const spaceBelow = window.innerHeight - rect.bottom - 8
-    const top = spaceBelow >= dropHeight ? rect.bottom + 4 : rect.top - dropHeight - 4
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - dropdownRef.current.offsetWidth - 8))
-    setPos({ top, left, width: rect.width })
+    const trigger = triggerRef.current
+    const dropdown = dropdownRef.current
+
+    function reposition() {
+      const rect = trigger.getBoundingClientRect()
+      const dropH = dropdown.offsetHeight
+      const vp = window.visualViewport
+      const vpH = vp ? vp.height : window.innerHeight
+      const vpW = vp ? vp.width : window.innerWidth
+      const spaceBelow = vpH - rect.bottom - 8
+      const top = spaceBelow >= dropH ? rect.bottom + 4 : rect.top - dropH - 4
+      const left = Math.max(8, Math.min(rect.left, vpW - dropdown.offsetWidth - 8))
+      setPos({ top, left, width: rect.width })
+    }
+
+    reposition()
+
+    const vp = window.visualViewport
+    if (vp) {
+      vp.addEventListener('resize', reposition)
+      vp.addEventListener('scroll', reposition)
+      return () => {
+        vp.removeEventListener('resize', reposition)
+        vp.removeEventListener('scroll', reposition)
+      }
+    }
+    window.addEventListener('resize', reposition)
+    return () => window.removeEventListener('resize', reposition)
   }, [open])
 
   function toggle() {

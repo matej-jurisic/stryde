@@ -118,13 +118,35 @@ export function DateTimePicker({
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current || !panelRef.current) return
-    const rect = triggerRef.current.getBoundingClientRect()
-    const panelH = panelRef.current.offsetHeight
-    const panelW = panelRef.current.offsetWidth
-    const spaceBelow = window.innerHeight - rect.bottom - 8
-    const top = spaceBelow >= panelH ? rect.bottom + 4 : rect.top - panelH - 4
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelW - 8))
-    setPos({ top, left })
+    const trigger = triggerRef.current
+    const panel = panelRef.current
+
+    function reposition() {
+      const rect = trigger.getBoundingClientRect()
+      const panelH = panel.offsetHeight
+      const panelW = panel.offsetWidth
+      const vp = window.visualViewport
+      const vpH = vp ? vp.height : window.innerHeight
+      const vpW = vp ? vp.width : window.innerWidth
+      const spaceBelow = vpH - rect.bottom - 8
+      const top = spaceBelow >= panelH ? rect.bottom + 4 : rect.top - panelH - 4
+      const left = Math.max(8, Math.min(rect.left, vpW - panelW - 8))
+      setPos({ top, left })
+    }
+
+    reposition()
+
+    const vp = window.visualViewport
+    if (vp) {
+      vp.addEventListener('resize', reposition)
+      vp.addEventListener('scroll', reposition)
+      return () => {
+        vp.removeEventListener('resize', reposition)
+        vp.removeEventListener('scroll', reposition)
+      }
+    }
+    window.addEventListener('resize', reposition)
+    return () => window.removeEventListener('resize', reposition)
   }, [open])
 
   function toggle() {
