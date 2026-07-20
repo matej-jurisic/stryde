@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Menu, Plus, LayoutGrid, CalendarCheck } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, settingsApi, insightsApi } from '@/lib/api'
@@ -254,7 +254,6 @@ function EventBlock({
   suppressClickRef,
   dimmed,
   isResizing,
-  animateDir,
 }: {
   layout: LayoutEvent
   onClick: (e: Occurrence) => void
@@ -263,9 +262,7 @@ function EventBlock({
   suppressClickRef?: { current: boolean }
   dimmed?: boolean
   isResizing?: boolean
-  animateDir?: 'forward' | 'back' | null
 }) {
-  const dirRef = useRef(animateDir)
   const { event, col, totalCols, topPx, heightPx, trueEndPx } = layout
   const { bgClass, bgHex, leftColor, textClass } = eventColors(event)
   const isDone = event.status === 'done'
@@ -326,11 +323,7 @@ function EventBlock({
         left: `calc(${leftPct}% + ${GAP}px)`,
         width: `calc(${widthPct}% - ${GAP * 2}px)`,
         zIndex: isResizing ? 25 : undefined,
-        animation: dirRef.current === 'forward'
-          ? 'cal-slide-in-forward 180ms ease-out forwards'
-          : dirRef.current === 'back'
-          ? 'cal-slide-in-back 180ms ease-out forwards'
-          : undefined,
+        pointerEvents: 'auto',
       }}
     >
       {isDue ? (
@@ -501,9 +494,10 @@ interface DayColumnProps {
   hourPx: number
   likelyFree: InsightsFreeRange[]
   animateDir?: 'forward' | 'back' | null
+  navCount: number
 }
 
-function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx, likelyFree, animateDir }: DayColumnProps) {
+function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx, likelyFree, animateDir, navCount }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
@@ -526,6 +520,17 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
 
   const now = new Date()
   const nowPx = ((now.getHours() * 60 + now.getMinutes()) / 60) * hourPx
+
+  const eventsLayerRef = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const el = eventsLayerRef.current
+    if (!el || !animateDir) return
+    el.style.animation = 'none'
+    void el.offsetHeight
+    el.style.animation = animateDir === 'forward'
+      ? 'cal-slide-in-forward 180ms ease-out forwards'
+      : 'cal-slide-in-back 180ms ease-out forwards'
+  }, [navCount])
 
   return (
     <div
@@ -591,20 +596,22 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
           style={{ top: resizeOverlay.topPx, height: resizeOverlay.heightPx }}
         />
       )}
-      {/* Event blocks */}
-      {layout.map((l) => (
-        <EventBlock
-          key={l.event.id}
-          layout={l}
-          onClick={onEventClick}
-          onMoveStart={(e, topPx) => onEventMoveStart(e, l.event, topPx)}
-          onResizeStart={(e, side) => onEventResizeStart(e, l.event, side)}
-          suppressClickRef={suppressClickRef}
-          dimmed={l.event.id === movingEventId}
-          isResizing={l.event.id === resizingEventId}
-          animateDir={animateDir}
-        />
-      ))}
+      {/* Event blocks — animated layer; pointer-events:none on the wrapper lets
+          drag-to-create pass through to the grid; buttons inside override to auto */}
+      <div ref={eventsLayerRef} className="absolute inset-0" style={{ pointerEvents: 'none' }}>
+        {layout.map((l) => (
+          <EventBlock
+            key={l.event.id}
+            layout={l}
+            onClick={onEventClick}
+            onMoveStart={(e, topPx) => onEventMoveStart(e, l.event, topPx)}
+            onResizeStart={(e, side) => onEventResizeStart(e, l.event, side)}
+            suppressClickRef={suppressClickRef}
+            dimmed={l.event.id === movingEventId}
+            isResizing={l.event.id === resizingEventId}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -820,7 +827,9 @@ export function CalendarPage() {
     side: 'top' | 'bottom'
   } | null>(null)
   const swipeRef = useRef<{ direction: 'horizontal' | 'vertical'; startX: number } | null>(null)
-  const navDirectionRef = useRef<'forward' | 'back' | null>(null)
+  const [navDir, setNavDir] = useState<'forward' | 'back' | null>(null)
+  const [navCount, setNavCount] = useState(0)
+  const navDirTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const allDayDragStateRef = useRef<{ durationMinutes: number; curDayIdx: number; isDue: boolean } | null>(null)
   const allDayDragActiveRef = useRef(false)
   const floatRowRef = useRef<HTMLDivElement>(null)
@@ -930,7 +939,6 @@ export function CalendarPage() {
 
   useEffect(() => {
     sessionStorage.setItem('stryde-calendar-date', formatDateInput(current))
-    navDirectionRef.current = null
   }, [current])
 
   useEffect(() => {
@@ -1053,25 +1061,32 @@ export function CalendarPage() {
     }
   }, [])
 
+  function fireNav(dir: 'forward' | 'back') {
+    if (navDirTimerRef.current) clearTimeout(navDirTimerRef.current)
+    setNavDir(dir)
+    setNavCount((c) => c + 1)
+    navDirTimerRef.current = setTimeout(() => setNavDir(null), 400)
+  }
+
   function prev() {
-    navDirectionRef.current = 'back'
+    fireNav('back')
     const step = view === 'day' ? -1 : view === '3day' ? -3 : -7
     setCurrent((d) => addDays(d, step))
   }
 
   function next() {
-    navDirectionRef.current = 'forward'
+    fireNav('forward')
     const step = view === 'day' ? 1 : view === '3day' ? 3 : 7
     setCurrent((d) => addDays(d, step))
   }
 
   function prevDay() {
-    navDirectionRef.current = 'back'
+    fireNav('back')
     setCurrent((d) => addDays(d, -1))
   }
 
   function nextDay() {
-    navDirectionRef.current = 'forward'
+    fireNav('forward')
     setCurrent((d) => addDays(d, 1))
   }
 
@@ -2090,8 +2105,8 @@ export function CalendarPage() {
     }
     if (swipeRef.current?.direction === 'horizontal') {
       const dx = e.clientX - swipeRef.current.startX
-      if (dx > 40) { navDirectionRef.current = 'back'; setCurrent((d) => addDays(d, -1)) }
-      else if (dx < -40) { navDirectionRef.current = 'forward'; setCurrent((d) => addDays(d, 1)) }
+      if (dx > 40) { fireNav('back'); setCurrent((d) => addDays(d, -1)) }
+      else if (dx < -40) { fireNav('forward'); setCurrent((d) => addDays(d, 1)) }
       swipeRef.current = null
       return
     }
@@ -2431,7 +2446,8 @@ export function CalendarPage() {
                   resizingEventId={resizingEventId}
                   hourPx={hourPx}
                   likelyFree={day.getTime() >= effectiveToday.getTime() ? (likelyFreeByWeekday.get(day.getDay()) ?? []) : []}
-                  animateDir={navDirectionRef.current}
+                  animateDir={navDir}
+                  navCount={navCount}
                 />
               ))}
             </div>
