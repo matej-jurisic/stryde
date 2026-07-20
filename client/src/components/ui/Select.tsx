@@ -33,7 +33,7 @@ export function Select({
 }: SelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxOptionsH: number } | null>(null)
   const [highlighted, setHighlighted] = useState(0)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -97,18 +97,42 @@ export function Select({
   useLayoutEffect(() => {
     if (!open || !triggerRef.current || !dropdownRef.current) return
     const trigger = triggerRef.current
-    const dropdown = dropdownRef.current
 
     function reposition() {
       const rect = trigger.getBoundingClientRect()
-      const dropH = dropdown.offsetHeight
       const vp = window.visualViewport
       const vpH = vp ? vp.height : window.innerHeight
       const vpW = vp ? vp.width : window.innerWidth
-      const spaceBelow = vpH - rect.bottom - 8
-      const top = spaceBelow >= dropH ? rect.bottom + 4 : rect.top - dropH - 4
-      const left = Math.max(8, Math.min(rect.left, vpW - dropdown.offsetWidth - 8))
-      setPos({ top, left, width: rect.width })
+      // visualViewport.offsetTop is non-zero when the keyboard is open and the
+      // page has scrolled (common on iOS). getBoundingClientRect() is in layout-
+      // viewport space; position:fixed uses visual-viewport space, so subtract.
+      const vpOffsetTop = vp ? vp.offsetTop : 0
+
+      const tTop = rect.top - vpOffsetTop
+      const tBottom = rect.bottom - vpOffsetTop
+
+      const SEARCH_H = 48  // search bar (py-2 + h-8 input)
+      const CREATE_H = onCreateNew ? 41 : 0
+      const GAP = 4
+      const MARGIN = 8
+      const MAX_OPT_H = 208 // matches former max-h-52
+
+      const spaceBelow = vpH - tBottom - MARGIN
+      const spaceAbove = tTop - MARGIN
+
+      let top: number
+      let maxOptionsH: number
+
+      if (spaceBelow >= spaceAbove) {
+        top = vpOffsetTop + tBottom + GAP
+        maxOptionsH = Math.max(60, Math.min(MAX_OPT_H, spaceBelow - SEARCH_H - CREATE_H - GAP))
+      } else {
+        maxOptionsH = Math.max(60, Math.min(MAX_OPT_H, spaceAbove - SEARCH_H - CREATE_H - GAP))
+        top = vpOffsetTop + tTop - SEARCH_H - maxOptionsH - CREATE_H - GAP * 2
+      }
+
+      const left = Math.max(MARGIN, Math.min(rect.left, vpW - Math.max(rect.width, 220) - MARGIN))
+      setPos({ top, left, width: rect.width, maxOptionsH })
     }
 
     reposition()
@@ -185,7 +209,7 @@ export function Select({
               </div>
             </div>
 
-            <div className="max-h-52 overflow-y-auto py-1">
+            <div style={{ maxHeight: pos?.maxOptionsH ?? 208 }} className="overflow-y-auto py-1">
               {filtered.length === 0 && !onCreateNew && (
                 <p className="px-3 py-2 text-sm text-muted-foreground">No results</p>
               )}
