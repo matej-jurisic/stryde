@@ -753,6 +753,61 @@ function FloatingTasksRow({
   )
 }
 
+// ── UpcomingDueRow ───────────────────────────────────────────────────────────
+
+function UpcomingDueRow({
+  tasks,
+  onTaskClick,
+}: {
+  tasks: Occurrence[]
+  onTaskClick: (o: Occurrence) => void
+}) {
+  const scrollElRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = scrollElRef.current
+    if (!el) return
+    function onWheel(e: WheelEvent) {
+      if (!el) return
+      const canScrollH = el.scrollWidth > el.clientWidth
+      if (!canScrollH) return
+      e.preventDefault()
+      e.stopPropagation()
+      el.scrollLeft += e.deltaY + e.deltaX
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  if (tasks.length === 0) return null
+
+  return (
+    <div className="flex border-b border-border">
+      <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
+        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Due</span>
+      </div>
+      <div ref={scrollElRef} className="flex-1 overflow-x-auto border-l border-border" style={{ scrollbarWidth: 'none' }}>
+        <div className="flex gap-1 px-1 py-1">
+          {tasks.map((o) => {
+            const { className, style } = eventAllDayColors(o)
+            const dateLabel = new Date(o.startAt!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            return (
+              <button
+                key={o.id}
+                onClick={() => onTaskClick(o)}
+                className={`shrink-0 max-w-[180px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 select-none ${className}`}
+                style={style}
+              >
+                {o.effectiveTitle} · {dateLabel}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── CalendarPage ─────────────────────────────────────────────────────────────
 
 type ViewMode = 'day' | '3day' | 'week'
@@ -920,6 +975,21 @@ export function CalendarPage() {
   const floatingTasks = useMemo(
     () => [...rawFloatingTasks].sort((a, b) => Number(b.isPlanned) - Number(a.isPlanned)),
     [rawFloatingTasks],
+  )
+
+  const { data: rawUpcomingDue = [] } = useQuery({
+    queryKey: ['events', 'upcoming', rangeEnd.toISOString()],
+    queryFn: () => occurrencesApi.list({ startFrom: rangeEnd.toISOString(), status: 'pending' }),
+    staleTime: 30 * 1000,
+  })
+
+  // Pending scheduled (non-allday) occurrences that start after the current view.
+  const upcomingDueItems = useMemo(
+    () =>
+      rawUpcomingDue
+        .filter((o) => o.startAt !== null && !o.isAllDay && new Date(o.startAt!).getTime() >= rangeEnd.getTime())
+        .sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime()),
+    [rawUpcomingDue, rangeEnd.getTime()],
   )
 
   // Scroll to current time once the grid first becomes visible. Gated on
@@ -2315,6 +2385,10 @@ export function CalendarPage() {
                   </div>
                 ))}
               </div>
+              <UpcomingDueRow
+                tasks={upcomingDueItems}
+                onTaskClick={(o) => { if (!suppressClickRef.current) openDetail(o) }}
+              />
               <FloatingTasksRow
                 tasks={floatingTasks}
                 onSchedule={(o) => { if (!suppressClickRef.current) openDetail(o) }}
@@ -2374,8 +2448,12 @@ export function CalendarPage() {
           )}
 
           {/* Day view all-day row */}
-          {view === 'day' && (dayAllDayEvents.length > 0 || floatingTasks.length > 0 || isDraggingGridEvent) && (
+          {view === 'day' && (dayAllDayEvents.length > 0 || floatingTasks.length > 0 || isDraggingGridEvent || upcomingDueItems.length > 0) && (
             <div className="sticky top-0 z-40 bg-background">
+              <UpcomingDueRow
+                tasks={upcomingDueItems}
+                onTaskClick={(o) => { if (!suppressClickRef.current) openDetail(o) }}
+              />
               <FloatingTasksRow
                 tasks={floatingTasks}
                 onSchedule={(o) => { if (!suppressClickRef.current) openDetail(o) }}
