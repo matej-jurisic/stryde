@@ -55,16 +55,17 @@ function formatMins(mins: number): string {
 
 function formatTimeLabel(hhmm: string): string {
   const [h, m] = hhmm.split(':').map(Number)
-  const ampm = h >= 12 ? 'pm' : 'am'
-  const h12 = h % 12 || 12
-  return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2, '0')}${ampm}`
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 function timingLabel(duration: number | null, startTime: string | null): string | null {
-  const parts: string[] = []
-  if (duration) parts.push(`~${formatMins(duration)}`)
-  if (startTime) parts.push(formatTimeLabel(startTime))
-  return parts.length > 0 ? parts.join(' · ') : null
+  if (!startTime) return duration ? `~${formatMins(duration)}` : null
+  const [h, m] = startTime.split(':').map(Number)
+  const startLabel = formatTimeLabel(startTime)
+  if (!duration) return startLabel
+  const endTotal = h * 60 + m + duration
+  const endLabel = `${String(Math.floor(endTotal / 60) % 24).padStart(2, '0')}:${String(endTotal % 60).padStart(2, '0')}`
+  return `${startLabel} - ${endLabel}`
 }
 
 function formatDuration(o: Occurrence): string | null {

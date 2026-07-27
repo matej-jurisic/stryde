@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Menu, Plus, LayoutGrid, CalendarCheck } from 'lucide-react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { occurrencesApi, settingsApi, insightsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import type { Activity, Occurrence, InsightsFreeRange } from '@/lib/types'
@@ -753,14 +753,20 @@ function FloatingTasksRow({
   )
 }
 
-// ── UpcomingDueRow ───────────────────────────────────────────────────────────
+// ── DueRow ────────────────────────────────────────────────────────────────────
 
-function UpcomingDueRow({
+function DueRow({
   tasks,
   onTaskClick,
+  onDragStart,
+  movingEventId,
+  pendingDragId,
 }: {
   tasks: Occurrence[]
   onTaskClick: (o: Occurrence) => void
+  onDragStart?: (info: FloatingDragInfo, o: Occurrence) => void
+  movingEventId?: string | null
+  pendingDragId?: string | null
 }) {
   const scrollElRef = useRef<HTMLDivElement>(null)
 
@@ -779,12 +785,74 @@ function UpcomingDueRow({
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
+  const pendingRef = useRef<{
+    timer: ReturnType<typeof setTimeout>
+    pointerId: number
+    startX: number
+    startY: number
+    scrollStart: number
+    scrolling: boolean
+    occ: Occurrence
+    pointerType: string
+  } | null>(null)
+
+  function cancelPending() {
+    if (!pendingRef.current) return
+    clearTimeout(pendingRef.current.timer)
+    pendingRef.current = null
+  }
+
+  function handlePointerDown(e: React.PointerEvent<HTMLButtonElement>, o: Occurrence) {
+    if (e.pointerType === 'mouse') {
+      if (e.button !== 0) return
+      onDragStart?.({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY, pointerType: e.pointerType }, o)
+      return
+    }
+    if (!onDragStart) return
+    const { pointerId, clientX, clientY, pointerType } = e
+    const scrollStart = scrollElRef.current?.scrollLeft ?? 0
+    const timer = setTimeout(() => {
+      const p = pendingRef.current
+      pendingRef.current = null
+      if (!p) return
+      if (navigator.vibrate) navigator.vibrate(30)
+      onDragStart({ pointerId, clientX, clientY, pointerType }, o)
+    }, 350)
+    pendingRef.current = { timer, pointerId, startX: clientX, startY: clientY, scrollStart, scrolling: false, occ: o, pointerType }
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    const p = pendingRef.current
+    if (!p || e.pointerId !== p.pointerId) return
+    const dx = e.clientX - p.startX
+    const dy = e.clientY - p.startY
+    if (p.scrolling) {
+      if (scrollElRef.current) scrollElRef.current.scrollLeft = p.scrollStart - dx
+      return
+    }
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      clearTimeout(p.timer)
+      p.scrolling = true
+      if (scrollElRef.current) scrollElRef.current.scrollLeft = p.scrollStart - dx
+    }
+  }
+
+  function handlePointerUp(e: React.PointerEvent) {
+    if (pendingRef.current?.pointerId === e.pointerId) cancelPending()
+  }
+
   if (tasks.length === 0) return null
 
   return (
-    <div className="flex border-b border-border">
+    <div
+      className="flex border-b border-border"
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={cancelPending}
+    >
       <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
-        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Due</span>
+        <span className="text-[9px] font-medium uppercase tracking-wide text-destructive">Due</span>
       </div>
       <div ref={scrollElRef} className="flex-1 overflow-x-auto border-l border-border" style={{ scrollbarWidth: 'none' }}>
         <div className="flex gap-1 px-1 py-1">
@@ -794,9 +862,134 @@ function UpcomingDueRow({
             return (
               <button
                 key={o.id}
+                onPointerDown={(e) => handlePointerDown(e, o)}
                 onClick={() => onTaskClick(o)}
-                className={`shrink-0 max-w-[180px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 select-none ${className}`}
-                style={style}
+                className={`shrink-0 max-w-[180px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${movingEventId === o.id ? 'opacity-20' : pendingDragId === o.id ? 'opacity-50 scale-95' : ''} ${className}`}
+                style={{ touchAction: 'none', ...style }}
+              >
+                {o.effectiveTitle} · {dateLabel}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── UpcomingRow ───────────────────────────────────────────────────────────────
+
+function UpcomingRow({
+  tasks,
+  onTaskClick,
+  onDragStart,
+  movingEventId,
+  pendingDragId,
+}: {
+  tasks: Occurrence[]
+  onTaskClick: (o: Occurrence) => void
+  onDragStart?: (info: FloatingDragInfo, o: Occurrence) => void
+  movingEventId?: string | null
+  pendingDragId?: string | null
+}) {
+  const scrollElRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = scrollElRef.current
+    if (!el) return
+    function onWheel(e: WheelEvent) {
+      if (!el) return
+      const canScrollH = el.scrollWidth > el.clientWidth
+      if (!canScrollH) return
+      e.preventDefault()
+      e.stopPropagation()
+      el.scrollLeft += e.deltaY + e.deltaX
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  const pendingRef = useRef<{
+    timer: ReturnType<typeof setTimeout>
+    pointerId: number
+    startX: number
+    startY: number
+    scrollStart: number
+    scrolling: boolean
+    occ: Occurrence
+    pointerType: string
+  } | null>(null)
+
+  function cancelPending() {
+    if (!pendingRef.current) return
+    clearTimeout(pendingRef.current.timer)
+    pendingRef.current = null
+  }
+
+  function handlePointerDown(e: React.PointerEvent<HTMLButtonElement>, o: Occurrence) {
+    if (e.pointerType === 'mouse') {
+      if (e.button !== 0) return
+      onDragStart?.({ pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY, pointerType: e.pointerType }, o)
+      return
+    }
+    if (!onDragStart) return
+    const { pointerId, clientX, clientY, pointerType } = e
+    const scrollStart = scrollElRef.current?.scrollLeft ?? 0
+    const timer = setTimeout(() => {
+      const p = pendingRef.current
+      pendingRef.current = null
+      if (!p) return
+      if (navigator.vibrate) navigator.vibrate(30)
+      onDragStart({ pointerId, clientX, clientY, pointerType }, o)
+    }, 350)
+    pendingRef.current = { timer, pointerId, startX: clientX, startY: clientY, scrollStart, scrolling: false, occ: o, pointerType }
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    const p = pendingRef.current
+    if (!p || e.pointerId !== p.pointerId) return
+    const dx = e.clientX - p.startX
+    const dy = e.clientY - p.startY
+    if (p.scrolling) {
+      if (scrollElRef.current) scrollElRef.current.scrollLeft = p.scrollStart - dx
+      return
+    }
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      clearTimeout(p.timer)
+      p.scrolling = true
+      if (scrollElRef.current) scrollElRef.current.scrollLeft = p.scrollStart - dx
+    }
+  }
+
+  function handlePointerUp(e: React.PointerEvent) {
+    if (pendingRef.current?.pointerId === e.pointerId) cancelPending()
+  }
+
+  if (tasks.length === 0) return null
+
+  return (
+    <div
+      className="flex border-b border-border"
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={cancelPending}
+    >
+      <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
+        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Upcoming</span>
+      </div>
+      <div ref={scrollElRef} className="flex-1 overflow-x-auto border-l border-border" style={{ scrollbarWidth: 'none' }}>
+        <div className="flex gap-1 px-1 py-1">
+          {tasks.map((o) => {
+            const { className, style } = eventAllDayColors(o)
+            const dateLabel = new Date(o.startAt!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            return (
+              <button
+                key={o.id}
+                onPointerDown={(e) => handlePointerDown(e, o)}
+                onClick={() => onTaskClick(o)}
+                className={`shrink-0 max-w-[180px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${movingEventId === o.id ? 'opacity-20' : pendingDragId === o.id ? 'opacity-50 scale-95' : ''} ${className}`}
+                style={{ touchAction: 'none', ...style }}
               >
                 {o.effectiveTitle} · {dateLabel}
               </button>
@@ -981,15 +1174,32 @@ export function CalendarPage() {
     queryKey: ['events', 'upcoming', rangeEnd.toISOString()],
     queryFn: () => occurrencesApi.list({ startFrom: rangeEnd.toISOString(), status: 'pending' }),
     staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
   })
 
-  // Pending scheduled (non-allday) occurrences that start after the current view.
+  // Pending due-type (no endAt) occurrences that start after the current view.
   const upcomingDueItems = useMemo(
     () =>
       rawUpcomingDue
-        .filter((o) => o.startAt !== null && !o.isAllDay && new Date(o.startAt!).getTime() >= rangeEnd.getTime())
+        .filter((o) => isDueOccurrence(o) && !o.isAllDay && new Date(o.startAt!).getTime() >= rangeEnd.getTime())
         .sort((a, b) => new Date(a.startAt!).getTime() - new Date(b.startAt!).getTime()),
     [rawUpcomingDue, rangeEnd.getTime()],
+  )
+
+  const { data: rawPastAllDay = [] } = useQuery({
+    queryKey: ['events', 'due-allday', rangeStart.toISOString()],
+    queryFn: () => occurrencesApi.list({ endBefore: rangeStart.toISOString(), status: 'pending' }),
+    staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
+  })
+
+  // Past all-day planned occurrences that were never completed — not visible anywhere else.
+  const overdueAllDayItems = useMemo(
+    () =>
+      rawPastAllDay
+        .filter((o) => o.isAllDay && o.isPlanned && o.startAt !== null)
+        .sort((a, b) => new Date(b.startAt!).getTime() - new Date(a.startAt!).getTime()),
+    [rawPastAllDay],
   )
 
   // Scroll to current time once the grid first becomes visible. Gated on
@@ -2385,9 +2595,19 @@ export function CalendarPage() {
                   </div>
                 ))}
               </div>
-              <UpcomingDueRow
+              <DueRow
+                tasks={overdueAllDayItems}
+                onTaskClick={(o) => { if (!suppressClickRef.current) openDetail(o) }}
+                onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, rescheduleEvent)}
+                movingEventId={movingEventId}
+                pendingDragId={pendingAllDayDragId}
+              />
+              <UpcomingRow
                 tasks={upcomingDueItems}
                 onTaskClick={(o) => { if (!suppressClickRef.current) openDetail(o) }}
+                onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, rescheduleEvent)}
+                movingEventId={movingEventId}
+                pendingDragId={pendingAllDayDragId}
               />
               <FloatingTasksRow
                 tasks={floatingTasks}
@@ -2448,11 +2668,21 @@ export function CalendarPage() {
           )}
 
           {/* Day view all-day row */}
-          {view === 'day' && (dayAllDayEvents.length > 0 || floatingTasks.length > 0 || isDraggingGridEvent || upcomingDueItems.length > 0) && (
+          {view === 'day' && (dayAllDayEvents.length > 0 || floatingTasks.length > 0 || isDraggingGridEvent || upcomingDueItems.length > 0 || overdueAllDayItems.length > 0) && (
             <div className="sticky top-0 z-40 bg-background">
-              <UpcomingDueRow
+              <DueRow
+                tasks={overdueAllDayItems}
+                onTaskClick={(o) => { if (!suppressClickRef.current) openDetail(o) }}
+                onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, rescheduleEvent)}
+                movingEventId={movingEventId}
+                pendingDragId={pendingAllDayDragId}
+              />
+              <UpcomingRow
                 tasks={upcomingDueItems}
                 onTaskClick={(o) => { if (!suppressClickRef.current) openDetail(o) }}
+                onDragStart={(info, o) => handleAllDayPillMoveStart({ ...info, button: 0, stopPropagation: () => {} } as unknown as React.PointerEvent, o, rescheduleEvent)}
+                movingEventId={movingEventId}
+                pendingDragId={pendingAllDayDragId}
               />
               <FloatingTasksRow
                 tasks={floatingTasks}

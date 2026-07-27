@@ -38,9 +38,7 @@ function formatDisplay(value: string, mode: 'date' | 'datetime'): string {
   const d = new Date(p.year, p.month, p.day)
   const dateStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
   if (mode === 'date') return dateStr
-  const ampm = p.hour >= 12 ? 'PM' : 'AM'
-  const h12 = p.hour % 12 === 0 ? 12 : p.hour % 12
-  return `${dateStr} · ${h12}:${String(p.minute).padStart(2, '0')} ${ampm}`
+  return `${dateStr} · ${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`
 }
 
 function daysInMonth(year: number, month: number): number {
