@@ -21,7 +21,6 @@ appsettings.Development.json
 *.suo
 
 # Android / Capacitor build artifacts
-/stryde-build.ps1
 *.jks
 *.keystore
 /release/

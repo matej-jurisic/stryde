@@ -132,6 +132,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - **Dev port:** `dotnet run` uses `launchSettings.json` (port 5200). Published DLL: set `ASPNETCORE_URLS`.
 - **Tests:** in-memory SQLite, kept-open connection, `EnsureCreated()` (not Migrate) in factory. Isolated DB per integration test class.
 
+## Git
+
+**Never run `git commit` unless the user explicitly asks.** Make the changes, stop, and wait.
+
 ## Verify changes
 
 `dotnet test` for backend; `cd client && npm run build` for frontend. End-to-end: both dev servers or `docker compose up --build`.
