@@ -238,10 +238,11 @@ function eventColors(o: Occurrence): EventColors {
 
 function eventAllDayColors(o: Occurrence): { className: string; style?: React.CSSProperties } {
   const category = o.activity.category
+  const plannedBorder = o.isPlanned ? { border: `1px dashed ${category?.color ?? 'var(--color-primary)'}` } : undefined
   if (category) {
-    return { className: 'text-foreground', style: { backgroundColor: category.color + '26' } }
+    return { className: 'text-foreground', style: { backgroundColor: category.color + '26', ...plannedBorder } }
   }
-  return { className: 'bg-primary/10 text-primary' }
+  return { className: 'bg-primary/10 text-primary', style: plannedBorder }
 }
 
 // ── EventBlock ──────────────────────────────────────────────────────────────
@@ -738,7 +739,7 @@ function FloatingTasksRow({
                   onPointerDown={(e) => handlePointerDown(e, o)}
                   onClick={() => onSchedule(o)}
                   className={`shrink-0 max-w-[160px] truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${movingEventId === o.id ? 'opacity-20' : pendingDragId === o.id ? 'opacity-50 scale-95' : ''} ${className}`}
-                  style={{ touchAction: 'none', ...style, ...(o.isPlanned ? { border: `1px dashed ${o.activity.category?.color ?? 'var(--color-primary)'}` } : undefined) }}
+                  style={{ touchAction: 'none', ...style }}
                 >
                   {o.effectiveTitle}{o.durationMinutes ? ` ~${o.durationMinutes >= 60 ? `${Math.floor(o.durationMinutes / 60)}h${o.durationMinutes % 60 ? `${o.durationMinutes % 60}m` : ''}` : `${o.durationMinutes}m`}` : ''}
                 </button>
@@ -976,7 +977,7 @@ function UpcomingRow({
       onPointerCancel={cancelPending}
     >
       <div className="w-12 shrink-0 flex items-center justify-end pr-2 py-1">
-        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Upcoming</span>
+        <span className="text-[9px] font-medium uppercase text-muted-foreground">Soon</span>
       </div>
       <div ref={scrollElRef} className="flex-1 overflow-x-auto border-l border-border" style={{ scrollbarWidth: 'none' }}>
         <div className="flex gap-1 px-1 py-1">
@@ -2653,7 +2654,6 @@ export function CalendarPage() {
                             height: 20,
                             touchAction: 'none',
                             ...eventAllDayColors(e).style,
-                            ...(e.isPlanned ? { border: `1px dashed ${e.activity.category?.color ?? 'var(--color-primary)'}` } : undefined),
                           }}
                           className={`truncate rounded-[3px] px-1.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status === 'done' ? 'opacity-50 line-through' : e.status === 'skipped' ? 'opacity-30' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`}
                         >
@@ -2701,7 +2701,7 @@ export function CalendarPage() {
                   </div>
                   <div className="flex flex-1 flex-col gap-0.5 border-l border-r border-border px-0.5 py-0.5 min-h-[26px]">
                     {dayAllDayEvents.map((e) => (
-                      <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status !== 'pending' ? 'opacity-50 line-through' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style, ...(e.isPlanned ? { border: `1px dashed ${e.activity.category?.color ?? 'var(--color-primary)'}` } : undefined) }}>
+                      <button key={e.id} onPointerDown={(ev) => handleAllDayPillMoveStart(ev, e)} onClick={() => { if (!suppressClickRef.current) openDetail(e) }} className={`w-full truncate rounded-[3px] px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-all duration-150 hover:opacity-80 cursor-grab active:cursor-grabbing select-none ${e.status !== 'pending' ? 'opacity-50 line-through' : movingEventId === e.id ? 'opacity-20' : pendingAllDayDragId === e.id ? 'opacity-50 scale-95' : ''} ${eventAllDayColors(e).className}`} style={{ touchAction: 'none', ...eventAllDayColors(e).style }}>
                         {e.effectiveTitle}{e.durationMinutes ? ` ~${e.durationMinutes >= 60 ? `${Math.floor(e.durationMinutes / 60)}h${e.durationMinutes % 60 ? `${e.durationMinutes % 60}m` : ''}` : `${e.durationMinutes}m`}` : ''}
                       </button>
                     ))}
