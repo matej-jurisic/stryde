@@ -6,7 +6,9 @@ import { AppShell } from '@/components/layout/AppShell'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { PlanPage } from '@/pages/PlanPage'
+import { PlanPreviewPage } from '@/pages/PlanPreviewPage'
 import { GoalsPage } from '@/pages/GoalsPage'
+import { GoalsPreviewPage } from '@/pages/GoalsPreviewPage'
 import { CategoriesPage } from '@/pages/CategoriesPage'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { SettingsPage } from '@/pages/SettingsPage'
@@ -45,11 +47,13 @@ function AppRoutes() {
   return (
     <AppShell>
       <Routes>
-        <Route path="/plan"     element={<PlanPage />} />
+        <Route path="/plan"     element={<PlanPreviewPage />} />
+        <Route path="/plan-old" element={<PlanPage />} />
         <Route path="/categories" element={<CategoriesPage />} />
         <Route path="/inbox"    element={<Navigate to="/categories" replace />} />
         <Route path="/calendar" element={<CalendarPage />} />
-        <Route path="/goals"         element={<GoalsPage />} />
+        <Route path="/goals"         element={<GoalsPreviewPage />} />
+        <Route path="/goals-old"     element={<GoalsPage />} />
         <Route path="/goals/:id"     element={<GoalDetailPage />} />
         <Route path="/activities"    element={<ActivitiesPage />} />
         <Route path="/activities/:id" element={<ActivityDetailPage />} />
