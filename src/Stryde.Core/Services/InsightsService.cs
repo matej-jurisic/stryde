@@ -21,6 +21,7 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
         var windowStart = today.AddDays(-(windowDays - 1));
 
         var completed = await db.Occurrences
+            .AsNoTracking()
             .Include(o => o.Activity).ThenInclude(a => a.Category)
             .Where(o => o.UserId == userId && o.Status == EventStatus.done && o.StartAt != null)
             .ToListAsync();
@@ -189,6 +190,7 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
         var windowEnd = localToday.AddDays(-1);
 
         var completed = await db.Occurrences
+            .AsNoTracking()
             .Where(o => o.UserId == userId && o.Status == EventStatus.done && o.StartAt != null)
             .ToListAsync();
 

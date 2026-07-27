@@ -30,6 +30,7 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
     public async Task<Result<GoalDto>> GetAsync(Guid id, Guid userId)
     {
         var goal = await db.Goals
+            .AsNoTracking()
             .Include(g => g.Checkpoints)
             .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
         if (goal is null) return Result<GoalDto>.Fail(new Error(ErrorType.NotFound, "Goal not found."));
@@ -44,6 +45,7 @@ public class GoalService(StrydeDbContext db, UserSettingsService settingsService
     public async Task<List<GoalDto>> ListAsync(Guid userId, GoalStatus? status = null)
     {
         var query = db.Goals
+            .AsNoTracking()
             .Include(g => g.Checkpoints)
             .Where(g => g.UserId == userId);
 

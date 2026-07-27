@@ -56,6 +56,7 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
     public async Task<Result<OccurrenceDto>> GetAsync(Guid id, Guid userId)
     {
         var o = await WithFullIncludes()
+            .AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
         return Result<OccurrenceDto>.Success(await ToDtoAsync(o, userId));
@@ -71,6 +72,8 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         Guid? activityId = null)
     {
         var query = WithFullIncludes()
+            .AsNoTracking()
+            .AsSplitQuery()
             .Where(o => o.UserId == userId);
 
         if (status.HasValue) query = query.Where(o => o.Status == status.Value);
@@ -78,6 +81,14 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             && (o.Activity.GoalId == null || o.Activity.Goal!.Status != GoalStatus.bench));
         if (goalId.HasValue) query = query.Where(o => o.Activity.GoalId == goalId.Value);
         if (activityId.HasValue) query = query.Where(o => o.ActivityId == activityId.Value);
+
+        // A ranged query never returns fully-floating (all-null anchor) occurrences: the exact
+        // in-memory filter below always drops them. Excluding them in SQL is safe because it is a
+        // pure null check. We cannot go further and date-bound the query itself: SQLite stores
+        // DateTimeOffset as offset-bearing text, so EF cannot translate an instant-correct range
+        // comparison (it throws), which is why the precise windowing stays in memory.
+        if (!floatingOnly && (startFrom.HasValue || endBefore.HasValue))
+            query = query.Where(o => o.WindowStart != null || o.StartAt != null || o.EndAt != null);
 
         var all = await query.ToListAsync();
 

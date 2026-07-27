@@ -35,6 +35,12 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .HasForeignKey(o => o.ActivityId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // Every occurrence read filters by UserId (often together with Status); UserId is a bare
+        // Guid with no relationship, so EF would not index it otherwise. Occurrences are the
+        // highest-volume table, so this is the index that matters most.
+        modelBuilder.Entity<Occurrence>()
+            .HasIndex(o => new { o.UserId, o.Status });
+
         modelBuilder.Entity<Activity>()
             .Property(a => a.Kind)
             .HasConversion<string>();
@@ -50,6 +56,9 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .WithMany()
             .HasForeignKey(a => a.GoalId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Goal>()
+            .HasIndex(g => g.UserId);
 
         modelBuilder.Entity<Goal>()
             .Property(g => g.Status)

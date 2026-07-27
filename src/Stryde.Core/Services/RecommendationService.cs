@@ -31,6 +31,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         var today = date ?? currentDay;
 
         var allOccurrences = await db.Occurrences
+            .AsNoTracking()
             .Where(o => o.UserId == userId)
             .ToListAsync();
 
@@ -104,6 +105,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
 
         // Load all goal-linked activities for tiers 1/2
         var goalActivities = await db.Activities
+            .AsNoTracking()
             .Include(a => a.Goal)
             .Include(a => a.Category)
             .Where(a => a.UserId == userId && !a.ExcludeFromRecommendations && a.Goal != null &&
@@ -145,6 +147,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         {
             var ids = patternedActivityIds.Select(x => x.ActivityId).ToList();
             var activities = await db.Activities
+                .AsNoTracking()
                 .Include(a => a.Category)
                 .Include(a => a.Goal)
                 .Where(a => ids.Contains(a.Id) && !a.ExcludeFromRecommendations)

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Check } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { goalsApi, checkpointsApi, ApiError } from '@/lib/api'
 import { toastError } from '@/store/toasts'
@@ -87,11 +87,12 @@ function ProgressRing({ pct, color, size = 52, stroke = 5, children }: { pct: nu
 
 const SIZE_DOT: Record<CheckpointSize, number> = { tiny: 5, small: 6, normal: 8, big: 10, huge: 13 }
 
-function CheckpointChip({ goalId, cp, tierColor, onEdit }: { goalId: string; cp: Checkpoint; tierColor: string; onEdit: (cp: Checkpoint) => void }) {
+// Shared toggle/delete mutations + delete-confirm state for a single checkpoint.
+// Used by both the desktop chip and the mobile list row.
+function useCheckpointActions(goalId: string, cp: Checkpoint) {
   const qc = useQueryClient()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const reached = cp.status === 'reached'
-  const dot = SIZE_DOT[cp.size]
 
   const toggle = useMutation({
     mutationFn: () => checkpointsApi.setStatus(goalId, cp.id, reached ? 'pending' : 'reached'),
@@ -107,6 +108,32 @@ function CheckpointChip({ goalId, cp, tierColor, onEdit }: { goalId: string; cp:
     },
     onError: (err) => toastError(err, 'Could not delete the checkpoint.'),
   })
+
+  return { reached, toggle, del, confirmDelete, setConfirmDelete }
+}
+
+function CheckpointDeleteDialog({ cp, del, confirmDelete, setConfirmDelete }: {
+  cp: Checkpoint
+  del: ReturnType<typeof useCheckpointActions>['del']
+  confirmDelete: boolean
+  setConfirmDelete: (v: boolean) => void
+}) {
+  return (
+    <ConfirmDialog
+      open={confirmDelete}
+      onClose={() => setConfirmDelete(false)}
+      onConfirm={() => del.mutate()}
+      loading={del.isPending}
+      title="Delete checkpoint?"
+      message={`"${cp.title}" will be permanently deleted.`}
+    />
+  )
+}
+
+// Desktop: a rounded chip. Click the label to toggle reached; the menu edits or deletes.
+function CheckpointChip({ goalId, cp, tierColor, onEdit }: { goalId: string; cp: Checkpoint; tierColor: string; onEdit: (cp: Checkpoint) => void }) {
+  const { reached, toggle, del, confirmDelete, setConfirmDelete } = useCheckpointActions(goalId, cp)
+  const dot = SIZE_DOT[cp.size]
 
   return (
     <div
@@ -133,14 +160,39 @@ function CheckpointChip({ goalId, cp, tierColor, onEdit }: { goalId: string; cp:
           { icon: Trash2, label: 'Delete', onClick: () => setConfirmDelete(true), destructive: true },
         ]}
       />
-      <ConfirmDialog
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        onConfirm={() => del.mutate()}
-        loading={del.isPending}
-        title="Delete checkpoint?"
-        message={`"${cp.title}" will be permanently deleted.`}
+      <CheckpointDeleteDialog cp={cp} del={del} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} />
+    </div>
+  )
+}
+
+// Mobile: a full-width checklist row. The circle is the reached toggle.
+function CheckpointListRow({ goalId, cp, tierColor, onEdit }: { goalId: string; cp: Checkpoint; tierColor: string; onEdit: (cp: Checkpoint) => void }) {
+  const { reached, toggle, del, confirmDelete, setConfirmDelete } = useCheckpointActions(goalId, cp)
+
+  return (
+    <div className="flex items-center gap-2.5 py-1">
+      <button
+        onClick={() => toggle.mutate()}
+        aria-label={reached ? 'Mark checkpoint pending' : 'Mark checkpoint reached'}
+        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors"
+        style={{ borderColor: tierColor, background: reached ? tierColor : 'transparent' }}
+      >
+        {reached && <Check className="h-2.5 w-2.5 text-background" strokeWidth={3} />}
+      </button>
+      <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <span className={`truncate text-[13px] ${reached ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{cp.title}</span>
+        <span className="shrink-0 text-[10px] capitalize text-muted-foreground/70">{cp.size}</span>
+        {cp.targetDate && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/60">{shortDate(dayMs(cp.targetDate))}</span>}
+      </div>
+      <ActionMenu
+        triggerClassName="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        iconClassName="h-3.5 w-3.5"
+        items={[
+          { icon: Pencil, label: 'Edit', onClick: () => onEdit(cp) },
+          { icon: Trash2, label: 'Delete', onClick: () => setConfirmDelete(true), destructive: true },
+        ]}
       />
+      <CheckpointDeleteDialog cp={cp} del={del} confirmDelete={confirmDelete} setConfirmDelete={setConfirmDelete} />
     </div>
   )
 }
@@ -165,8 +217,15 @@ function CheckpointBreakdown({ goal, tierColor, onEditCheckpoint }: { goal: Goal
         })}
       </div>
 
-      {/* Chips: click the label to toggle reached; the menu edits or deletes */}
-      <div className="flex flex-wrap gap-1.5">
+      {/* Mobile: full-width checklist (pills wrap into an awkward pseudo-list on narrow screens) */}
+      <div className="flex flex-col divide-y divide-border/60 sm:hidden">
+        {cps.map((c) => (
+          <CheckpointListRow key={c.id} goalId={goal.id} cp={c} tierColor={tierColor} onEdit={onEditCheckpoint} />
+        ))}
+      </div>
+
+      {/* Desktop: chips. Click the label to toggle reached; the menu edits or deletes */}
+      <div className="hidden flex-wrap gap-1.5 sm:flex">
         {cps.map((c) => (
           <CheckpointChip key={c.id} goalId={goal.id} cp={c} tierColor={tierColor} onEdit={onEditCheckpoint} />
         ))}
@@ -235,13 +294,15 @@ function GoalCard({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: G
             <span className="text-sm font-semibold text-foreground hover:underline">{goal.title}</span>
           </button>
           {goal.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{goal.description}</p>}
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-            {isMilestone ? (
-              <span>{goal.checkpoints.filter((c) => c.status === 'reached').length}/{goal.checkpoints.length} checkpoints</span>
-            ) : (
-              <span>{lastDoneLabel(goal.lastOccurrenceAt)}</span>
-            )}
-          </div>
+          {(isMilestone ? hasCheckpoints : goal.lastOccurrenceAt) && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+              {isMilestone ? (
+                <span>{goal.checkpoints.filter((c) => c.status === 'reached').length}/{goal.checkpoints.length} checkpoints</span>
+              ) : (
+                <span>{lastDoneLabel(goal.lastOccurrenceAt)}</span>
+              )}
+            </div>
+          )}
         </div>
 
         <ActionMenu
@@ -260,23 +321,17 @@ function GoalCard({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: G
       </div>
 
       {/* Body */}
-      <div className="mt-3">
-        {isMilestone ? (
-          hasCheckpoints ? (
+      {(isMilestone ? hasCheckpoints : !!goal.occurrenceStats) && (
+        <div className="mt-3">
+          {isMilestone ? (
             <CheckpointBreakdown goal={goal} tierColor={tierColor} onEditCheckpoint={(cp) => onEditCheckpoint(goal.id, cp)} />
           ) : (
-            <button onClick={() => onAddCheckpoint(goal.id)} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors">
-              <Plus className="h-3.5 w-3.5" strokeWidth={2.5} /> Add the first checkpoint
-            </button>
-          )
-        ) : goal.occurrenceStats ? (
-          <div className="flex items-center gap-3">
-            <OccurrenceBar stats={goal.occurrenceStats} barClassName="flex-1 h-1.5" labelClassName="w-10" />
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground/70">No linked activity yet.</p>
-        )}
-      </div>
+            <div className="flex items-center gap-3">
+              <OccurrenceBar stats={goal.occurrenceStats!} barClassName="flex-1 h-1.5" labelClassName="w-10" />
+            </div>
+          )}
+        </div>
+      )}
 
       {statusError && <p className="mt-2 text-xs text-destructive">{statusError}</p>}
 
@@ -369,9 +424,6 @@ export function GoalsPreviewPage() {
                   </section>
                 )
               })}
-              <p className="px-1 text-center text-[11px] text-muted-foreground/50">
-                Tip: click a checkpoint to toggle reached; use its menu to edit or delete.
-              </p>
             </div>
           )}
         </div>

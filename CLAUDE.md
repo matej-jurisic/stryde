@@ -65,6 +65,9 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   Key DTOs: `ActivityDto` (has `Kind`), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (discriminated: `type: 'occurrence' | 'activity'`), `CategoryDto`/`CategorySummaryDto`, `CheckpointDto` (has `Size` enum — not numeric progress).
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
 - ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
+  It also **can't translate a `DateTimeOffset` range `WHERE`** (EF throws at execution — stored as offset-bearing
+  text, no instant-correct comparison), so occurrence date-window filtering runs in memory too. SQL pre-filters on
+  those queries are limited to null checks (e.g. excluding fully-floating rows).
 
 **Backend (`Stryde.Api`)**
 - `Program.cs` — registers core services, JWT + auth policy, SPA fallback. JWT config is read

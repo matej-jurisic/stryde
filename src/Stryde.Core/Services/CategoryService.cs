@@ -10,7 +10,7 @@ public class CategoryService(StrydeDbContext db)
 {
     public async Task<List<CategoryDto>> ListAsync(Guid userId)
     {
-        var cats = await db.Categories.Where(c => c.UserId == userId).ToListAsync();
+        var cats = await db.Categories.AsNoTracking().Where(c => c.UserId == userId).ToListAsync();
         return cats.OrderBy(c => c.CreatedAt).Select(CategoryDto.FromEntity).ToList();
     }
 
