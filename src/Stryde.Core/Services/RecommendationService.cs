@@ -28,6 +28,22 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
     /// </summary>
     private const int DefaultSuggestionMinutes = 30;
 
+    /// <summary>
+    /// How many suggestions may cover the same instant. Deliberately not 1: two ghosts side by side
+    /// read as "pick one", which is useful. Past that the calendar columns get too narrow to read.
+    /// </summary>
+    private const int MaxConcurrentSuggestions = 2;
+
+    /// <summary>Granularity of the candidate start times a suggestion is placed on.</summary>
+    private const int PlacementStepMinutes = 15;
+
+    /// <summary>
+    /// Earliest local time a suggestion may land at when it has no habitual time to anchor to.
+    /// The day boundary is usually the small hours, and a ghost at 04:00 is noise scrolled off the
+    /// top of the grid. Ignored for today, where placement can't start before now anyway.
+    /// </summary>
+    private static readonly TimeOnly EarliestUnanchoredStart = new(8, 0);
+
     /// <param name="date">The day to recommend for; defaults to the user's current day.</param>
     /// <param name="nowUtc">Injectable clock for tests; defaults to the real time.</param>
     public async Task<List<RecommendationDto>> GetAsync(Guid userId, DateOnly? date = null, DateTimeOffset? nowUtc = null)
@@ -61,9 +77,19 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             .GroupBy(o => o.ActivityId)
             .ToDictionary(g => g.Key, g => ComputeStats(g.ToList(), ctx));
 
+        DateTimeOffset InstantForMinutes(int minutesFromMidnight)
+        {
+            // Minutes are from local midnight; times before the day boundary belong to the next calendar date
+            var time = new TimeOnly(minutesFromMidnight / 60, minutesFromMidnight % 60);
+            var calendarDate = time < ctx.DayBoundary ? today.AddDays(1) : today;
+            var local = calendarDate.ToDateTime(time);
+            return new DateTimeOffset(local, ctx.TimeZone.GetUtcOffset(local));
+        }
+
         // Free time on the target day. For today: from now to end-of-day; for a future day: the
         // whole day. Null (past day) disables slot filtering — there is no time left to fill.
         List<(DateTimeOffset Start, DateTimeOffset End)>? freeSlots = null;
+        var earliestUnanchored = default(DateTimeOffset);
         if (today >= currentDay)
         {
             var slotStart = today == currentDay ? now : DayMath.StartOfDay(today, ctx);
@@ -75,7 +101,13 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
                 .Where(o => !IsFloating(o) && o.StartAt != null && o.EndAt != null && DayMath.OccurrenceDay(o, ctx) == today)
                 .OrderBy(o => o.StartAt!.Value)
                 .ToList();
-            freeSlots = ComputeFreeSlots(slotStart, DayMath.EndOfDay(today, ctx), dayBlocks);
+            var endOfDay = DayMath.EndOfDay(today, ctx);
+            freeSlots = ComputeFreeSlots(slotStart, endOfDay, dayBlocks);
+
+            // Hold unanchored suggestions back to a sensible hour, unless that would push them out
+            // of the day entirely (a day boundary late enough to swallow it).
+            var civil = InstantForMinutes(EarliestUnanchoredStart.Hour * 60 + EarliestUnanchoredStart.Minute);
+            earliestUnanchored = civil > slotStart && civil < endOfDay ? civil : slotStart;
         }
 
         bool FitsASlot(Guid activityId)
@@ -86,24 +118,36 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             return freeSlots.Any(slot => (slot.End - slot.Start).TotalMinutes >= s.DurationMinutes.Value);
         }
 
-        DateTimeOffset InstantForMinutes(int minutesFromMidnight)
-        {
-            // Minutes are from local midnight; times before the day boundary belong to the next calendar date
-            var time = new TimeOnly(minutesFromMidnight / 60, minutesFromMidnight % 60);
-            var calendarDate = time < ctx.DayBoundary ? today.AddDays(1) : today;
-            var local = calendarDate.ToDateTime(time);
-            return new DateTimeOffset(local, ctx.TimeZone.GetUtcOffset(local));
-        }
-
         bool StartTimeIsFree(int minutesFromMidnight)
         {
             var instant = InstantForMinutes(minutesFromMidnight);
             return freeSlots!.Any(slot => instant >= slot.Start && instant < slot.End);
         }
 
-        // Where this activity could go on the target day: its habitual time when that still sits in a
-        // gap big enough, otherwise the start of the first gap that fits. Null when nothing fits.
-        DateTimeOffset? SuggestedStart(Guid activityId)
+        // Spans already handed to earlier (higher-ranked) suggestions. Placement consumes the day as
+        // it goes, so suggestions spread out instead of every one of them picking the same first gap.
+        var placedSpans = new List<(DateTimeOffset Start, DateTimeOffset End)>();
+
+        bool CanPlace(DateTimeOffset start, int needed)
+        {
+            var end = start.AddMinutes(needed);
+            if (!freeSlots!.Any(slot => start >= slot.Start && end <= slot.End)) return false;
+            return placedSpans.Count(p => start < p.End && end > p.Start) < MaxConcurrentSuggestions;
+        }
+
+        // Every quarter-hour opening in the day's free time, in chronological order.
+        IEnumerable<DateTimeOffset> CandidateStarts()
+        {
+            foreach (var slot in freeSlots!)
+                for (var t = RoundUpToQuarter(slot.Start); t < slot.End; t = t.AddMinutes(PlacementStepMinutes))
+                    yield return t;
+        }
+
+        // Where this activity goes on the target day, given what's already been placed: its habitual
+        // time if that still fits, else the free opening nearest to it, else the first opening after
+        // the unanchored floor. Null when the day has no room left for it — which is the point: it
+        // caps how many ghosts one gap can absorb, rather than stacking them all on the same slot.
+        DateTimeOffset? PlaceActivity(Guid activityId)
         {
             if (freeSlots is null) return null;
             statsByActivity.TryGetValue(activityId, out var s);
@@ -111,23 +155,28 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             // than 0, which would "fit" any gap however small.
             var needed = s?.DurationMinutes ?? DefaultSuggestionMinutes;
 
+            DateTimeOffset? chosen;
             if (s?.StartMinutes is { } mins)
             {
                 var habitual = InstantForMinutes(mins);
-                foreach (var slot in freeSlots)
-                {
-                    if (habitual >= slot.Start && habitual < slot.End && (slot.End - habitual).TotalMinutes >= needed)
-                        return habitual;
-                }
+                chosen = CanPlace(habitual, needed)
+                    ? habitual
+                    : CandidateStarts()
+                        .Where(t => CanPlace(t, needed))
+                        .OrderBy(t => Math.Abs((t - habitual).TotalMinutes))
+                        .Cast<DateTimeOffset?>()
+                        .FirstOrDefault();
+            }
+            else
+            {
+                chosen = CandidateStarts()
+                    .Where(t => t >= earliestUnanchored && CanPlace(t, needed))
+                    .Cast<DateTimeOffset?>()
+                    .FirstOrDefault();
             }
 
-            foreach (var slot in freeSlots)
-            {
-                var start = RoundUpToQuarter(slot.Start);
-                if (start < slot.End && (slot.End - start).TotalMinutes >= needed)
-                    return start;
-            }
-            return null;
+            if (chosen is { } c) placedSpans.Add((c, c.AddMinutes(needed)));
+            return chosen;
         }
 
         // Overdueness relative to the activity's own rhythm: days since last completion divided by
@@ -219,14 +268,19 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
                 s is null ? null : today.DayNumber - s.LastDoneDay.DayNumber,
                 s?.MedianGapDays,
                 patternCount == 0 ? null : patternCount,
-                SuggestedStart(activityId));
+                PlaceActivity(activityId));
         }
 
         var result = new List<RecommendationDto>();
 
         // Tiers 1/2 rank by overdueness within the tier; tier 3 keeps its frequency order (spec).
-        foreach (var (tier, activity) in goalTierActivities
-            .OrderBy(x => x.tier).ThenByDescending(x => Score(x.activity.Id)))
+        // Order is materialised first because placement is stateful - each suggestion consumes the
+        // gap it takes, so the best-ranked activity must get first pick of the day.
+        var ranked = goalTierActivities
+            .OrderBy(x => x.tier).ThenByDescending(x => Score(x.activity.Id))
+            .ToList();
+
+        foreach (var (tier, activity) in ranked)
             result.Add(MakeActivityRec(tier, activity.Id, ActivityDto.FromEntity(activity)));
 
         foreach (var a in habitRecs)

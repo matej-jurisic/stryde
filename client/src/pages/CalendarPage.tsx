@@ -18,9 +18,9 @@ const MAX_HOUR_PX = 128
 const MIN_EVENT_PX = 16
 // Span drawn for a suggestion whose activity has no duration history.
 const DEFAULT_SUGGESTION_MINUTES = 30
-// Suggestions share the day's free slots, so many of them pile onto the same
-// gap. Only the top-ranked few get drawn — past that the columns are too
-// narrow to read, and the panel remains the full list. User-tunable via
+// The server spreads suggestions across the day and lets at most two share any
+// instant, so this is a ceiling rather than the main throttle. Only the
+// top-ranked few get drawn; the panel remains the full list. User-tunable via
 // settings; this is the fallback before settings have loaded.
 const DEFAULT_MAX_SUGGESTIONS_PER_DAY = 6
 

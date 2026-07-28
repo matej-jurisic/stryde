@@ -490,4 +490,75 @@ public class RecommendationServiceTests : IDisposable
         Assert.Null(recs[0].TypicalDurationMinutes);
         Assert.Null(recs[0].TypicalStartTime);
     }
+
+    [Fact]
+    public async Task GetAsync_suggestions_do_not_all_stack_on_the_first_gap()
+    {
+        var userId = await CreateUserAsync();
+        for (var i = 0; i < 5; i++)
+            await AddActivityAsync(userId, $"never done {i}", GoalStatus.active);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+        var starts = recs.Select(r => r.SuggestedStartAt).ToList();
+
+        Assert.Equal(5, starts.Count);
+        Assert.All(starts, s => Assert.NotNull(s));
+        // Two per slot is allowed on purpose ("pick one"), five on the same one is not
+        Assert.True(starts.Distinct().Count() >= 3, $"suggestions bunched up: {string.Join(", ", starts)}");
+    }
+
+    [Fact]
+    public async Task GetAsync_no_more_than_two_suggestions_cover_the_same_instant()
+    {
+        var userId = await CreateUserAsync();
+        for (var i = 0; i < 6; i++)
+            await AddActivityAsync(userId, $"never done {i}", GoalStatus.active);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+        var spans = recs
+            .Where(r => r.SuggestedStartAt is not null)
+            .Select(r => (Start: r.SuggestedStartAt!.Value, End: r.SuggestedStartAt!.Value.AddMinutes(30)))
+            .ToList();
+
+        foreach (var span in spans)
+        {
+            var overlapping = spans.Count(o => span.Start < o.End && span.End > o.Start);
+            Assert.True(overlapping <= 2, $"{overlapping} suggestions overlap at {span.Start}");
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_unanchored_suggestion_on_a_future_day_skips_the_small_hours()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "never done", GoalStatus.active);
+
+        // Day boundary is midnight, so the first free slot opens at 00:00 - useless as a suggestion
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Single(recs);
+        Assert.Equal(At(9, 8), recs[0].SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_displaced_suggestion_stays_near_its_habitual_time()
+    {
+        var userId = await CreateUserAsync();
+        // Three activities that all habitually run at 20:00 - only two may share the slot
+        for (var i = 0; i < 3; i++)
+        {
+            var a = await AddActivityAsync(userId, $"evening task {i}", GoalStatus.active);
+            await CompleteAsync(userId, a, At(2, 20), At(2, 21));
+            await CompleteAsync(userId, a, At(4, 20), At(4, 21));
+        }
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+        var starts = recs.Select(r => r.SuggestedStartAt).ToList();
+
+        Assert.Equal(2, starts.Count(s => s == At(7, 20)));
+        // The third lands butted up against the habit, not back at the start of the day.
+        // 19:00 and 21:00 are equidistant; the tie breaks toward the earlier slot.
+        var displaced = Assert.Single(starts, s => s != At(7, 20));
+        Assert.Equal(At(7, 19), displaced);
+    }
 }
