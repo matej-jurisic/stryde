@@ -205,8 +205,21 @@ public sealed record CategoryDto(Guid Id, Guid UserId, string Name, string Color
 public sealed record CreateCategoryRequest(string Name, string Color, string? Icon);
 public sealed record UpdateCategoryRequest(string Name, string Color, string? Icon);
 
-// Recommendations — "activity" for all tiers; timing fields null when no history exists
-public sealed record RecommendationDto(int Tier, string Type, OccurrenceDto? Occurrence, ActivityDto? Activity, int? TypicalDurationMinutes, string? TypicalStartTime);
+// Recommendations — "activity" for all tiers; timing fields null when no history exists.
+// DaysSinceLast/MedianGapDays/PatternCount are the raw "why" signals; the client composes the
+// user-facing reason text from them. SuggestedStartAt is the best free slot on the target day,
+// null when nothing fits (or the day is in the past, where slots are not computed).
+public sealed record RecommendationDto(
+    int Tier,
+    string Type,
+    OccurrenceDto? Occurrence,
+    ActivityDto? Activity,
+    int? TypicalDurationMinutes,
+    string? TypicalStartTime,
+    int? DaysSinceLast,
+    double? MedianGapDays,
+    int? PatternCount,
+    DateTimeOffset? SuggestedStartAt);
 
 // Insights — server-side day bucketing; floating occurrences (no StartAt) are excluded.
 // Time = EndAt-StartAt when both set, else DurationMinutes, else 0.
@@ -268,10 +281,12 @@ public sealed record ExportDto(
     List<ExportOccurrenceDto> Occurrences);
 
 // UserSettings
-public sealed record UserSettingsDto(Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone)
+public sealed record UserSettingsDto(
+    Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions)
 {
     public static UserSettingsDto FromEntity(UserSettings us, string timezone) => new(
-        us.UserId, us.MaxFocusGoals, us.DayBoundaryTime.ToString("HH:mm"), timezone);
+        us.UserId, us.MaxFocusGoals, us.DayBoundaryTime.ToString("HH:mm"), timezone, us.MaxCalendarSuggestions);
 }
 
-public sealed record UpdateUserSettingsRequest(int MaxFocusGoals, string DayBoundaryTime, string Timezone);
+public sealed record UpdateUserSettingsRequest(
+    int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions);

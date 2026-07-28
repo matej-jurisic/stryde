@@ -210,7 +210,7 @@ The start of a day (when "today" rolls over) is user-configurable in settings. S
 
 ### Recommendations (Rule-Based)
 
-The recommendation panel answers: "what should I add to today's schedule?" Planned floating occurrences are always visible in the panel's "Floating" section regardless of recommendations; unplanned floating occurrences live in the Daily Plan agenda instead.
+The recommendation panel answers: "what should I add to today's schedule?" Planned floating occurrences are always visible in the panel's "Floating" section regardless of recommendations, listed **above** the ranked tiers since they are already committed to and only need a time; unplanned floating occurrences live in the Daily Plan agenda instead.
 
 Recommendations are ranked — all tiers surface **activities** (not occurrences):
 
@@ -225,6 +225,19 @@ Activities already scheduled today are excluded from all tiers. Activities linke
 **Timing hints:** Each recommendation is enriched with the activity's median duration and most common start time (rounded to 15 min, in user's timezone) from completed history in the **last 90 days** - older habits age out of both timing hints and cadence. When the user schedules from a suggestion, these values pre-fill the modal (start time + computed end time if both are available).
 
 **Free slot awareness:** Activities are only suggested if their typical duration fits at least one free gap on the target day. For today, gaps run from now to end-of-day; for a future day, the whole day is considered; for a past day, slot filtering is skipped. Activities with no duration history are always included.
+
+Gaps are carved out by occurrences that hold a real span (both a start and an end) on that day. What counts as busy:
+
+- **Pending and done occurrences block.** Done time was spent, and the block is still drawn on the grid, so the engine cannot hand it out again.
+- **Skipped occurrences do not block.** Skipping is an explicit decision not to do something, which frees the time back up.
+- **Due pins do not block.** A pin (start, no end) is a deadline rather than a commitment to a span, so it never removes time from the day even though the grid draws it 30 minutes tall.
+- **Floating occurrences do not block.** They have no time to hold.
+
+**Reason signals:** Each recommendation carries the raw signals behind it - `daysSinceLast` (relative to the target day), `medianGapDays`, and `patternCount` (tier 3 weekday matches). The server ships numbers only; the panel composes the user-facing sentence ("6d since last, usually every 2d" / "Usually on Tuesdays, 3x lately"). An activity with no completion history carries no signals and shows no reason line.
+
+**Suggested slot:** Each recommendation carries `suggestedStartAt`, the best placement on the target day: the activity's habitual start time when that still falls inside a free gap long enough for its median duration, otherwise the next quarter hour at or after the start of the first gap that fits. An activity with no completion history has no median duration and is placed as if it needed 30 minutes, matching the span the calendar draws for it. It is null on past days (no slots are computed) and when no gap fits. When present, the panel offers one-click scheduling at that time, creating the occurrence directly with `endAt` derived from the median duration. The modal path remains available for anything needing adjustment.
+
+**Suggested slots on the calendar:** The Calendar page can draw its suggestions in place. A toggle in the header ("show suggested slots", persisted in `localStorage`) renders each visible day's top suggestions as ghost blocks sitting at their `suggestedStartAt` for the length of their median duration (30 min when there is no duration history). Suggestions are fetched per visible day, so a week view shows where the engine would place work across the whole week; past days produce no slots and therefore no ghosts. Only the top few per day are drawn - suggestions all compete for the same free gaps, so beyond that the blocks are too narrow to read; the panel stays the complete list. The count is the `Calendar suggestions` setting (1-12, default 6). Clicking a ghost opens the event modal pre-filled with that activity and slot, so a suggestion is never committed by accident.
 
 **LLM expansion slot:** The recommendation engine is designed to be replaceable or augmentable with an LLM-powered planner. Out of scope for v1.
 
@@ -273,6 +286,7 @@ Read-only stats over **done occurrences**, computed server-side (`GET /api/insig
 | Max Focus goals | Hard limit on simultaneous Focus goals. User-defined. |
 | Day boundary | Time at which the day rolls over. |
 | Timezone | Set automatically on registration from browser locale. Editable on the Settings page. |
+| Calendar suggestions | How many suggestion ghosts the calendar draws per day (1-12, default 6). |
 | Theme | Light / dark / system. Client-side preference (localStorage), defaults to system. |
 
 ---

@@ -187,7 +187,7 @@ export const checkpointsApi = {
 
 export const settingsApi = {
   get: () => request<UserSettings>('/api/settings'),
-  update: (body: { maxFocusGoals: number; dayBoundaryTime: string; timezone: string }) =>
+  update: (body: { maxFocusGoals: number; dayBoundaryTime: string; timezone: string; maxCalendarSuggestions: number }) =>
     request<UserSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
 }
 

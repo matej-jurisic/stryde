@@ -1,9 +1,12 @@
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { CalendarPlus, Sparkles, X } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { CalendarPlus, Plus, Sparkles, X } from 'lucide-react'
 import { occurrencesApi, recommendationsApi } from '@/lib/api'
 import type { Activity, GoalStatus, Occurrence, Recommendation } from '@/lib/types'
+import { toastError } from '@/store/toasts'
 import { Badge } from '@/components/ui/Badge'
+
+type ActivityRecommendation = Extract<Recommendation, { type: 'activity' }>
 
 export interface ActivityTiming {
   durationMinutes: number | null
@@ -68,6 +71,26 @@ function timingLabel(duration: number | null, startTime: string | null): string 
   return `${startLabel} - ${endLabel}`
 }
 
+function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
+function weekdayPlural(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  return `${new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'long' })}s`
+}
+
+// Why this activity is being suggested, from the raw signals on the DTO. Phrased relative to the
+// target day rather than to now, since the panel can be pointed at any date. Null = no history.
+function reasonText(rec: ActivityRecommendation, date: string): string | null {
+  if (rec.patternCount) return `Usually on ${weekdayPlural(date)}, ${rec.patternCount}x lately`
+  if (rec.daysSinceLast === null) return null
+  if (rec.daysSinceLast === 0) return 'Done earlier today'
+  const since = `${rec.daysSinceLast}d since last`
+  if (rec.medianGapDays === null) return since
+  return `${since}, usually every ${Math.max(1, Math.round(rec.medianGapDays))}d`
+}
+
 function formatDuration(o: Occurrence): string | null {
   let mins: number
   if (o.startAt && o.endAt) {
@@ -114,47 +137,94 @@ function OccurrenceRecItem({ occurrence, onSchedule }: { occurrence: Occurrence;
 }
 
 function ActivityRecItem({
-  activity,
-  timing,
+  rec,
+  date,
   onCreate,
+  onQuickSchedule,
+  isScheduling,
 }: {
-  activity: Activity
-  timing: ActivityTiming
+  rec: ActivityRecommendation
+  date: string
   onCreate: () => void
+  onQuickSchedule: () => void
+  isScheduling: boolean
 }) {
-  const hint = timingLabel(timing.durationMinutes, timing.startTime)
+  const activity = rec.activity
+  const reason = reasonText(rec, date)
+  // With a one-click slot the pill already carries the time, so the meta shows effort only.
+  // Without one, fall back to the full timing hint.
+  const meta = rec.suggestedStartAt
+    ? rec.typicalDurationMinutes
+      ? `~${formatMins(rec.typicalDurationMinutes)}`
+      : null
+    : timingLabel(rec.typicalDurationMinutes, rec.typicalStartTime)
 
   return (
-    <li className="group flex items-start gap-2 rounded-lg border border-transparent px-2 py-2.5 transition-colors hover:border-border hover:bg-muted/40">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <p className="truncate text-sm text-foreground">{activity.title}</p>
-          {hint && (
-            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{hint}</span>
-          )}
-        </div>
-        {activity.goal && (
-          <div className="mt-1.5">
-            <Badge tone={goalTone(activity.goal.status)} className="max-w-[160px] truncate block">
-              {activity.goal.title}
-            </Badge>
+    <li className="group rounded-lg border border-transparent px-2 py-2.5 transition-colors hover:border-border hover:bg-muted/40">
+      <div className="flex items-start gap-2">
+        <button onClick={onCreate} className="min-w-0 flex-1 text-left" title="Schedule activity">
+          <div className="flex items-center justify-between gap-2">
+            <p className="truncate text-sm text-foreground">{activity.title}</p>
+            {meta && (
+              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{meta}</span>
+            )}
           </div>
+          {reason && (
+            <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground/80">{reason}</p>
+          )}
+          {activity.goal && (
+            <div className="mt-1.5">
+              <Badge tone={goalTone(activity.goal.status)} className="max-w-[160px] truncate block">
+                {activity.goal.title}
+              </Badge>
+            </div>
+          )}
+        </button>
+        {rec.suggestedStartAt ? (
+          <button
+            onClick={onQuickSchedule}
+            disabled={isScheduling}
+            title={`Schedule at ${formatClock(rec.suggestedStartAt)}`}
+            className="mt-0.5 flex shrink-0 items-center gap-0.5 rounded-md border border-border py-1 pl-1 pr-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+          >
+            <Plus className="h-3 w-3" strokeWidth={2.5} />
+            {formatClock(rec.suggestedStartAt)}
+          </button>
+        ) : (
+          <button
+            onClick={onCreate}
+            title="Schedule activity"
+            className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary"
+          >
+            <CalendarPlus className="h-4 w-4" />
+          </button>
         )}
       </div>
-      <button
-        onClick={onCreate}
-        title="Schedule activity"
-        className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary"
-      >
-        <CalendarPlus className="h-4 w-4" />
-      </button>
     </li>
   )
 }
 
 export function RecommendationPanel({ date, today, onOccurrenceClick, onActivityClick, mobileOpen, onMobileClose }: RecommendationPanelProps) {
+  const qc = useQueryClient()
   const label = dayLabel(date, today)
   const isNamedDay = label === 'today' || label === 'tomorrow' || label === 'yesterday'
+
+  // One-click scheduling into the server-picked slot. The modal path stays available on the
+  // row body for anything that needs adjusting.
+  const scheduleMutation = useMutation({
+    mutationFn: (rec: ActivityRecommendation) => {
+      const startAt = rec.suggestedStartAt!
+      const endAt = rec.typicalDurationMinutes
+        ? new Date(new Date(startAt).getTime() + rec.typicalDurationMinutes * 60000).toISOString()
+        : null
+      return occurrencesApi.create({ activityId: rec.activity.id, startAt, endAt })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+    },
+    onError: (err) => toastError(err, 'Could not schedule that.'),
+  })
 
   const { data: recommendations = [], isLoading } = useQuery({
     queryKey: ['recommendations', date],
@@ -209,6 +279,28 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
 
     return (
       <>
+        {/* Floating first: these are already committed to, they only need a time. */}
+        {hasFloating && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between px-2 py-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Floating
+              </h2>
+              <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
+                {floatingOnly.length}
+              </span>
+            </div>
+            <ul className="flex flex-col gap-0.5">
+              {floatingOnly.map((o) => (
+                <OccurrenceRecItem
+                  key={o.id}
+                  occurrence={o}
+                  onSchedule={() => onOccurrenceClick(o)}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
         {hasRecs && groups.map((group) => (
           <div key={group.label} className="mb-4">
             <div className="flex items-center justify-between px-2 py-2">
@@ -235,36 +327,20 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
                 ) : (
                   <ActivityRecItem
                     key={rec.activity.id + i}
-                    activity={rec.activity}
-                    timing={{ durationMinutes: rec.typicalDurationMinutes, startTime: rec.typicalStartTime }}
+                    rec={rec}
+                    date={date}
                     onCreate={() => onActivityClick(rec.activity, { durationMinutes: rec.typicalDurationMinutes, startTime: rec.typicalStartTime })}
+                    onQuickSchedule={() => scheduleMutation.mutate(rec)}
+                    isScheduling={
+                      scheduleMutation.isPending &&
+                      scheduleMutation.variables?.activity.id === rec.activity.id
+                    }
                   />
                 )
               )}
             </ul>
           </div>
         ))}
-        {hasFloating && (
-          <div className="mb-4">
-            <div className="flex items-center justify-between px-2 py-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Floating
-              </h2>
-              <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground">
-                {floatingOnly.length}
-              </span>
-            </div>
-            <ul className="flex flex-col gap-0.5">
-              {floatingOnly.map((o) => (
-                <OccurrenceRecItem
-                  key={o.id}
-                  occurrence={o}
-                  onSchedule={() => onOccurrenceClick(o)}
-                />
-              ))}
-            </ul>
-          </div>
-        )}
       </>
     )
   }

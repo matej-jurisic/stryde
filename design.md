@@ -72,12 +72,11 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - White background (`--card`).
 - **Purpose:** In the Daily Plan and Calendar day views — Recommendation Engine surface. In other views — contextual panel or collapsed.
 - **Top:** Column header ("Recommendations"), followed by a full-width outlined "+ New Event" button.
-- **Content:** Events grouped by recommendation tier label (e.g., "Due Today", "Overdue", "Focus", "Floating").
-- **Event list items:**
-  - Custom checkbox (square, 4px radius, primary fill with white checkmark when done).
-  - Event title (strikethrough + muted when done/skipped).
-  - Duration floated right (e.g., `00:30`).
-  - Goal tag pills below the title (small text, color-matched to goal status).
+- **Content:** "Floating" first (already-committed work needing a time), then activities grouped by recommendation tier label ("Focus Goals", "Active Goals", "Based on Your Habits").
+- **Suggestion list items:** two side-by-side targets, never nested buttons.
+  - *Body* (opens the event modal): title, effort floated right (`~45m`), reason line beneath in `text-[11px] text-muted-foreground/80`, goal tag pill below (color-matched to goal status).
+  - *Action* (right edge): when the server returned a suggested slot, an outlined mono pill showing `+ 18:00` that schedules there in one click, hover shifting to primary tint. With no slot it degrades to the plain `CalendarPlus` icon that opens the modal.
+  - The reason line is optional: activities with no completion history show title and action only.
 - Separated from canvas by 1px border-r.
 
 ### 3. Right Canvas (fluid)
@@ -87,6 +86,7 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - **Floating row:** All-day row pinned above the time grid — shows floating occurrences as compact chips. Overdue occurrences are rendered in a separate sticky band at the top of the scroll container so they stay visible while scrolling.
 - **Content:** Time-based vertical grid. Hours listed on the far left. Event blocks placed in their time slots.
 - **Event blocks:** Light-tinted background + solid 1px colored left border, matching the event's goal color. Title + time range inside.
+- **Suggestion ghosts:** Toggled by the `Sparkles` button in the top bar (tinted primary when on), capped per day by the `Calendar suggestions` setting. Placeholder blocks drawn where the engine would place a suggested activity: **dotted** 1.5px border in the activity's category color (planned occurrences own the dashed border, real ones the solid one), a very faint tint over an opaque card base, `Sparkles` icon + title, and `opacity-70` rising to full on hover. They render *below* the event layer, so a real block always wins the pixels.
 
 ---
 

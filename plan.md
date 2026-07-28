@@ -528,6 +528,31 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 - Stats windowing: timing hints and cadence derive from the last 90 days of completed history only
 - Date-aware suggestions on the Calendar page: the sidebar targets the viewed day (multi-day views: today while visible, otherwise the first visible day) instead of always today; the panel header names the target day, and clicking a suggestion pre-fills that day's date on both Calendar and Plan pages
 
+**Suggestions panel: reason + one-click scheduling** (shipped ahead of Phase 12)
+- The engine already computed cadence, weekday pattern counts, and free slots but discarded all of it after ranking. `RecommendationDto` now carries `DaysSinceLast`, `MedianGapDays`, `PatternCount`, and `SuggestedStartAt`
+- Reason line under each suggestion, composed client-side from those numbers ("6d since last, usually every 2d", "Usually on Tuesdays, 3x lately") so copy stays out of C#
+- One-click schedule: the row's action becomes a `+ HH:mm` pill that creates the occurrence at the server-picked slot with no modal. Slot choice prefers the activity's habitual start time when it still fits a free gap, else the next quarter hour of the first gap that fits. Null on past days and when nothing fits, where the row falls back to the modal
+- Floating section moved above the ranked tiers: those occurrences are already committed to and only need a time
+- Decided against for this slice: per-day dismiss (needs a persistence decision), a free-capacity panel header (needs a response envelope change from `RecommendationDto[]`), top-pick card, time-of-day regrouping, collapsible desktop panel
+
+**Suggested slots drawn on the calendar** (follow-on to the above)
+- `SuggestedStartAt` was only readable as a `+ HH:mm` pill in the panel; the calendar grid is where "when would this go?" is actually answered
+- `Sparkles` toggle in the Calendar header (persisted in `localStorage` under `stryde-calendar-suggestions`) draws ghost blocks at each suggestion's slot, styled dotted to sit apart from solid (real) and dashed (planned) blocks
+- Fetched per *visible* day via `useQueries` on the existing `['recommendations', date]` key, so the sidebar's day is already cached and a week view shows the engine's placement across all 7 days. Queries are disabled while the toggle is off
+- Capped per day: every suggestion is scored against the same free gaps, so they bunch onto the same slot and the side-by-side columns stop being readable past a handful. Started as a hardcoded 4, raised to 6, then promoted to a real setting - `UserSettings.MaxCalendarSuggestions` (1-12, default 6), server-side alongside `MaxFocusGoals` rather than localStorage, since it is a preference rather than per-device view state like zoom and view mode
+- Clicking a ghost opens the event modal pre-filled with the activity and slot rather than creating it - the panel's `+ HH:mm` pill remains the one-click path
+- `packColumns` factored out of `layoutDay` so ghosts reuse the same overlap packing
+
+**Calendar overlap packing fix**
+- Overlapping blocks could be drawn on top of each other: `packColumns` assigned columns with a greedy sweep but derived each block's width divisor (`totalCols`) from its *direct* neighbours only. Blocks are positioned on a global `col / totalCols` percentage grid, so a block that recycled an early column after a gap saw fewer neighbours, computed a smaller `totalCols`, and claimed a wider slice that ran under its neighbours
+- `totalCols` is now a property of the whole cluster of transitively-overlapping spans: the sweep flushes a cluster when a span starts at or after every span so far has ended, and stamps that cluster's column count on all its members
+- Tradeoff accepted: every block in a cluster is equal width, so a block does not expand into columns its neighbours vacated. Google-Calendar-style rightward growth is a separate cosmetic pass, not needed for correctness
+
+**Suggestion ghosts landing on top of real events** (follow-on)
+- `SuggestedStart` sized an activity with no completed history at `needed = 0`, so any gap however small "fit" it, while the calendar drew it at `DEFAULT_SUGGESTION_MINUTES` (30). A ghost placed in a 10-minute gap overhung the next event. The server now assumes the same 30 minutes; the constant is duplicated rather than shared, with a comment on each side pointing at the other
+- Ghosts and events were packed by two independent `packColumns` calls into two stacked layers, so any overlap that did occur rendered the ghost full-width *underneath* the event, clipped in half, instead of side by side. `layoutDay` now takes both lists and packs them in one pass, ties breaking towards real events so those keep the leftmost columns. `layoutSuggestions` is gone
+- Free-slot computation only counted *pending* occurrences, so ticking something off immediately re-offered its span. Done now blocks (the time was spent, and the grid still draws it); skipped does not (an explicit decision not to, so the time frees up); due pins still never block, being deadlines rather than commitments to a span
+
 **UX hardening** (shipped ahead of the Polish phase)
 - Toast notifications (`store/toasts.ts` + `components/ui/Toasts.tsx`): every mutation without inline error display now reports failures via `toastError`
 - Delete confirmations everywhere: shared `ConfirmDialog` modal guards deletes of occurrences, activities (warns about cascade), goals, checkpoints, and categories; the edit occurrence modal gained Delete + Cancel in its footer

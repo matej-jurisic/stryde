@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Menu, Plus, LayoutGrid, CalendarCheck } from 'lucide-react'
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
-import { occurrencesApi, settingsApi, insightsApi } from '@/lib/api'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Menu, Plus, LayoutGrid, CalendarCheck, Sparkles } from 'lucide-react'
+import { useQuery, useQueries, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { occurrencesApi, settingsApi, insightsApi, recommendationsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import type { Activity, Occurrence, InsightsFreeRange } from '@/lib/types'
 import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
@@ -16,6 +16,13 @@ const MAX_HOUR_PX = 128
 // zoom-out a half-hour block still matches its true span and only shorter
 // events get inflated.
 const MIN_EVENT_PX = 16
+// Span drawn for a suggestion whose activity has no duration history.
+const DEFAULT_SUGGESTION_MINUTES = 30
+// Suggestions share the day's free slots, so many of them pile onto the same
+// gap. Only the top-ranked few get drawn — past that the columns are too
+// narrow to read, and the panel remains the full list. User-tunable via
+// settings; this is the fallback before settings have loaded.
+const DEFAULT_MAX_SUGGESTIONS_PER_DAY = 6
 
 // ── Date utilities ─────────────────────────────────────────────────────────
 
@@ -146,10 +153,63 @@ interface LayoutEvent {
   trueEndPx: number
 }
 
-function layoutDay(events: Occurrence[], day: Date, hourPx: number): LayoutEvent[] {
+/**
+ * Greedy side-by-side packing for overlapping spans (minutes from day start).
+ * Items must be sorted by start; returns each item's column and the divisor its
+ * width should use.
+ *
+ * Blocks are positioned on a global `col / totalCols` percentage grid, so every
+ * item in a cluster of transitively-overlapping events must share one
+ * `totalCols` — deriving it from an item's direct neighbours understates it
+ * whenever a column was recycled after a gap, and the blocks then overlap.
+ */
+function packColumns(items: { s: number; end: number }[]): { col: number; totalCols: number }[] {
+  const result: { col: number; totalCols: number }[] = []
+  const colEnds: number[] = []
+  let cluster: number[] = []
+  let clusterEnd = -Infinity
+
+  function flush() {
+    const total = colEnds.length || 1
+    for (const i of cluster) result[i].totalCols = total
+    cluster = []
+    colEnds.length = 0
+  }
+
+  items.forEach((it, i) => {
+    // Starts at or after every span seen so far ends → disjoint, start a cluster
+    if (it.s >= clusterEnd) flush()
+    let c = colEnds.findIndex((e) => e <= it.s)
+    if (c === -1) {
+      c = colEnds.length
+      colEnds.push(it.end)
+    } else {
+      colEnds[c] = it.end
+    }
+    result[i] = { col: c, totalCols: 0 }
+    cluster.push(i)
+    clusterEnd = Math.max(clusterEnd, it.end)
+  })
+  flush()
+
+  return result
+}
+
+interface DayLayout {
+  events: LayoutEvent[]
+  suggestions: LayoutSuggestion[]
+}
+
+/**
+ * Lays out one day's real events and its suggestion ghosts. Both go through a
+ * single `packColumns` pass: a ghost whose drawn span overhangs a real event has
+ * to take its own column, otherwise it renders full-width underneath and the
+ * event clips it in half.
+ */
+function layoutDay(events: Occurrence[], ghosts: SuggestionGhost[], day: Date, hourPx: number): DayLayout {
   const dayStartMs = sod(day).getTime()
 
-  const items = events
+  const eventItems = events
     .filter((e) => !!e.startAt)
     .map((e) => {
       const startMs = new Date(e.startAt!).getTime()
@@ -162,41 +222,119 @@ function layoutDay(events: Occurrence[], day: Date, hourPx: number): LayoutEvent
       return { event: e, s, end: Math.min(end, 24 * 60) }
     })
     .filter((it) => it.s < 24 * 60 && it.end > it.s)
-    .sort((a, b) => a.s - b.s)
 
-  const colEnds: number[] = []
-  const colIdx: number[] = []
+  const ghostItems = ghosts
+    .map((ghost) => {
+      const startMs = new Date(ghost.startAt).getTime()
+      const mins = ghost.durationMinutes && ghost.durationMinutes > 0
+        ? ghost.durationMinutes
+        : DEFAULT_SUGGESTION_MINUTES
+      const s = Math.round((startMs - dayStartMs) / 60000)
+      return { ghost, s, end: Math.min(s + mins, 24 * 60) }
+    })
+    .filter((it) => it.s >= 0 && it.s < 24 * 60 && it.end > it.s)
 
-  for (const it of items) {
-    let c = colEnds.findIndex((e) => e <= it.s)
-    if (c === -1) {
-      c = colEnds.length
-      colEnds.push(it.end)
+  // Ties break towards real events, so they keep the leftmost columns
+  const merged = [
+    ...eventItems.map((it, i) => ({ s: it.s, end: it.end, isEvent: true, i })),
+    ...ghostItems.map((it, i) => ({ s: it.s, end: it.end, isEvent: false, i })),
+  ].sort((a, b) => a.s - b.s || Number(b.isEvent) - Number(a.isEvent))
+
+  const cols = packColumns(merged)
+
+  const eventLayout: LayoutEvent[] = []
+  const suggestionLayout: LayoutSuggestion[] = []
+
+  merged.forEach((m, k) => {
+    const { col, totalCols } = cols[k]
+    if (m.isEvent) {
+      const { event, s, end } = eventItems[m.i]
+      eventLayout.push({
+        event,
+        col,
+        totalCols,
+        topPx: (s / 60) * hourPx,
+        // Due pins keep their exact 30-minute height so they scale with zoom
+        heightPx: isDueOccurrence(event)
+          ? ((end - s) / 60) * hourPx
+          : Math.max(((end - s) / 60) * hourPx, MIN_EVENT_PX),
+        trueEndPx: (end / 60) * hourPx,
+      })
     } else {
-      colEnds[c] = it.end
-    }
-    colIdx.push(c)
-  }
-
-  return items.map(({ event, s, end }, i) => {
-    let maxC = colIdx[i]
-    for (let j = 0; j < items.length; j++) {
-      if (j !== i && items[j].s < end && items[j].end > s) {
-        maxC = Math.max(maxC, colIdx[j])
-      }
-    }
-    return {
-      event,
-      col: colIdx[i],
-      totalCols: maxC + 1,
-      topPx: (s / 60) * hourPx,
-      // Due pins keep their exact 30-minute height so they scale with zoom
-      heightPx: isDueOccurrence(event)
-        ? ((end - s) / 60) * hourPx
-        : Math.max(((end - s) / 60) * hourPx, MIN_EVENT_PX),
-      trueEndPx: (end / 60) * hourPx,
+      const { ghost, s, end } = ghostItems[m.i]
+      suggestionLayout.push({
+        ghost,
+        col,
+        totalCols,
+        topPx: (s / 60) * hourPx,
+        heightPx: Math.max(((end - s) / 60) * hourPx, MIN_EVENT_PX),
+      })
     }
   })
+
+  return { events: eventLayout, suggestions: suggestionLayout }
+}
+
+// ── Suggestion ghosts ───────────────────────────────────────────────────────
+
+/** A recommended activity plus the slot the server picked for it. */
+interface SuggestionGhost {
+  activity: Activity
+  startAt: string
+  durationMinutes: number | null
+}
+
+interface LayoutSuggestion {
+  ghost: SuggestionGhost
+  col: number
+  totalCols: number
+  topPx: number
+  heightPx: number
+}
+
+function SuggestionBlock({ layout, onClick }: { layout: LayoutSuggestion; onClick: (g: SuggestionGhost) => void }) {
+  const { ghost, col, totalCols, topPx, heightPx } = layout
+  const accentColor = ghost.activity.category?.color ?? 'var(--color-primary)'
+  const isHex = accentColor.startsWith('#')
+  const accentFaded = isHex ? `${accentColor}12` : `color-mix(in srgb, ${accentColor} 7%, transparent)`
+
+  const GAP = 2
+  const leftPct = (col / totalCols) * 100
+  const widthPct = 100 / totalCols
+  const compact = heightPx < 26
+
+  return (
+    <div
+      className="absolute"
+      style={{
+        top: topPx + GAP,
+        height: Math.max(heightPx - GAP, 14),
+        left: `calc(${leftPct}% + ${GAP}px)`,
+        width: `calc(${widthPct}% - ${GAP * 2}px)`,
+        pointerEvents: 'auto',
+      }}
+    >
+      <button
+        onClick={(e) => { e.stopPropagation(); onClick(ghost) }}
+        title={`Suggested: ${ghost.activity.title} at ${timeLabel(ghost.startAt)}`}
+        className="absolute inset-0 overflow-hidden rounded-[4px] text-left opacity-70 transition-opacity hover:opacity-100"
+        style={{
+          border: `1.5px dotted ${accentColor}`,
+          background: `linear-gradient(${accentFaded}, ${accentFaded}), var(--color-card)`,
+        }}
+      >
+        <div className={`flex items-center gap-1 px-1.5 ${compact ? 'py-px' : 'py-0.5'}`}>
+          <Sparkles className="h-2.5 w-2.5 shrink-0" strokeWidth={2.5} style={{ color: accentColor }} />
+          <p
+            className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] font-medium ${compact ? 'leading-none' : 'leading-tight'}`}
+            style={{ color: accentColor }}
+          >
+            {ghost.activity.title}
+          </p>
+        </div>
+      </button>
+    </div>
+  )
 }
 
 // ── Due occurrence helper ───────────────────────────────────────────────────
@@ -494,11 +632,13 @@ interface DayColumnProps {
   resizingEventId: string | null
   hourPx: number
   likelyFree: InsightsFreeRange[]
+  suggestions: SuggestionGhost[]
+  onSuggestionClick: (g: SuggestionGhost) => void
   animateDir?: 'forward' | 'back' | null
   navCount: number
 }
 
-function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx, likelyFree, animateDir, navCount }: DayColumnProps) {
+function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx, likelyFree, suggestions, onSuggestionClick, animateDir, navCount }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
@@ -517,7 +657,10 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
     [allEvents, dayStart.getTime(), dayEnd.getTime()],
   )
 
-  const layout = useMemo(() => layoutDay(dayEvents, day, hourPx), [dayEvents, day, hourPx])
+  const { events: layout, suggestions: suggestionLayout } = useMemo(
+    () => layoutDay(dayEvents, suggestions, day, hourPx),
+    [dayEvents, suggestions, day, hourPx],
+  )
 
   const now = new Date()
   const nowPx = ((now.getHours() * 60 + now.getMinutes()) / 60) * hourPx
@@ -596,6 +739,19 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
           className="pointer-events-none absolute inset-x-0 z-30 rounded-[4px] border-2 border-dashed border-primary/80 bg-primary/10"
           style={{ top: resizeOverlay.topPx, height: resizeOverlay.heightPx }}
         />
+      )}
+      {/* Suggestion ghosts — below the event layer: they only ever fill free
+          slots, so a real event on top always wins the pixels. */}
+      {suggestionLayout.length > 0 && (
+        <div className="absolute inset-0" style={{ pointerEvents: 'none' }}>
+          {suggestionLayout.map((l) => (
+            <SuggestionBlock
+              key={l.ghost.activity.id + l.ghost.startAt}
+              layout={l}
+              onClick={onSuggestionClick}
+            />
+          ))}
+        </div>
       )}
       {/* Event blocks — animated layer; pointer-events:none on the wrapper lets
           drag-to-create pass through to the grid; buttons inside override to auto */}
@@ -1014,6 +1170,9 @@ export function CalendarPage() {
   })
   const [viewDropOpen, setViewDropOpen] = useState(false)
   const viewDropRef = useRef<HTMLDivElement>(null)
+  const [showSuggestions, setShowSuggestions] = useState(
+    () => localStorage.getItem('stryde-calendar-suggestions') === 'true',
+  )
   const [current, setCurrent] = useState(() => {
     const savedView = localStorage.getItem('stryde-calendar-view')
     // Session-scoped on purpose: coming back mid-session restores the viewed
@@ -1164,6 +1323,36 @@ export function CalendarPage() {
     }
     return map
   }, [emptyProfile])
+
+  // Suggested slots for every visible day, on the same ['recommendations', date] cache the
+  // panel uses - so the panel's own day costs no extra request. Past days come back with no
+  // slot (the server only fits suggestions into remaining free time), and therefore no ghosts.
+  const suggestionQueries = useQueries({
+    queries: days.map((day) => {
+      const date = formatDateInput(day)
+      return {
+        queryKey: ['recommendations', date],
+        queryFn: () => recommendationsApi.list(date),
+        staleTime: 30 * 1000,
+        enabled: showSuggestions,
+      }
+    }),
+  })
+
+  const suggestionsByDay: SuggestionGhost[][] = days.map((_, idx) => {
+    if (!showSuggestions) return []
+    return (suggestionQueries[idx]?.data ?? [])
+      .flatMap((rec) =>
+        rec.type === 'activity' && rec.suggestedStartAt
+          ? [{
+              activity: rec.activity,
+              startAt: rec.suggestedStartAt,
+              durationMinutes: rec.typicalDurationMinutes,
+            }]
+          : [],
+      )
+      .slice(0, settings?.maxCalendarSuggestions ?? DEFAULT_MAX_SUGGESTIONS_PER_DAY)
+  })
 
   // The FLOAT row shows planned floating tasks before unplanned ones.
   const floatingTasks = useMemo(
@@ -1398,6 +1587,24 @@ export function CalendarPage() {
       setDefaultEndAt(undefined)
     }
 
+    setModalOpen(true)
+  }
+
+  // Clicking a ghost opens the modal already filled with the suggested slot, so the
+  // suggestion is a starting point rather than a commitment.
+  function openFromSuggestion(ghost: SuggestionGhost) {
+    setDuplicateFromOccurrence(undefined)
+    setEditingOccurrence(undefined)
+    setDefaultActivity(ghost.activity)
+    setFocusStartAt(false)
+    setScheduleMode(false)
+
+    const start = new Date(ghost.startAt)
+    const mins = ghost.durationMinutes && ghost.durationMinutes > 0
+      ? ghost.durationMinutes
+      : DEFAULT_SUGGESTION_MINUTES
+    setDefaultStartAt(formatDatetimeLocal(start))
+    setDefaultEndAt(formatDatetimeLocal(new Date(start.getTime() + mins * 60000)))
     setModalOpen(true)
   }
 
@@ -2518,6 +2725,23 @@ export function CalendarPage() {
 
         <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
           <button
+            onClick={() => {
+              const next = !showSuggestions
+              setShowSuggestions(next)
+              localStorage.setItem('stryde-calendar-suggestions', String(next))
+            }}
+            aria-pressed={showSuggestions}
+            title={showSuggestions ? 'Hide suggested slots' : 'Show suggested slots'}
+            className={`flex h-8 w-8 items-center justify-center rounded-md border transition-colors ${
+              showSuggestions
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border text-foreground hover:bg-muted'
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+
+          <button
             onClick={goToday}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
           >
@@ -2754,6 +2978,8 @@ export function CalendarPage() {
                   resizingEventId={resizingEventId}
                   hourPx={hourPx}
                   likelyFree={day.getTime() >= effectiveToday.getTime() ? (likelyFreeByWeekday.get(day.getDay()) ?? []) : []}
+                  suggestions={suggestionsByDay[idx] ?? []}
+                  onSuggestionClick={openFromSuggestion}
                   animateDir={navDir}
                   navCount={navCount}
                 />
@@ -2815,7 +3041,7 @@ export function CalendarPage() {
       />
 
       <EventModal
-        key={`${editingOccurrence?.id ?? duplicateFromOccurrence?.id ?? defaultStartAt ?? defaultActivity?.id ?? 'new'}-${scheduleMode}-${editingOccurrence?.startAt ?? ''}`}
+        key={`${editingOccurrence?.id ?? duplicateFromOccurrence?.id ?? defaultStartAt ?? defaultActivity?.id ?? 'new'}-${defaultActivity?.id ?? ''}-${scheduleMode}-${editingOccurrence?.startAt ?? ''}`}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         occurrence={editingOccurrence}

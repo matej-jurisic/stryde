@@ -21,6 +21,13 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
     /// <summary>Score multiplier when the activity's typical start time falls outside today's free slots.</summary>
     private const double StartTimeMismatchPenalty = 0.5;
 
+    /// <summary>
+    /// Span assumed for an activity with no completed history, when picking its slot. Must match
+    /// DEFAULT_SUGGESTION_MINUTES on the calendar - the client draws an unknown-duration ghost this
+    /// tall, so a slot chosen against a smaller figure would overhang the next event.
+    /// </summary>
+    private const int DefaultSuggestionMinutes = 30;
+
     /// <param name="date">The day to recommend for; defaults to the user's current day.</param>
     /// <param name="nowUtc">Injectable clock for tests; defaults to the real time.</param>
     public async Task<List<RecommendationDto>> GetAsync(Guid userId, DateOnly? date = null, DateTimeOffset? nowUtc = null)
@@ -60,7 +67,11 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         if (today >= currentDay)
         {
             var slotStart = today == currentDay ? now : DayMath.StartOfDay(today, ctx);
-            var dayBlocks = pendingOccurrences
+            // Done blocks still occupy their span - that time was spent, and the grid keeps drawing
+            // them. Skipped ones don't: skipping is an explicit decision not to, so the time frees up.
+            // Due pins (EndAt == null) are deadlines rather than commitments and never block.
+            var dayBlocks = allOccurrences
+                .Where(o => o.Status is EventStatus.pending or EventStatus.done)
                 .Where(o => !IsFloating(o) && o.StartAt != null && o.EndAt != null && DayMath.OccurrenceDay(o, ctx) == today)
                 .OrderBy(o => o.StartAt!.Value)
                 .ToList();
@@ -75,14 +86,48 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             return freeSlots.Any(slot => (slot.End - slot.Start).TotalMinutes >= s.DurationMinutes.Value);
         }
 
-        bool StartTimeIsFree(int minutesFromMidnight)
+        DateTimeOffset InstantForMinutes(int minutesFromMidnight)
         {
             // Minutes are from local midnight; times before the day boundary belong to the next calendar date
             var time = new TimeOnly(minutesFromMidnight / 60, minutesFromMidnight % 60);
             var calendarDate = time < ctx.DayBoundary ? today.AddDays(1) : today;
             var local = calendarDate.ToDateTime(time);
-            var instant = new DateTimeOffset(local, ctx.TimeZone.GetUtcOffset(local));
+            return new DateTimeOffset(local, ctx.TimeZone.GetUtcOffset(local));
+        }
+
+        bool StartTimeIsFree(int minutesFromMidnight)
+        {
+            var instant = InstantForMinutes(minutesFromMidnight);
             return freeSlots!.Any(slot => instant >= slot.Start && instant < slot.End);
+        }
+
+        // Where this activity could go on the target day: its habitual time when that still sits in a
+        // gap big enough, otherwise the start of the first gap that fits. Null when nothing fits.
+        DateTimeOffset? SuggestedStart(Guid activityId)
+        {
+            if (freeSlots is null) return null;
+            statsByActivity.TryGetValue(activityId, out var s);
+            // No history means no median duration - assume the same span the calendar draws rather
+            // than 0, which would "fit" any gap however small.
+            var needed = s?.DurationMinutes ?? DefaultSuggestionMinutes;
+
+            if (s?.StartMinutes is { } mins)
+            {
+                var habitual = InstantForMinutes(mins);
+                foreach (var slot in freeSlots)
+                {
+                    if (habitual >= slot.Start && habitual < slot.End && (slot.End - habitual).TotalMinutes >= needed)
+                        return habitual;
+                }
+            }
+
+            foreach (var slot in freeSlots)
+            {
+                var start = RoundUpToQuarter(slot.Start);
+                if (start < slot.End && (slot.End - start).TotalMinutes >= needed)
+                    return start;
+            }
+            return null;
         }
 
         // Overdueness relative to the activity's own rhythm: days since last completion divided by
@@ -142,6 +187,10 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             .OrderByDescending(x => x.Count)
             .ToList();
 
+        // Only tier 3 activities carry a weekday pattern: goal-tier ones are already in
+        // seenActivityIds by this point and were filtered out of the query above.
+        var patternCountById = patternedActivityIds.ToDictionary(x => x.ActivityId, x => x.Count);
+
         List<ActivityDto> habitRecs = [];
         if (patternedActivityIds.Count > 0)
         {
@@ -164,7 +213,13 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         RecommendationDto MakeActivityRec(int tier, Guid activityId, ActivityDto dto)
         {
             statsByActivity.TryGetValue(activityId, out var s);
-            return new RecommendationDto(tier, "activity", null, dto, s?.DurationMinutes, s?.StartTime);
+            patternCountById.TryGetValue(activityId, out var patternCount);
+            return new RecommendationDto(
+                tier, "activity", null, dto, s?.DurationMinutes, s?.StartTime,
+                s is null ? null : today.DayNumber - s.LastDoneDay.DayNumber,
+                s?.MedianGapDays,
+                patternCount == 0 ? null : patternCount,
+                SuggestedStart(activityId));
         }
 
         var result = new List<RecommendationDto>();
@@ -236,6 +291,15 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         }
 
         return new ActivityStats(medianDuration, typicalStartTime, modeMinutes, doneDays[^1], medianGap);
+    }
+
+    /// <summary>Next quarter hour at or after <paramref name="t"/>, so suggested times read cleanly.</summary>
+    private static DateTimeOffset RoundUpToQuarter(DateTimeOffset t)
+    {
+        var truncated = new DateTimeOffset(t.Year, t.Month, t.Day, t.Hour, t.Minute, 0, t.Offset);
+        if (truncated < t) truncated = truncated.AddMinutes(1);
+        var remainder = truncated.Minute % 15;
+        return remainder == 0 ? truncated : truncated.AddMinutes(15 - remainder);
     }
 
     private static List<(DateTimeOffset Start, DateTimeOffset End)> ComputeFreeSlots(

@@ -319,6 +319,163 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_exposes_cadence_signals_from_history()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "every other day", GoalStatus.active);
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 27, 9, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 29, 9, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, At(1, 9));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+        Assert.Equal(6, recs[0].DaysSinceLast);   // last done Jul 1, target day Jul 7
+        Assert.Equal(2, recs[0].MedianGapDays);
+        Assert.Null(recs[0].PatternCount);
+    }
+
+    [Fact]
+    public async Task GetAsync_signals_are_null_without_history()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "never done", GoalStatus.focus);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+        Assert.Null(recs[0].DaysSinceLast);
+        Assert.Null(recs[0].MedianGapDays);
+        Assert.Null(recs[0].PatternCount);
+    }
+
+    [Fact]
+    public async Task GetAsync_tier3_exposes_weekday_pattern_count()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "Tuesday deep work");
+
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 16, 9, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 23, 9, 0, 0, TimeSpan.Zero));
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 30, 9, 0, 0, TimeSpan.Zero));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+        Assert.Equal(3, recs[0].Tier);
+        Assert.Equal(3, recs[0].PatternCount);
+    }
+
+    [Fact]
+    public async Task GetAsync_suggests_the_habitual_start_time_when_it_is_still_free()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "evening task", GoalStatus.active);
+        await CompleteAsync(userId, activity, At(2, 20), At(2, 21));
+        await CompleteAsync(userId, activity, At(4, 20), At(4, 21));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+        Assert.Equal(At(7, 20), recs[0].SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_suggested_start_falls_back_to_next_quarter_of_the_first_gap()
+    {
+        var userId = await CreateUserAsync();
+        // Habitual time is 09:00, already behind us at 12:07 — the slot itself is the fallback
+        var activity = await AddActivityAsync(userId, "morning task", GoalStatus.active);
+        await CompleteAsync(userId, activity, At(2, 9), At(2, 10));
+        await CompleteAsync(userId, activity, At(4, 9), At(4, 10));
+
+        var now = new DateTimeOffset(2026, 7, 7, 12, 7, 0, TimeSpan.Zero);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, now);
+
+        Assert.Single(recs);
+        Assert.Equal(At(7, 12, 15), recs[0].SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_suggested_start_skips_a_gap_too_short_for_the_activity()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "two hour block", GoalStatus.active);
+        await CompleteAsync(userId, activity, At(2, 9), At(2, 11));
+        await CompleteAsync(userId, activity, At(4, 9), At(4, 11));
+
+        // Busy 12:00-13:00 and 14:00-15:00, leaving a 1h gap at 13:00 that cannot hold 2h
+        var blocker = await AddActivityAsync(userId, "blocker");
+        await AddOccurrenceAsync(userId, blocker, startAt: At(7, 12), endAt: At(7, 13));
+        await AddOccurrenceAsync(userId, blocker, startAt: At(7, 14), endAt: At(7, 15));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+        Assert.Equal(At(7, 15), recs[0].SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_past_day_has_no_suggested_start()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "hour long", GoalStatus.active);
+        await CompleteAsync(userId, activity, new DateTimeOffset(2026, 6, 20, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 20, 10, 0, 0, TimeSpan.Zero));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 1), Now);
+
+        Assert.Single(recs);
+        Assert.Null(recs[0].SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_suggested_start_skips_a_gap_too_small_for_an_activity_with_no_history()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "never done", GoalStatus.active);
+
+        // 12:00-12:15 is free but only 15 min - an unknown duration assumes 30, so it must not fit
+        var blocker = await AddActivityAsync(userId, "blocker");
+        await AddOccurrenceAsync(userId, blocker, startAt: At(7, 12, 15), endAt: At(7, 14));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        var rec = recs.Single(r => r.Activity!.Id == activity.Id);
+        Assert.Null(rec.TypicalDurationMinutes);
+        Assert.Equal(At(7, 14), rec.SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_free_slots_exclude_time_held_by_a_done_block()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "never done", GoalStatus.active);
+
+        var blocker = await AddActivityAsync(userId, "already done");
+        await AddOccurrenceAsync(userId, blocker, startAt: At(7, 12), endAt: At(7, 13), status: EventStatus.done);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        var rec = recs.Single(r => r.Activity!.Id == activity.Id);
+        Assert.Equal(At(7, 13), rec.SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_free_slots_reclaim_time_held_by_a_skipped_block()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "never done", GoalStatus.active);
+
+        var blocker = await AddActivityAsync(userId, "not doing it");
+        await AddOccurrenceAsync(userId, blocker, startAt: At(7, 12), endAt: At(7, 13), status: EventStatus.skipped);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        var rec = recs.Single(r => r.Activity!.Id == activity.Id);
+        Assert.Equal(At(7, 12), rec.SuggestedStartAt);
+    }
+
+    [Fact]
     public async Task GetAsync_timing_stats_ignore_completions_older_than_90_days()
     {
         var userId = await CreateUserAsync();

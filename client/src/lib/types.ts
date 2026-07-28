@@ -117,9 +117,21 @@ export interface Occurrence {
   activity: Activity
 }
 
+/** Raw "why" signals; the panel composes the reason text from them. */
+interface RecommendationSignals {
+  tier: number
+  typicalDurationMinutes: number | null
+  typicalStartTime: string | null
+  daysSinceLast: number | null
+  medianGapDays: number | null
+  patternCount: number | null
+  /** Best free slot on the target day, null when nothing fits or the day is past. */
+  suggestedStartAt: string | null
+}
+
 export type Recommendation =
-  | { tier: number; type: 'occurrence'; occurrence: Occurrence; activity: null; typicalDurationMinutes: number | null; typicalStartTime: string | null }
-  | { tier: number; type: 'activity'; occurrence: null; activity: Activity; typicalDurationMinutes: number | null; typicalStartTime: string | null }
+  | (RecommendationSignals & { type: 'occurrence'; occurrence: Occurrence; activity: null })
+  | (RecommendationSignals & { type: 'activity'; occurrence: null; activity: Activity })
 
 export interface InsightsActivity {
   activityId: string
@@ -177,4 +189,6 @@ export interface UserSettings {
   maxFocusGoals: number
   dayBoundaryTime: string // "HH:mm"
   timezone: string // IANA id
+  /** Suggestion ghosts drawn per day on the calendar. */
+  maxCalendarSuggestions: number
 }
