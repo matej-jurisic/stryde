@@ -2696,7 +2696,9 @@ export function CalendarPage() {
             <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${datePopOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
           </button>
           {datePopOpen && (
-            <div className="absolute left-0 top-full z-50 mt-2 w-64 rounded-xl border border-border bg-card shadow-pop p-3 flex flex-col gap-3">
+            <div className="absolute left-0 top-full z-50 mt-2 w-64 rounded-xl border border-border bg-card shadow-pop p-3 flex flex-col gap-2">
+              {/* Current selection */}
+              <p className="text-sm font-semibold text-foreground">{pageTitle(view, days)}</p>
               {/* Nav row */}
               <div className="flex items-center gap-1">
                 <button
@@ -2706,21 +2708,25 @@ export function CalendarPage() {
                 >
                   {view === 'day' ? <ChevronLeft className="h-4 w-4" strokeWidth={2} /> : <ChevronsLeft className="h-4 w-4" strokeWidth={2} />}
                 </button>
-                <button
-                  onClick={prevDay}
-                  aria-label="Back 1 day"
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${view === 'day' ? 'invisible' : ''}`}
-                >
-                  <ChevronLeft className="h-4 w-4" strokeWidth={2} />
-                </button>
-                <p className="flex-1 text-center text-xs font-medium text-foreground truncate">{pageTitle(view, days)}</p>
-                <button
-                  onClick={nextDay}
-                  aria-label="Forward 1 day"
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${view === 'day' ? 'invisible' : ''}`}
-                >
-                  <ChevronRight className="h-4 w-4" strokeWidth={2} />
-                </button>
+                {view !== 'day' && (
+                  <button
+                    onClick={prevDay}
+                    aria-label="Back 1 day"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  >
+                    <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+                  </button>
+                )}
+                <div className="flex-1" />
+                {view !== 'day' && (
+                  <button
+                    onClick={nextDay}
+                    aria-label="Forward 1 day"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  >
+                    <ChevronRight className="h-4 w-4" strokeWidth={2} />
+                  </button>
+                )}
                 <button
                   onClick={() => { next(); }}
                   aria-label={view === 'day' ? 'Next day' : view === '3day' ? 'Forward 3 days' : 'Forward 7 days'}
