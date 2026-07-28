@@ -492,6 +492,20 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 
 ---
 
+## Suggestion Muting from the Activities List (July 2026) ✅
+
+**Goal:** Manage which activities are eligible for suggestions from one screen. The `excludeFromRecommendations` flag was only reachable by opening each activity's edit modal, so there was no way to see the current state at a glance or flip several activities quickly.
+
+**Backend**
+- `PATCH /api/activities/{id}/recommendations` + `ActivityService.SetRecommendationsAsync`: single-field toggle, so muting no longer round-trips the full activity payload (which also risked clobbering title/goal/category from a stale form)
+
+**Frontend**
+- Activities page rows show a lightbulb toggle and a "Not suggested" badge; the toggle is optimistic (list does not reorder or flicker while flipping several in a row) and invalidates `['activities']` + `['recommendations']`
+- Filter bar above the list: All / Suggested / Muted with counts
+- The edit modal keeps its checkbox; both paths write the same flag
+
+---
+
 ## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.

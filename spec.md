@@ -59,6 +59,7 @@ The scheduling primitive is split into two layers:
 | Goal | Optional — links to one goal |
 | Category | Optional |
 | Kind | `activity` (default) or `event` |
+| Exclude from suggestions | Boolean — when set, the activity never appears in recommendations or as a calendar suggestion. For things logged automatically from outside the app, or anything the user does not want proposed. Toggled per row on the Activities page (which also filters by All / Suggested / Muted) or from the activity's edit modal. |
 
 **Occurrence** — a scheduled (or floating) instance of an Activity.
 
@@ -218,7 +219,7 @@ Recommendations are ranked — all tiers surface **activities** (not occurrences
 2. Activities linked to Active goals
 3. Activities with a day-of-week pattern matching today (>=2 completions on this weekday in the past 6 weeks), where no instance is already on today's schedule — sorted by frequency descending
 
-Activities already scheduled today are excluded from all tiers. Activities linked to Bench or Closed goals never appear. An activity appears at most once.
+Activities already scheduled today are excluded from all tiers. Activities linked to Bench or Closed goals never appear. Activities flagged "exclude from suggestions" never appear. An activity appears at most once.
 
 **Ranking within tiers:** Tiers 1 and 2 rank by overdueness relative to the activity's own rhythm: days since last completion divided by the median gap between completion days. An activity completed today scores ~0 and sinks (natural cooldown); one past its usual gap floats up. A single completion assumes a weekly cadence; no history scores neutral (1.0). An activity whose typical start time falls inside already-occupied or past time is downranked (score halved). Tier 3 keeps its frequency-descending sort.
 

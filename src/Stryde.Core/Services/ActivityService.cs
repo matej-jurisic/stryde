@@ -108,6 +108,20 @@ public class ActivityService(StrydeDbContext db)
         return Result<ActivityDto>.Success(ActivityDto.FromEntity(a));
     }
 
+    public async Task<Result<ActivityDto>> SetRecommendationsAsync(Guid id, Guid userId, SetActivityRecommendationsRequest req)
+    {
+        var a = await db.Activities
+            .Include(a => a.Category)
+            .Include(a => a.Goal)
+            .Include(a => a.Subtasks)
+            .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);
+        if (a is null) return Result<ActivityDto>.Fail(new Error(ErrorType.NotFound, "Activity not found."));
+
+        a.ExcludeFromRecommendations = req.ExcludeFromRecommendations;
+        await db.SaveChangesAsync();
+        return Result<ActivityDto>.Success(ActivityDto.FromEntity(a));
+    }
+
     public async Task<Result> DeleteAsync(Guid id, Guid userId)
     {
         var a = await db.Activities.FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);

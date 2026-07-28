@@ -294,11 +294,13 @@ export function PlanPreviewPage() {
     queryFn: () => occurrencesApi.list({ startFrom: dayStart.toISOString(), endBefore: dayEnd.toISOString() }),
   })
 
-  const { data: allOccurrences = [] } = useQuery({
+  const { data: allOccurrences = [], isLoading: isLoadingAll } = useQuery({
     queryKey: ['events', 'all'],
     queryFn: () => occurrencesApi.list(),
     enabled: isToday,
   })
+
+  const anyLoading = isLoading || (isToday && isLoadingAll)
 
   const { data: focusGoals = [] } = useQuery({ queryKey: ['goals', { status: 'focus' }], queryFn: () => goalsApi.list({ status: 'focus' }) })
 
@@ -341,7 +343,7 @@ export function PlanPreviewPage() {
 
   const greeting = (() => {
     const h = now.getHours()
-    if (!isToday) return 'Planning ahead'
+    if (!isToday) return current < effectiveToday ? 'Looking back' : 'Planning ahead'
     if (h < 5) return 'Late night'
     if (h < 12) return 'Good morning'
     if (h < 17) return 'Good afternoon'
@@ -481,49 +483,50 @@ export function PlanPreviewPage() {
         {/* Canvas */}
         <div className="flex-1 overflow-y-auto">
           <div className="px-4 py-5 md:px-6">
-            {/* Briefing hero */}
-            <section className="mb-6 rounded-xl border border-border bg-gradient-to-br from-card to-muted/40 p-5">
-              <div className="flex items-center gap-4">
-                <ProgressRing pct={completionPct}>
-                  <div className="text-center leading-none">
-                    <span className="block text-sm font-semibold tabular-nums text-foreground">{Math.round(completionPct)}%</span>
-                  </div>
-                </ProgressRing>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    {now.getHours() < 17 ? <Sunrise className="h-3.5 w-3.5" strokeWidth={2} /> : <MoonStar className="h-3.5 w-3.5" strokeWidth={2} />}
-                    <span className="text-xs font-medium">{greeting}</span>
-                  </div>
-                  <p className="mt-0.5 truncate text-lg font-semibold text-foreground">
-                    {remainingCount === 0
-                      ? totalTracked > 0 ? 'All clear for the day' : 'Nothing on the books yet'
-                      : `${remainingCount} thing${remainingCount === 1 ? '' : 's'} left`}
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    <span><strong className="text-foreground tabular-nums">{doneCount}</strong> done</span>
-                    <span><strong className="text-foreground tabular-nums">{remainingCount}</strong> left</span>
-                    {committedMin > 0 && <span><strong className="text-foreground tabular-nums">{formatDuration(committedMin)}</strong> planned</span>}
-                    {overdueEvents.length > 0 && (
-                      <span className="text-destructive"><strong className="tabular-nums">{overdueEvents.length}</strong> overdue</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Focus goals */}
-              {focusGoals.length > 0 && (
-                <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {focusGoals.map((g) => <GoalHealthChip key={g.id} goal={g} />)}
-                </div>
-              )}
-            </section>
-
-            {isLoading ? (
+            {anyLoading ? (
               <div className="flex items-center justify-center py-10">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
               </div>
             ) : (
-              <div className="flex flex-col gap-6">
+              <>
+                {/* Briefing hero */}
+                <section className="mb-6 rounded-xl border border-border bg-gradient-to-br from-card to-muted/40 p-5">
+                  <div className="flex items-center gap-4">
+                    <ProgressRing pct={completionPct}>
+                      <div className="text-center leading-none">
+                        <span className="block text-sm font-semibold tabular-nums text-foreground">{Math.round(completionPct)}%</span>
+                      </div>
+                    </ProgressRing>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 text-muted-foreground">
+                        {now.getHours() < 17 ? <Sunrise className="h-3.5 w-3.5" strokeWidth={2} /> : <MoonStar className="h-3.5 w-3.5" strokeWidth={2} />}
+                        <span className="text-xs font-medium">{greeting}</span>
+                      </div>
+                      <p className="mt-0.5 truncate text-lg font-semibold text-foreground">
+                        {remainingCount === 0
+                          ? totalTracked > 0 ? 'All clear for the day' : 'Nothing on the books yet'
+                          : `${remainingCount} thing${remainingCount === 1 ? '' : 's'} left`}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span><strong className="text-foreground tabular-nums">{doneCount}</strong> done</span>
+                        <span><strong className="text-foreground tabular-nums">{remainingCount}</strong> left</span>
+                        {committedMin > 0 && <span><strong className="text-foreground tabular-nums">{formatDuration(committedMin)}</strong> planned</span>}
+                        {overdueEvents.length > 0 && (
+                          <span className="text-destructive"><strong className="tabular-nums">{overdueEvents.length}</strong> overdue</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Focus goals */}
+                  {focusGoals.length > 0 && (
+                    <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {focusGoals.map((g) => <GoalHealthChip key={g.id} goal={g} />)}
+                    </div>
+                  )}
+                </section>
+
+                <div className="flex flex-col gap-6">
                 {/* Wrap-up / sweep */}
                 {overdueEvents.length > 0 && (
                   <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
@@ -618,6 +621,7 @@ export function PlanPreviewPage() {
                   </section>
                 )}
               </div>
+              </>
             )}
           </div>
         </div>

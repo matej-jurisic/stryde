@@ -83,6 +83,12 @@ export const activitiesApi = {
   update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; excludeFromRecommendations?: boolean }) =>
     request<Activity>(`/api/activities/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
+  setRecommendations: (id: string, excludeFromRecommendations: boolean) =>
+    request<Activity>(`/api/activities/${id}/recommendations`, {
+      method: 'PATCH',
+      body: JSON.stringify({ excludeFromRecommendations }),
+    }),
+
   delete: (id: string) => request<void>(`/api/activities/${id}`, { method: 'DELETE' }),
 }
 

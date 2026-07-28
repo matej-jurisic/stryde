@@ -131,10 +131,7 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
           onChange={(e) => setExcludeFromRecommendations(e.target.checked)}
           className="h-4 w-4 rounded border-input accent-primary"
         />
-        <span className="text-sm text-foreground">
-          Exclude from suggestions
-          <span className="ml-1 text-muted-foreground">(auto-logged externally)</span>
-        </span>
+        <span className="text-sm text-foreground">Exclude from suggestions</span>
       </label>
 
       {isEdit && (
