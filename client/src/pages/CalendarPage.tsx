@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Menu, Plus, LayoutGrid, CalendarCheck, Sparkles } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Menu, Plus, LayoutGrid, CalendarCheck, Sparkles } from 'lucide-react'
 import { useQuery, useQueries, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { occurrencesApi, settingsApi, insightsApi, recommendationsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
@@ -1170,6 +1170,8 @@ export function CalendarPage() {
   })
   const [viewDropOpen, setViewDropOpen] = useState(false)
   const viewDropRef = useRef<HTMLDivElement>(null)
+  const [datePopOpen, setDatePopOpen] = useState(false)
+  const datePopRef = useRef<HTMLDivElement>(null)
   const [showSuggestions, setShowSuggestions] = useState(
     () => localStorage.getItem('stryde-calendar-suggestions') === 'true',
   )
@@ -1427,6 +1429,15 @@ export function CalendarPage() {
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
   }, [viewDropOpen])
+
+  useEffect(() => {
+    if (!datePopOpen) return
+    function close(e: MouseEvent) {
+      if (datePopRef.current && !datePopRef.current.contains(e.target as Node)) setDatePopOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [datePopOpen])
 
   // A long-press in the Android WebView triggers the native context-menu /
   // text-selection gesture, which steals the pointer (pointercancel) before our
@@ -2666,7 +2677,7 @@ export function CalendarPage() {
 
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
       {/* Header */}
-      <header className="flex h-[57px] shrink-0 items-center gap-2 border-b border-border px-4 md:gap-3 md:px-6">
+      <header className="relative flex h-[57px] shrink-0 items-center gap-2 border-b border-border px-4 md:gap-3 md:px-6">
         <button
           onClick={() => setDrawerOpen(true)}
           className="md:hidden flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -2675,7 +2686,77 @@ export function CalendarPage() {
           <Menu className="h-4 w-4" strokeWidth={2} />
         </button>
 
-        <div className="flex items-center gap-0.5">
+        {/* Mobile: date popup trigger */}
+        <div className="sm:hidden relative flex-1 min-w-0" ref={datePopRef}>
+          <button
+            onClick={() => setDatePopOpen((o) => !o)}
+            className="flex items-center gap-1 text-sm font-semibold text-foreground hover:text-muted-foreground transition-colors"
+          >
+            <span className="truncate">{compactTitle(view, days)}</span>
+            <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${datePopOpen ? 'rotate-180' : ''}`} strokeWidth={2} />
+          </button>
+          {datePopOpen && (
+            <div className="absolute left-0 top-full z-50 mt-2 w-64 rounded-xl border border-border bg-card shadow-pop p-3 flex flex-col gap-3">
+              {/* Nav row */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => { prev(); }}
+                  aria-label={view === 'day' ? 'Previous day' : view === '3day' ? 'Back 3 days' : 'Back 7 days'}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                >
+                  {view === 'day' ? <ChevronLeft className="h-4 w-4" strokeWidth={2} /> : <ChevronsLeft className="h-4 w-4" strokeWidth={2} />}
+                </button>
+                <button
+                  onClick={prevDay}
+                  aria-label="Back 1 day"
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${view === 'day' ? 'invisible' : ''}`}
+                >
+                  <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+                </button>
+                <p className="flex-1 text-center text-xs font-medium text-foreground truncate">{pageTitle(view, days)}</p>
+                <button
+                  onClick={nextDay}
+                  aria-label="Forward 1 day"
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${view === 'day' ? 'invisible' : ''}`}
+                >
+                  <ChevronRight className="h-4 w-4" strokeWidth={2} />
+                </button>
+                <button
+                  onClick={() => { next(); }}
+                  aria-label={view === 'day' ? 'Next day' : view === '3day' ? 'Forward 3 days' : 'Forward 7 days'}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                >
+                  {view === 'day' ? <ChevronRight className="h-4 w-4" strokeWidth={2} /> : <ChevronsRight className="h-4 w-4" strokeWidth={2} />}
+                </button>
+              </div>
+              {/* Today + date picker row */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { goToday(); setDatePopOpen(false) }}
+                  className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-xs text-foreground hover:bg-muted transition-colors"
+                >
+                  <CalendarCheck className="h-3.5 w-3.5" strokeWidth={2} />
+                  Today
+                </button>
+                <input
+                  type="date"
+                  value={formatDateInput(current)}
+                  onChange={(e) => {
+                    const d = new Date(e.target.value + 'T00:00:00')
+                    if (!isNaN(d.getTime())) { setCurrent(view === 'week' ? startOfWeek(d) : d); setDatePopOpen(false) }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
+                  }}
+                  className="flex-1 h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Desktop: nav + title */}
+        <div className="hidden sm:flex items-center gap-0.5">
           <button
             onClick={prev}
             aria-label={view === 'day' ? 'Previous day' : view === '3day' ? 'Back 3 days' : 'Back 7 days'}
@@ -2718,9 +2799,8 @@ export function CalendarPage() {
           </button>
         </div>
 
-        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
-          <span className="sm:hidden">{compactTitle(view, days)}</span>
-          <span className="hidden sm:inline">{pageTitle(view, days)}</span>
+        <h1 className="hidden sm:block min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+          {pageTitle(view, days)}
         </h1>
 
         <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
@@ -2743,7 +2823,7 @@ export function CalendarPage() {
 
           <button
             onClick={goToday}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
+            className="hidden sm:flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
           >
             <CalendarCheck className="h-3.5 w-3.5" strokeWidth={2} />
           </button>
