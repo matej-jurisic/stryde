@@ -24,7 +24,9 @@ public class RecommendationServiceTests : IDisposable
         return user.Id;
     }
 
-    private async Task<Activity> AddActivityAsync(Guid userId, string title, GoalStatus? goalStatus = null)
+    private async Task<Activity> AddActivityAsync(
+        Guid userId, string title, GoalStatus? goalStatus = null,
+        ActivityType type = ActivityType.general, DateTimeOffset? createdAt = null)
     {
         Goal? goal = null;
         if (goalStatus.HasValue)
@@ -33,7 +35,10 @@ public class RecommendationServiceTests : IDisposable
             _ctx.Db.Goals.Add(goal);
             await _ctx.Db.SaveChangesAsync();
         }
-        var activity = new Activity { UserId = userId, Title = title, GoalId = goal?.Id };
+        var activity = new Activity { UserId = userId, Title = title, GoalId = goal?.Id, Type = type };
+        // Cold-start scoring measures from creation, and the default is the real wall clock, which
+        // is in the future relative to the fixed test clock.
+        if (createdAt.HasValue) activity.CreatedAt = createdAt.Value;
         _ctx.Db.Activities.Add(activity);
         await _ctx.Db.SaveChangesAsync();
         return activity;
@@ -560,5 +565,206 @@ public class RecommendationServiceTests : IDisposable
         // 19:00 and 21:00 are equidistant; the tie breaks toward the earlier slot.
         var displaced = Assert.Single(starts, s => s != At(7, 20));
         Assert.Equal(At(7, 19), displaced);
+    }
+
+    // --- Activity types ---
+
+    [Fact]
+    public async Task GetAsync_deep_work_is_not_offered_a_gap_below_its_block_floor()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "deep work", GoalStatus.focus, ActivityType.deepWork);
+        var normal = await AddActivityAsync(userId, "anything", GoalStatus.focus);
+
+        // Only an hour left in the day - enough for an untyped activity, not for a 90 minute block
+        var lateNow = new DateTimeOffset(2026, 7, 7, 23, 0, 0, TimeSpan.Zero);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
+
+        var rec = Assert.Single(recs);
+        Assert.Equal(normal.Id, rec.Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_unanchored_activity_is_placed_inside_its_type_window()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "inbox zero", GoalStatus.focus, ActivityType.admin);
+
+        // Future day, entirely free: without a type this would land at the 08:00 default
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        var rec = Assert.Single(recs);
+        Assert.Equal(At(9, 15), rec.SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_habitual_time_beats_the_type_window()
+    {
+        var userId = await CreateUserAsync();
+        var a = await AddActivityAsync(userId, "morning admin", GoalStatus.focus, ActivityType.admin);
+        await CompleteAsync(userId, a, At(2, 7), At(2, 8));
+        await CompleteAsync(userId, a, At(4, 7), At(4, 8));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        // 07:00 is outside the admin window, but observed behaviour wins over a declared preference
+        var rec = Assert.Single(recs);
+        Assert.Equal(At(9, 7), rec.SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_cold_start_ranks_by_the_type_cadence_prior()
+    {
+        var userId = await CreateUserAsync();
+        // Same goal status, same age, no history: only the cadence prior separates them
+        var chore = await AddActivityAsync(userId, "chore", GoalStatus.focus, ActivityType.chore, At(1, 0));
+        var habit = await AddActivityAsync(userId, "habit", GoalStatus.focus, ActivityType.habit, At(1, 0));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Equal(2, recs.Count);
+        Assert.Equal(habit.Id, recs[0].Activity!.Id);
+        Assert.Equal(chore.Id, recs[1].Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_cold_start_score_does_not_run_away_with_age()
+    {
+        var userId = await CreateUserAsync();
+        // Created 300 days ago and never done: uncapped, 300/1 would bury a genuinely overdue habit
+        await AddActivityAsync(userId, "ancient", GoalStatus.focus, ActivityType.habit, At(1, 0).AddDays(-300));
+        var real = await AddActivityAsync(userId, "real rhythm", GoalStatus.focus, ActivityType.habit);
+        await CompleteAsync(userId, real, At(1, 9), At(1, 10));
+        await CompleteAsync(userId, real, At(2, 9), At(2, 10));
+
+        // Targets a future day so the 09:00 habit slot is still free and takes no mismatch penalty
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        // 7 days since last against a 1 day median gap beats the cold-start ceiling of 3
+        Assert.Equal(real.Id, recs[0].Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_evening_habit_is_placed_after_the_morning_window()
+    {
+        var userId = await CreateUserAsync();
+        var morning = await AddActivityAsync(userId, "stretch", GoalStatus.focus, ActivityType.habit);
+        var evening = await AddActivityAsync(userId, "read", GoalStatus.focus, ActivityType.eveningHabit);
+
+        // Future day, entirely free: the two share a cadence prior, so only the window separates them
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Equal(At(9, 6), recs.Single(r => r.Activity!.Id == morning.Id).SuggestedStartAt);
+        Assert.Equal(At(9, 18), recs.Single(r => r.Activity!.Id == evening.Id).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_training_is_capped_at_two_a_day()
+    {
+        var userId = await CreateUserAsync();
+        for (var i = 0; i < 3; i++)
+            await AddActivityAsync(userId, $"session {i}", GoalStatus.focus, ActivityType.training);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        // Two leaves room for a run alongside a lift; the cooldown is what spaces sessions out
+        Assert.Equal(2, recs.Count);
+        Assert.Equal(At(9, 15), recs[0].SuggestedStartAt);
+    }
+
+    // --- Cooldown ---
+
+    [Fact]
+    public async Task GetAsync_cooldown_holds_a_session_back_and_surfaces_the_other_half_of_the_split()
+    {
+        var userId = await CreateUserAsync();
+        // Push: last done 3 days ago on a 3 day rhythm, so due. Pull: done yesterday on a 4 day
+        // rhythm, so a quarter of the way through it.
+        var push = await AddActivityAsync(userId, "push", GoalStatus.focus, ActivityType.training);
+        await CompleteAsync(userId, push, At(1, 17), At(1, 18));
+        await CompleteAsync(userId, push, At(4, 17), At(4, 18));
+
+        var pull = await AddActivityAsync(userId, "pull", GoalStatus.focus, ActivityType.training);
+        await CompleteAsync(userId, pull, At(2, 17), At(2, 18));
+        await CompleteAsync(userId, pull, At(6, 17), At(6, 18));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        // Both fit the day and the cap is 2, so only the cooldown separates them
+        var rec = Assert.Single(recs);
+        Assert.Equal(push.Id, rec.Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_cooldown_does_not_apply_to_an_activity_with_no_history()
+    {
+        var userId = await CreateUserAsync();
+        // Due-ness for a never-completed activity comes from its creation date, which says nothing
+        // about rest - a brand new training activity must still be offered.
+        var fresh = await AddActivityAsync(userId, "push", GoalStatus.focus, ActivityType.training, At(7, 0));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        var rec = Assert.Single(recs);
+        Assert.Equal(fresh.Id, rec.Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_cooldown_only_applies_to_types_that_declare_one()
+    {
+        var userId = await CreateUserAsync();
+        // Same history as the held-back session above, but untyped: general declares no cooldown
+        var a = await AddActivityAsync(userId, "anything", GoalStatus.focus);
+        await CompleteAsync(userId, a, At(2, 17), At(2, 18));
+        await CompleteAsync(userId, a, At(6, 17), At(6, 18));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Single(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_training_is_not_offered_a_gap_below_its_block_floor()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "push", GoalStatus.focus, ActivityType.training);
+        var normal = await AddActivityAsync(userId, "anything", GoalStatus.focus);
+
+        // Half an hour left in the day: enough for an untyped activity, not for a 45 minute session
+        var lateNow = new DateTimeOffset(2026, 7, 7, 23, 30, 0, TimeSpan.Zero);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
+
+        var rec = Assert.Single(recs);
+        Assert.Equal(normal.Id, rec.Activity!.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_type_cap_limits_suggestions_per_day()
+    {
+        var userId = await CreateUserAsync();
+        for (var i = 0; i < 3; i++)
+            await AddActivityAsync(userId, $"deep {i}", GoalStatus.focus, ActivityType.deepWork);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Equal(2, recs.Count);
+    }
+
+    [Fact]
+    public async Task GetAsync_type_cap_counts_activities_already_scheduled_that_day()
+    {
+        var userId = await CreateUserAsync();
+        var target = new DateOnly(2026, 7, 9);
+        for (var i = 0; i < 2; i++)
+        {
+            var scheduled = await AddActivityAsync(userId, $"scheduled deep {i}", GoalStatus.focus, ActivityType.deepWork);
+            await AddOccurrenceAsync(userId, scheduled, At(9, 9 + i * 2), At(9, 10 + i * 2));
+        }
+        await AddActivityAsync(userId, "one more", GoalStatus.focus, ActivityType.deepWork);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, target, Now);
+
+        // The day already holds two deep work blocks, so a third is not offered even though it fits
+        Assert.Empty(recs);
     }
 }

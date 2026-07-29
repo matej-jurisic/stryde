@@ -46,6 +46,10 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .HasConversion<string>();
 
         modelBuilder.Entity<Activity>()
+            .Property(a => a.Type)
+            .HasConversion<string>();
+
+        modelBuilder.Entity<Activity>()
             .HasOne(a => a.Category)
             .WithMany()
             .HasForeignKey(a => a.CategoryId)

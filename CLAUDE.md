@@ -58,11 +58,13 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. `Occurrence → Activity` cascade delete; `Activity → Category/Goal` set-null.
 - `Common/Result.cs` — `Result`/`Result<T>` + `Error(ErrorType, msg)`. **Expected failures = Results, not exceptions.**
 - `Common/Validators.cs` — shared static validation rules.
+- `Common/ActivityProfiles.cs` — the `ActivityType` preset table (window, min block, cadence prior, max/day, cooldown).
+  Every type-driven decision in `RecommendationService` reads from here; add a type by adding a row.
 - `Common/DayMath.cs` — all "which day / is this overdue?" logic goes through here, in the user's IANA
   timezone offset by `DayBoundaryTime`. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
   Key methods: `OccurrenceDay(Occurrence, DayContext)`, `IsOverdue(Occurrence, DayContext, DateTimeOffset)`.
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
-  Key DTOs: `ActivityDto` (has `Kind`), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (discriminated: `type: 'occurrence' | 'activity'`), `CategoryDto`/`CategorySummaryDto`, `CheckpointDto` (has `Size` enum — not numeric progress).
+  Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split — and `Type`, the scheduling profile), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (discriminated: `type: 'occurrence' | 'activity'`), `CategoryDto`/`CategorySummaryDto`, `CheckpointDto` (has `Size` enum — not numeric progress).
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
 - ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
   It also **can't translate a `DateTimeOffset` range `WHERE`** (EF throws at execution — stored as offset-bearing
@@ -88,10 +90,17 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `store/toasts.ts` — Zustand toast store; `toastError(err)` for mutation failures without inline error display.
 - `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field, ConfirmDialog, ActionMenu, Toasts`.
 - `components/events/OccurrenceListRow.tsx` — shared occurrence list row (Plan + Categories): optimistic status toggle, action menu, confirmed delete.
+- `components/activities/ActivityListRow.tsx` — activity list row: type tile, meta line, mute toggle, action menu.
+  In multi-select mode the tile becomes a checkbox and the row selects instead of navigating. `hideType`/`hideCategory`/`hideGoal`
+  drop whatever the current grouping already says in the section header.
+- `components/activities/BulkAssignModal.tsx` — sets goal / category / type on a multi-select. No bulk endpoint exists:
+  it fans out over `PUT /api/activities/{id}`, resending unchanged fields from each activity (the PUT is a full replace).
 - `components/events/SkipRescheduleModal.tsx` — opened after skipping; lets user pick a date and creates a new pending copy on that date.
 - `components/goals/OccurrenceBar.tsx` — done/skipped/pending counts bar for ongoing goals on GoalsPage; data from `GoalDto.OccurrenceStats`.
 - `components/layout/useUncategorizedCount.ts` — shared nav badge hook (shares `['events', 'all']` cache with CategoriesPage; predicate in `lib/categories.ts`).
 - `components/layout/BottomNav.tsx` — mobile nav: 4 tabs + "More" bottom sheet (Activities, Insights, Settings). Max 5 slots; new pages go in the sheet.
+- `lib/activityTypes.ts` — labels, icons, and hint copy for `ActivityType`. The client mirror of
+  `ActivityProfiles.cs`; the hints describe real engine behaviour, so update both together.
 - `lib/quotes.ts` — local array of motivational quotes; Plan page picks one by day-of-year.
 
 **Tests**

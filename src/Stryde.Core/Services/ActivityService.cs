@@ -41,7 +41,7 @@ public class ActivityService(StrydeDbContext db)
         var err = Validators.ValidateTitle(req.Title, "Title");
         if (err is not null) return Result<ActivityDto>.Fail(err);
 
-        var a = new Activity { UserId = userId, Title = req.Title.Trim() };
+        var a = new Activity { UserId = userId, Title = req.Title.Trim(), Type = req.Type };
 
         if (req.CategoryId.HasValue)
         {
@@ -77,6 +77,7 @@ public class ActivityService(StrydeDbContext db)
 
         a.Title = req.Title.Trim();
         a.ExcludeFromRecommendations = req.ExcludeFromRecommendations;
+        a.Type = req.Type;
 
         if (req.CategoryId.HasValue)
         {

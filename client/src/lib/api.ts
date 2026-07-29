@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
-import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -77,10 +77,10 @@ export const activitiesApi = {
     return request<Activity[]>(`/api/activities${q.size ? `?${q}` : ''}`)
   },
 
-  create: (body: { title: string; categoryId?: string | null; goalId?: string | null }) =>
+  create: (body: { title: string; categoryId?: string | null; goalId?: string | null; type?: ActivityType }) =>
     request<Activity>('/api/activities', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; excludeFromRecommendations?: boolean }) =>
+  update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; excludeFromRecommendations?: boolean; type?: ActivityType }) =>
     request<Activity>(`/api/activities/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   setRecommendations: (id: string, excludeFromRecommendations: boolean) =>

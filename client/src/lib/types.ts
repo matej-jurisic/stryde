@@ -17,6 +17,17 @@ export type CheckpointStatus = 'pending' | 'reached'
 export type CheckpointSize = 'tiny' | 'small' | 'normal' | 'big' | 'huge'
 export type ActivityKind = 'activity' | 'event'
 
+/** Scheduling profile - drives when and how often the engine suggests the activity. */
+export type ActivityType =
+  | 'general'
+  | 'habit'
+  | 'eveningHabit'
+  | 'training'
+  | 'deepWork'
+  | 'chore'
+  | 'admin'
+  | 'recovery'
+
 export interface GoalSummary {
   id: string
   title: string
@@ -92,6 +103,7 @@ export interface Activity {
   categoryId: string | null
   goalId: string | null
   kind: ActivityKind
+  type: ActivityType
   excludeFromRecommendations: boolean
   createdAt: string
   category: CategorySummary | null

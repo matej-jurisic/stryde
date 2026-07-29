@@ -573,6 +573,44 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 - Displaced anchored activities now take the free opening *nearest* their habitual time instead of restarting from the first gap, ties breaking earlier. Unanchored ones start no earlier than `EarliestUnanchoredStart` (08:00 local), which is what kept future days empty-looking
 - An activity that cannot be placed within the overlap cap gets a null slot and stays in the panel without a time, so the throttle is server-side rather than a client `.slice`. The `Calendar suggestions` setting is now a ceiling, not the main limiter
 
+**Activity types: the first user-supplied input to the suggestion engine**
+- The engine was entirely history-driven: score, placement anchor, and slot fit all came out of `ComputeStats` over completed occurrences, and the only thing the user could tell it was the `ExcludeFromRecommendations` off-switch. An activity with no history was therefore invisible to all of it - neutral score, no anchor, assumed 30 minutes, dumped at the first opening after 08:00, which is why new activities piled onto the same morning slot
+- `ActivityType` (`general` default, `habit`, `deepWork`, `chore`, `admin`, `recovery`) is a **preset**: a fixed bundle of four engine settings in `Common/ActivityProfiles.cs`, not individually editable knobs. Chose presets over exposed knobs to find out whether the taxonomy is right before committing to the UI surface that knobs need
+- Named `Type` rather than reusing `Kind`: `ActivityKind` (`activity`/`event`) already exists but is internal and never shown, so "Type" was free in the UI
+- The four levers: **preferred window** (placement for unanchored activities; a preference, and history always wins over it), **min contiguous block** (the only one that can make an activity ineligible - without it a no-history `deepWork` activity is sized at the 30-minute default and gets offered a 30-minute crack), **cadence prior**, and **max per day**
+- Cold-start scoring changed rather than being special-cased: an activity with no completions is now measured from its **creation date** against its type's prior, instead of scoring a flat neutral 1.0. Clamped to 3.0 - it is not real evidence, and an ancient untouched activity would otherwise outrank everything with a genuine rhythm. `general`'s 7-day prior means untyped activities behave as they did, modulo this age term
+- Type caps count occurrences **already scheduled** for the day, not just suggestions emitted; otherwise scheduling from a suggestion would leave the cap untouched and the next fetch would offer a third deep work block. Applied before placement so a capped-out activity does not consume a slot on its way to being dropped
+- Decided against for this slice: per-type energy spacing, and surfacing `recovery` more heavily on dense days (needs a day-density signal the engine does not compute)
+
+**Activities page: management pass**
+- Type made the page's single fixed grouping (by goal) too narrow, so grouping became a Goal / Type / Category toggle keyed by attribute - a new dimension is one entry rather than a new branch. Type sections render in canonical order so they do not reshuffle as the filter changes
+- Title search, and per-section counts
+- Row actions moved to the shared `ActionMenu` per the row-dropdown convention; the mute bulb stayed a permanent tap target since it is used in streaks
+- Type chip on each row, hidden for `general` - a chip on every row would be noise
+
+**Activities page: redesign for managing a large list** (UI only, no API change)
+- Search + filter + grouping moved out of the scroll area into a fixed toolbar under the page header. They were the first three rows of the scrolling content, so they cost a screenful before the first activity and went out of reach on scroll
+- **Multi-select mode**, entered from a header toggle: the type tile becomes a checkbox, row actions give way to a bottom action bar (mute / unmute / assign / delete), and each section header gets its own select-all. Managing ten activities was ten modal round-trips
+- `BulkAssignModal` sets goal, category, and type across a selection, each field defaulting to "keep current". Nothing bulk exists server-side; it fans out over the single-item PUT and resends unchanged fields, which is cheap enough at personal-list scale that a bulk endpoint would be premature
+- Rows lead with a type tile instead of a type chip: the icon carries the type at a fixed position, and the meta line drops whatever the current grouping already states in its section header. Muted rows dim rather than hide
+- Sections collapse, grouping gained a **None** option (flat, A-Z), items sort by title within a section, and search now matches category, goal, and type label as well as the title
+- Grouping choice persists in `localStorage` (`stryde-activities-group`); collapse and selection are per-visit
+
+**Activity types: training, and splitting habit by time of day**
+- Audit of the real activity list against the six original types found two shapes with nowhere to go. A training split (push / pull / run) repeats every 2-3 days, needs a real block, and happens after work: `habit`'s 1-day prior is too aggressive, `chore`'s 7-day too slack, and `deepWork` is the only type with a block floor but pins itself to 09:00-17:00, which is exactly the working day. `training` (15:00-21:00, 45 min floor, 2.5d prior, max 1/day) fills it
+- `habit` welded a daily cadence to a 06:00-12:00 window, so there was no way to say "daily, in the evening" - reading before bed and evening practice both got placed at dawn until history overrode it. Added `eveningHabit` (18:00-22:00, same 1-day prior) rather than widening `habit`: placement takes the *first* opening inside the window, so a 06:00-22:00 window would have changed nothing. `habit` keeps its stored value and is now labelled "Morning habit", so the pair reads as one choice with two ends
+- Two new enum values only, no migration: `Type` is a plain TEXT column with no check constraint
+- Known and not addressed: `recovery`'s `Max/day` is per type, so Nap, Movies, and games filed under it compete for two slots a day; and there is still no type for activities that need another person, where suggesting any specific slot is wrong. Mute remains the answer for both
+
+**Cooldown: due-ness gates, not just ranks**
+- Started as "how do workouts alternate?" and turned out not to need a rotation. Score is already `daysSince / medianGap` per activity, so the day after a push session push scores ~0.33 against pull's ~1.0 and pull ranks above it. Alternation was emergent; what was missing was rest
+- The actual defect: tiers 1/2 admit **every** non-muted activity on a focus or active goal, and due-ness only ever *ranked* them - nothing was gated on it. An activity on a focus goal was therefore suggested every single day however recently it was done, and a rest day was never proposed
+- `MinDueFraction` on the profile (0 = none, `training` = 0.5) holds an activity back until it is that far through its own rhythm. Applies to the goal tiers and the weekday-pattern tier alike. Skipped when there is no completed history, since that figure comes from the creation date and says nothing about rest
+- Deliberately **per activity**, not per goal: a per-goal cooldown would silence pull because push was done, giving one workout every three days instead of push / pull / push. The type only supplies the threshold constant; the measurement is always the individual activity
+- `Score` split into `DueFraction` (raw) + the start-time-mismatch penalty. The gate reads the raw figure - a busy habitual time should downrank an activity, not fake a cooldown
+- `training`'s cap relaxed 1 → 2 now that spacing has a better mechanism. `MaxPerDay` is per *type*, so a cap of 1 meant a run and a lift could never be suggested on the same day even when both were due
+- Rejected: a rotation-group entity. It only earns its keep for a strict sequence (always push → pull → legs), and after a missed session "whichever is most overdue" is the better answer anyway
+
 **UX hardening** (shipped ahead of the Polish phase)
 - Toast notifications (`store/toasts.ts` + `components/ui/Toasts.tsx`): every mutation without inline error display now reports failures via `toastError`
 - Delete confirmations everywhere: shared `ConfirmDialog` modal guards deletes of occurrences, activities (warns about cascade), goals, checkpoints, and categories; the edit occurrence modal gained Delete + Cancel in its footer

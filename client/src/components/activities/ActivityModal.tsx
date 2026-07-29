@@ -2,7 +2,8 @@ import { useState, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { activitiesApi, activitySubtasksApi } from '@/lib/api'
-import type { Activity, Goal, Category } from '@/lib/types'
+import type { Activity, ActivityType, Goal, Category } from '@/lib/types'
+import { ACTIVITY_TYPES, activityTypeMeta } from '@/lib/activityTypes'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 
@@ -21,6 +22,7 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
   const [goalId, setGoalId] = useState(activity?.goalId ?? '')
   const [categoryId, setCategoryId] = useState(activity?.categoryId ?? '')
   const [excludeFromRecommendations, setExcludeFromRecommendations] = useState(activity?.excludeFromRecommendations ?? false)
+  const [type, setType] = useState<ActivityType>(activity?.type ?? 'general')
   const [titleError, setTitleError] = useState('')
   const [subtasks, setSubtasks] = useState(activity?.subtasks ?? [])
   const [newSubtask, setNewSubtask] = useState('')
@@ -28,7 +30,7 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
 
   const mutation = useMutation({
     mutationFn: () => {
-      const body = { title: title.trim(), goalId: goalId || null, categoryId: categoryId || null }
+      const body = { title: title.trim(), goalId: goalId || null, categoryId: categoryId || null, type }
       return isEdit
         ? activitiesApi.update(activity!.id, { ...body, excludeFromRecommendations })
         : activitiesApi.create(body)
@@ -90,6 +92,35 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
           }`}
         />
         {titleError && <p className="text-xs text-destructive">{titleError}</p>}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="text-sm font-medium text-foreground">Type</label>
+        {/* Chips rather than tiles: six of them stacked two rows deep pushed the rest of the form
+            below the fold on a phone. */}
+        <div className="flex flex-wrap gap-1.5">
+          {ACTIVITY_TYPES.map((t) => {
+            const Icon = t.icon
+            const selected = type === t.value
+            return (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setType(t.value)}
+                aria-pressed={selected}
+                className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors ${
+                  selected
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : 'border-input text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                {t.label}
+              </button>
+            )
+          })}
+        </div>
+        <p className="text-xs text-muted-foreground">{activityTypeMeta(type).hint}</p>
       </div>
 
       {activeGoals.length > 0 && (
