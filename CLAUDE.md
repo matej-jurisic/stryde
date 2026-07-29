@@ -53,7 +53,12 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Backend (`Stryde.Core`)**
 - `Entities/` — POCOs; `Guid Id = Guid.NewGuid()` + `DateTimeOffset CreatedAt`, no base class.
-  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, UserSettings, ActivityTypeSetting`
+  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, UserSettings, ActivityTypeSetting,
+  State, StateValue, ActivityStateEffect, ActivityStateRequirement`
+  (the last three are link/child rows keyed by their contents, not by a `Guid Id`: `StateValue` is a
+  normal child of `State`, while `ActivityStateEffect` keys on `(ActivityId, StateId)` — one value per
+  state, structurally — and `ActivityStateRequirement` on `(ActivityId, StateValueId)` — many per state,
+  ORed within a state and ANDed across them.)
   (`ActivityTypeSetting` is the exception to the shape above: composite key `UserId, Type`, no `Id`,
   no `CreatedAt`, and sparse — a row exists only for a type the user edited, holding only the
   fields that differ from the default).
@@ -61,20 +66,39 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. `Occurrence → Activity` cascade delete; `Activity → Category/Goal` set-null.
 - `Common/Result.cs` — `Result`/`Result<T>` + `Error(ErrorType, msg)`. **Expected failures = Results, not exceptions.**
 - `Common/Validators.cs` — shared static validation rules.
-- `Common/ActivityProfiles.cs` — the `ActivityType` **default** table (window, min block, cadence prior, max/day, cooldown, anchor).
-  Add a type by adding a row; `ActivityType` is stored as a string, so a new value needs no migration.
-  The engine never reads it directly: it resolves per user through
-  `ActivityProfileService.ResolveAsync`, which layers `ActivityTypeSetting` overrides on top.
-  Window / min block / max/day are user-editable; cadence prior, cooldown and anchor are not.
-  An **anchored** type (`AnchorType` + `Adjacency`, e.g. `commute` brackets `work`) is only suggested
-  on days holding an occurrence of the anchor type, and is placed flush against that day's span of it
-  rather than by window or habit. Its own window is never read. See `spec.md` → Anchored types.
+- `Common/ActivityProfiles.cs` — the `ActivityType` **default** table (window, min block, cadence prior, max/day, cooldown).
+  Add a type by adding a row; `ActivityType` is stored as a string, so a new value needs no migration
+  (removing one does: see the two `*ActivityTypes` data migrations). The engine never reads it directly:
+  it resolves per user through `ActivityProfileService.ResolveAsync`, which layers `ActivityTypeSetting`
+  overrides on top. Window / min block / max/day are user-editable; cadence prior and cooldown are not.
+  **Types hold scheduling numbers only** — no type refers to another type, and conditions belong to
+  States. Don't reintroduce a type that names a real-life thing (`work`, `commute`) instead of a
+  scheduling behaviour.
+- `Common/StateTimeline.cs` — folds `StateSetter`s into a state's piecewise value over time, and
+  answers `IntervalsWhere(allowedValueIds, from, to)`. Nothing about a state is persisted: the value at
+  an instant is derived from the schedule, so moving an occurrence moves the state with it. A setter
+  fires at its occurrence's **end** (`EndAt ?? StartAt`); a value's `DurationMinutes` decays it back to
+  the state default; a later setter cancels a pending expiry. See `spec.md` → States.
 - `Common/DayMath.cs` — all "which day / is this overdue?" logic goes through here, in the user's IANA
   timezone offset by `DayBoundaryTime`. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
   Key methods: `OccurrenceDay(Occurrence, DayContext)`, `IsOverdue(Occurrence, DayContext, DateTimeOffset)`.
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
-  Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split — and `Type`, the scheduling profile), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (always an activity to schedule; `SuggestedStartAt` nullable), `CategoryDto`/`CategorySummaryDto`, `CheckpointDto` (has `Size` enum — not numeric progress).
+  Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split — `Type`, the scheduling profile, and flat `SetsStateValueIds`/`RequiredStateValueIds`), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (always an activity to schedule; `SuggestedStartAt` nullable), `CategoryDto`/`CategorySummaryDto`, `StateDto` (values nested), `CheckpointDto` (has `Size` enum — not numeric progress).
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
+- `Services/RecommendationService.cs` — `LoadStatesAsync` builds the per-state timelines and each
+  activity's requirement groups (returns two empty maps when the user has no states, the case that must
+  cost nothing). `AllowedIntervals` intersects the groups over the day; `StateAllows` is the gate;
+  `AllowedSlots` masks `freeSlots` per activity and every placement branch draws candidates from it.
+- `Services/StateService.cs` — state + value CRUD. Invariants: exactly one default per state (the first
+  value is forced to be it), the default may not carry a duration, duration 1..`MaxDurationMinutes`,
+  deleting a value still referenced returns `Conflict`, deleting the default promotes the oldest
+  survivor. Value writes return the whole parent `StateDto`, since an invariant can move the default
+  onto a sibling.
+- ⚠️ **A child with a pre-set `Guid Id` added to a *tracked* parent's nav collection is treated as an
+  existing row** (change detection sees a non-default key) and issues an UPDATE matching nothing. Use
+  `db.Set<T>().Add(...)` explicitly — see `StateService.CreateValueAsync` and
+  `OccurrenceService.ApplySubtasks`. Relationship fixup then also appends it to the parent collection,
+  so guard against adding it twice if you build the response from that collection.
 - ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
   It also **can't translate a `DateTimeOffset` range `WHERE`** (EF throws at execution — stored as offset-bearing
   text, no instant-correct comparison), so occurrence date-window filtering runs in memory too. SQL pre-filters on
@@ -87,14 +111,17 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   must be set — the static property alone is not enough.
 - `Endpoints/*Endpoints.cs` — thin: parse → service → `result.ToProblem()`. Auth required on all routes except `/api/auth/*`.
   Key endpoint files: `ActivityEndpoints.cs` (`/api/activities`), `OccurrenceEndpoints.cs` (`/api/occurrences`),
-  `SettingsEndpoints.cs` (`/api/settings` + `/api/settings/activity-types`).
+  `SettingsEndpoints.cs` (`/api/settings` + `/api/settings/activity-types`),
+  `StateEndpoints.cs` (`/api/states` + `/api/states/{stateId}/values`).
 - `Endpoints/ApiResults.cs` — `Error.ToProblem()` + `principal.GetUserId()` (reads `sub` claim).
 
 **Frontend (`client/src`)**
 - `App.tsx` — auth-gated routing; index → `/plan`.
 - `pages/` — `PlanPage`, `CategoriesPage`, `CalendarPage`, `GoalsPage`, `ActivitiesPage`, `InsightsPage`, `SettingsPage`.
-- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`.
-- `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Recommendation` (flat; `activity` always present).
+- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`, `statesApi`/`stateValuesApi`.
+  On `activitiesApi.create`/`update`, **omitting** `setsStateValueIds`/`requiredStateValueIds` leaves them untouched
+  and `[]` clears them — which is what lets `BulkAssignModal` resend everything else without knowing about states.
+- `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Recommendation` (flat; `activity` always present), `State`/`StateValue`.
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
 - `store/toasts.ts` — Zustand toast store; `toastError(err)` for mutation failures without inline error display.
@@ -113,11 +140,20 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   `describeProfile`/`profileHint`, which **generate** the numeric hint copy from a resolved profile.
   Never hardcode a window or block size in client copy: the values are per user.
 - `lib/useActivityProfiles.ts` — `['activityProfiles']` query as a `Map<ActivityType, ActivityProfile>`.
+- `lib/useStates.ts` — `['states']` query plus `formatStateDuration`, `describeStateValue`,
+  `flattenStateValues`.
+- `components/activities/StateValuePicker.tsx` — chips grouped by state, the codebase's only
+  multi-value picker. `singlePerState` makes a pick replace that state's other selection, which is the
+  difference between the "Changes" and "Only suggest when" fields in `ActivityModal`. Both fields are
+  hidden entirely until the user has defined a state with values.
 - `components/settings/SettingSection.tsx` — `SettingSection`/`SettingRow`/`SectionFooter`/`inputCls`,
   shared by `SettingsPage` and its section editors.
 - `components/settings/ActivityTypeSettings.tsx` — per-type window / min block / max/day editor.
   Saves via `PUT /api/settings/activity-types/{type}`, resets via `DELETE`; both return the full
   resolved set, which replaces the cache.
+- `components/settings/StateSettings.tsx` — states admin: accordion per state, inline value list with a
+  star for the default and an optional expiry in minutes. Every value write returns the whole state,
+  which replaces that entry in the `['states']` cache.
 - `lib/quotes.ts` — local array of motivational quotes; Plan page picks one by day-of-year.
 
 **Tests**
@@ -152,8 +188,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   server state; Zustand for auth (access token in memory).
 - **Query keys:** every occurrence list lives under `['events', ...]` (`['events', 'all']` for Categories page + nav
   badge, `['events', 'calendar', ...]` for calendar ranges). After any occurrence write invalidate `['events']`
-  and `['recommendations']`. After any activity write invalidate `['activities']`. After an activity
+  and `['recommendations']`. After any activity write invalidate `['activities']` and `['recommendations']`
+  (an activity's state requirements decide whether it is suggested at all). After an activity
   type profile write invalidate `['recommendations']` (the engine reads the profiles per request). After any goal write also invalidate `['goals']`.
+  States live under `['states']`; after a state or value write invalidate `['states']` and `['recommendations']`.
 - **Design:** see `design.md`. Use semantic color tokens, not hardcoded values.
 
 ## Gotchas

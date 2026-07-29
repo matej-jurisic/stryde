@@ -18,8 +18,7 @@ export type CheckpointSize = 'tiny' | 'small' | 'normal' | 'big' | 'huge'
 export type ActivityKind = 'activity' | 'event'
 
 /** Scheduling profile - drives when and how often the engine suggests the activity. */
-export type ActivityType = 'general' | 'training' | 'deepWork' | 'work' | 'commute'
-export type Adjacency = 'none' | 'before' | 'after' | 'brackets'
+export type ActivityType = 'general' | 'training' | 'deepWork'
 
 export interface GoalSummary {
   id: string
@@ -102,6 +101,10 @@ export interface Activity {
   category: CategorySummary | null
   goal: GoalSummary | null
   subtasks: ActivitySubtask[]
+  /** State values this activity puts the world into. At most one per state. */
+  setsStateValueIds: string[]
+  /** Only suggested while every state named here holds one of its listed values. */
+  requiredStateValueIds: string[]
 }
 
 export interface Occurrence {
@@ -213,10 +216,31 @@ export interface ActivityProfile {
   cadencePriorDays: number
   /** 0 = no cooldown. Fraction of the activity's own rhythm. */
   minDueFraction: number
-  /** Type this one attaches to. When set, it is only suggested on days holding one of those. */
-  anchorType: ActivityType | null
-  /** Where it sits relative to the anchor. `none` leaves placement to the ordinary rules. */
-  adjacency: Adjacency
   /** True when any field differs from the built-in default. */
   isCustomised: boolean
+}
+
+/**
+ * A user-defined dimension of context the engine gates suggestions on: Location, Tired. Its value at
+ * any moment is derived from the schedule rather than stored, so moving an occurrence moves the state
+ * with it.
+ */
+export interface State {
+  id: string
+  userId: string
+  name: string
+  createdAt: string
+  /** In creation order. Exactly one is the default once the state has any values at all. */
+  values: StateValue[]
+}
+
+export interface StateValue {
+  id: string
+  stateId: string
+  name: string
+  /** In force before anything sets the state, and what an expiring value falls back to. */
+  isDefault: boolean
+  /** How long the value holds once set, or null for "until something else changes it". */
+  durationMinutes: number | null
+  createdAt: string
 }

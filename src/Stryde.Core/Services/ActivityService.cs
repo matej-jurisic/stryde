@@ -15,6 +15,8 @@ public class ActivityService(StrydeDbContext db)
             .Include(a => a.Category)
             .Include(a => a.Goal)
             .Include(a => a.Subtasks)
+            .Include(a => a.StateEffects)
+            .Include(a => a.StateRequirements)
             .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);
         return a is null
             ? Result<ActivityDto>.Fail(new Error(ErrorType.NotFound, "Activity not found."))
@@ -27,6 +29,8 @@ public class ActivityService(StrydeDbContext db)
             .Include(a => a.Category)
             .Include(a => a.Goal)
             .Include(a => a.Subtasks)
+            .Include(a => a.StateEffects)
+            .Include(a => a.StateRequirements)
             .Where(a => a.UserId == userId && a.Kind == ActivityKind.activity);
 
         if (goalId.HasValue)
@@ -59,6 +63,9 @@ public class ActivityService(StrydeDbContext db)
             a.Goal = goal;
         }
 
+        var stateErr = await ApplyStatesAsync(a, userId, req.SetsStateValueIds, req.RequiredStateValueIds);
+        if (stateErr is not null) return Result<ActivityDto>.Fail(stateErr);
+
         db.Activities.Add(a);
         await db.SaveChangesAsync();
         return Result<ActivityDto>.Success(ActivityDto.FromEntity(a));
@@ -72,6 +79,8 @@ public class ActivityService(StrydeDbContext db)
         var a = await db.Activities
             .Include(a => a.Category)
             .Include(a => a.Goal)
+            .Include(a => a.StateEffects)
+            .Include(a => a.StateRequirements)
             .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);
         if (a is null) return Result<ActivityDto>.Fail(new Error(ErrorType.NotFound, "Activity not found."));
 
@@ -105,8 +114,105 @@ public class ActivityService(StrydeDbContext db)
             a.Goal = null;
         }
 
+        var stateErr = await ApplyStatesAsync(a, userId, req.SetsStateValueIds, req.RequiredStateValueIds);
+        if (stateErr is not null) return Result<ActivityDto>.Fail(stateErr);
+
         await db.SaveChangesAsync();
         return Result<ActivityDto>.Success(ActivityDto.FromEntity(a));
+    }
+
+    /// <summary>
+    /// Brings the activity's state effects and requirements in line with the request. A null list
+    /// means "leave this alone", following <c>OccurrenceService.ApplySubtasks</c>, which matters
+    /// because the bulk-assign path resends every field it is not changing.
+    /// <para>
+    /// Diffed rather than cleared and rebuilt. Both tables key on the row's own contents, so removing
+    /// and re-adding an unchanged row would put a Deleted and an Added entity with the same key in the
+    /// change tracker at once, which EF refuses.
+    /// </para>
+    /// </summary>
+    private async Task<Error?> ApplyStatesAsync(
+        Activity a, Guid userId, List<Guid>? setsValueIds, List<Guid>? requiredValueIds)
+    {
+        if (setsValueIds is null && requiredValueIds is null) return null;
+
+        var wanted = (setsValueIds ?? []).Concat(requiredValueIds ?? []).Distinct().ToList();
+
+        // Joined through State so one user cannot reference another's value by guessing an id.
+        var values = await db.StateValues
+            .AsNoTracking()
+            .Where(v => wanted.Contains(v.Id) && v.State.UserId == userId)
+            .Select(v => new { v.Id, v.StateId })
+            .ToListAsync();
+
+        if (values.Count != wanted.Count)
+            return new Error(ErrorType.NotFound, "State value not found.");
+
+        var stateByValue = values.ToDictionary(v => v.Id, v => v.StateId);
+
+        if (setsValueIds is not null)
+        {
+            var ids = setsValueIds.Distinct().ToList();
+
+            // Checked before the dictionary is built, not after: two values of one state collide on
+            // its key, and the composite key forbidding it at the database is a poor way to say "an
+            // activity cannot put Location into two values at once".
+            if (ids.Select(id => stateByValue[id]).Distinct().Count() != ids.Count)
+                return new Error(ErrorType.Validation, "An activity can only set one value per state.");
+
+            var desired = ids.ToDictionary(id => stateByValue[id], id => id);
+
+            foreach (var existing in a.StateEffects.ToList())
+            {
+                if (desired.TryGetValue(existing.StateId, out var valueId))
+                {
+                    // Same state, different value: the value id is not part of the key, so this is an
+                    // in-place update and no row churns.
+                    existing.StateValueId = valueId;
+                    desired.Remove(existing.StateId);
+                }
+                else
+                {
+                    a.StateEffects.Remove(existing);
+                    db.ActivityStateEffects.Remove(existing);
+                }
+            }
+
+            foreach (var (stateId, valueId) in desired)
+                a.StateEffects.Add(new ActivityStateEffect
+                {
+                    ActivityId = a.Id,
+                    StateId = stateId,
+                    StateValueId = valueId,
+                });
+        }
+
+        if (requiredValueIds is not null)
+        {
+            var desired = requiredValueIds.Distinct().ToHashSet();
+
+            foreach (var existing in a.StateRequirements.ToList())
+            {
+                if (desired.Contains(existing.StateValueId))
+                {
+                    desired.Remove(existing.StateValueId);
+                }
+                else
+                {
+                    a.StateRequirements.Remove(existing);
+                    db.ActivityStateRequirements.Remove(existing);
+                }
+            }
+
+            foreach (var valueId in desired)
+                a.StateRequirements.Add(new ActivityStateRequirement
+                {
+                    ActivityId = a.Id,
+                    StateValueId = valueId,
+                });
+        }
+
+        return null;
     }
 
     public async Task<Result<ActivityDto>> SetRecommendationsAsync(Guid id, Guid userId, SetActivityRecommendationsRequest req)
@@ -115,6 +221,8 @@ public class ActivityService(StrydeDbContext db)
             .Include(a => a.Category)
             .Include(a => a.Goal)
             .Include(a => a.Subtasks)
+            .Include(a => a.StateEffects)
+            .Include(a => a.StateRequirements)
             .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);
         if (a is null) return Result<ActivityDto>.Fail(new Error(ErrorType.NotFound, "Activity not found."));
 

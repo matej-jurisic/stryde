@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
 import { activityProfilesApi, ApiError } from '@/lib/api'
 import type { ActivityProfile } from '@/lib/types'
-import { ACTIVITY_TYPES, activityTypeMeta, describeAnchor, describeProfile, isAnchored } from '@/lib/activityTypes'
+import { ACTIVITY_TYPES, activityTypeMeta, describeProfile } from '@/lib/activityTypes'
 import { Button } from '@/components/ui/Button'
 import { SettingSection, inputCls } from './SettingSection'
 
@@ -62,7 +62,6 @@ function TypeRow({ profile, open, onToggle }: {
   const meta = activityTypeMeta(profile.type)
   const Icon = meta.icon
   const { placement, rhythm } = describeProfile(profile)
-  const anchor = describeAnchor(profile)
 
   const [form, setForm] = useState({
     windowStart: profile.windowStart,
@@ -139,36 +138,26 @@ function TypeRow({ profile, open, onToggle }: {
       {open && (
         <div className="border-t border-border bg-muted/20 px-4 py-4">
           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-            {/* An anchored type takes its time from the occurrence it attaches to, so its window is
-                never read. Showing the inputs anyway would offer a setting that does nothing. */}
-            {anchor ? (
-              <p className="col-span-2 text-xs text-muted-foreground">
-                Placed {anchor}, so this type has no window of its own.
-              </p>
-            ) : (
-              <>
-                {/* lang="en-GB" pins the native picker to 24h; without it the browser follows its own
-                    locale and renders AM/PM. The value is "HH:mm" either way. */}
-                <Knob label="Window start" hint="Where an unplaced suggestion starts looking">
-                  <input
-                    type="time"
-                    lang="en-GB"
-                    value={form.windowStart}
-                    onChange={(e) => set('windowStart', e.target.value)}
-                    className={inputCls}
-                  />
-                </Knob>
-                <Knob label="Window end" hint="Never placed later than this">
-                  <input
-                    type="time"
-                    lang="en-GB"
-                    value={form.windowEnd}
-                    onChange={(e) => set('windowEnd', e.target.value)}
-                    className={inputCls}
-                  />
-                </Knob>
-              </>
-            )}
+            {/* lang="en-GB" pins the native picker to 24h; without it the browser follows its own
+                locale and renders AM/PM. The value is "HH:mm" either way. */}
+            <Knob label="Window start" hint="Where an unplaced suggestion starts looking">
+              <input
+                type="time"
+                lang="en-GB"
+                value={form.windowStart}
+                onChange={(e) => set('windowStart', e.target.value)}
+                className={inputCls}
+              />
+            </Knob>
+            <Knob label="Window end" hint="Never placed later than this">
+              <input
+                type="time"
+                lang="en-GB"
+                value={form.windowEnd}
+                onChange={(e) => set('windowEnd', e.target.value)}
+                className={inputCls}
+              />
+            </Knob>
             <Knob label="Minimum block" hint="Free minutes needed. 0 for no floor.">
               <input
                 type="number"
@@ -197,9 +186,7 @@ function TypeRow({ profile, open, onToggle }: {
               describes everything the type does. */}
           <p className="mt-4 text-xs text-muted-foreground">{rhythm}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {isAnchored(profile)
-              ? 'With both sides free, each activity takes the one nearer its own usual time.'
-              : 'A habitual start time from your own history always wins over the window.'}
+            A habitual start time from your own history always wins over the window.
           </p>
 
           <div className="mt-4 flex items-center justify-end gap-3">

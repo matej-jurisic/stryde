@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
-import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, ActivityProfile, Recommendation, Category, Activity, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, ActivityProfile, Recommendation, Category, Activity, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile, State } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -77,10 +77,12 @@ export const activitiesApi = {
     return request<Activity[]>(`/api/activities${q.size ? `?${q}` : ''}`)
   },
 
-  create: (body: { title: string; categoryId?: string | null; goalId?: string | null; type?: ActivityType }) =>
+  // Omitting the two state fields leaves them untouched; sending [] clears them. The bulk-assign
+  // path relies on that, since it resends everything it is not changing and knows nothing about states.
+  create: (body: { title: string; categoryId?: string | null; goalId?: string | null; type?: ActivityType; setsStateValueIds?: string[]; requiredStateValueIds?: string[] }) =>
     request<Activity>('/api/activities', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; excludeFromRecommendations?: boolean; type?: ActivityType }) =>
+  update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; excludeFromRecommendations?: boolean; type?: ActivityType; setsStateValueIds?: string[]; requiredStateValueIds?: string[] }) =>
     request<Activity>(`/api/activities/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   setRecommendations: (id: string, excludeFromRecommendations: boolean) =>
@@ -219,6 +221,28 @@ export const categoriesApi = {
   update: (id: string, body: { name: string; color: string; icon?: string | null }) =>
     request<Category>(`/api/categories/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (id: string) => request<void>(`/api/categories/${id}`, { method: 'DELETE' }),
+}
+
+export const statesApi = {
+  list: () => request<State[]>('/api/states'),
+  create: (body: { name: string }) =>
+    request<State>('/api/states', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: string, body: { name: string }) =>
+    request<State>(`/api/states/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  delete: (id: string) => request<void>(`/api/states/${id}`, { method: 'DELETE' }),
+}
+
+/**
+ * Every write returns the whole parent state, so the cache is replaced rather than patched: adding a
+ * default moves the flag off a sibling, and deleting one can promote another.
+ */
+export const stateValuesApi = {
+  create: (stateId: string, body: { name: string; isDefault?: boolean; durationMinutes?: number | null }) =>
+    request<State>(`/api/states/${stateId}/values`, { method: 'POST', body: JSON.stringify(body) }),
+  update: (stateId: string, id: string, body: { name: string; isDefault?: boolean; durationMinutes?: number | null }) =>
+    request<State>(`/api/states/${stateId}/values/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  delete: (stateId: string, id: string) =>
+    request<State>(`/api/states/${stateId}/values/${id}`, { method: 'DELETE' }),
 }
 
 export const recommendationsApi = {

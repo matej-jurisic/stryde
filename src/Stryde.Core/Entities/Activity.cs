@@ -18,4 +18,10 @@ public class Activity
     public Category? Category { get; set; }
     public Goal? Goal { get; set; }
     public List<ActivitySubtask> Subtasks { get; set; } = [];
+
+    /// <summary>What doing this activity changes about the world. At most one value per state.</summary>
+    public List<ActivityStateEffect> StateEffects { get; set; } = [];
+
+    /// <summary>What has to be true about the world for this to be suggested.</summary>
+    public List<ActivityStateRequirement> StateRequirements { get; set; } = [];
 }

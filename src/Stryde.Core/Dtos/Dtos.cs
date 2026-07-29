@@ -39,17 +39,28 @@ public sealed record ActivityDto(
     DateTimeOffset CreatedAt,
     CategorySummaryDto? Category,
     GoalSummaryDto? Goal,
-    List<ActivitySubtaskDto> Subtasks)
+    List<ActivitySubtaskDto> Subtasks,
+    List<Guid> SetsStateValueIds,
+    List<Guid> RequiredStateValueIds)
 {
     public static ActivityDto FromEntity(Activity a) => new(
         a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.Kind.ToString(), a.Type.ToString(), a.ExcludeFromRecommendations, a.CreatedAt,
         a.Category is not null ? CategorySummaryDto.FromEntity(a.Category) : null,
         a.Goal is not null ? GoalSummaryDto.FromEntity(a.Goal) : null,
-        a.Subtasks.OrderBy(s => s.CreatedAt).Select(ActivitySubtaskDto.FromEntity).ToList());
+        a.Subtasks.OrderBy(s => s.CreatedAt).Select(ActivitySubtaskDto.FromEntity).ToList(),
+        a.StateEffects.Select(e => e.StateValueId).ToList(),
+        a.StateRequirements.Select(r => r.StateValueId).ToList());
 }
 
-public sealed record CreateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId, ActivityType Type = ActivityType.general);
-public sealed record UpdateActivityRequest(string Title, Guid? CategoryId, Guid? GoalId, bool ExcludeFromRecommendations = false, ActivityType Type = ActivityType.general);
+// Bare value ids rather than nested value objects: the client already holds the whole state list from
+// `GET /api/states` and resolves names from it, and a flat list is what both write paths send back.
+public sealed record CreateActivityRequest(
+    string Title, Guid? CategoryId, Guid? GoalId, ActivityType Type = ActivityType.general,
+    List<Guid>? SetsStateValueIds = null, List<Guid>? RequiredStateValueIds = null);
+public sealed record UpdateActivityRequest(
+    string Title, Guid? CategoryId, Guid? GoalId, bool ExcludeFromRecommendations = false,
+    ActivityType Type = ActivityType.general,
+    List<Guid>? SetsStateValueIds = null, List<Guid>? RequiredStateValueIds = null);
 public sealed record SetActivityRecommendationsRequest(bool ExcludeFromRecommendations);
 
 // Activity subtasks (template)
@@ -213,6 +224,28 @@ public sealed record CategoryDto(Guid Id, Guid UserId, string Name, string Color
 public sealed record CreateCategoryRequest(string Name, string Color, string? Icon);
 public sealed record UpdateCategoryRequest(string Name, string Color, string? Icon);
 
+// States — user-defined context the engine gates suggestions on. Values come nested, in creation
+// order, because a state is meaningless without them and the client always needs both.
+public sealed record StateDto(
+    Guid Id, Guid UserId, string Name, DateTimeOffset CreatedAt, List<StateValueDto> Values)
+{
+    public static StateDto FromEntity(Entities.State s) => new(
+        s.Id, s.UserId, s.Name, s.CreatedAt,
+        s.Values.OrderBy(v => v.CreatedAt).Select(StateValueDto.FromEntity).ToList());
+}
+
+public sealed record StateValueDto(
+    Guid Id, Guid StateId, string Name, bool IsDefault, int? DurationMinutes, DateTimeOffset CreatedAt)
+{
+    public static StateValueDto FromEntity(StateValue v) =>
+        new(v.Id, v.StateId, v.Name, v.IsDefault, v.DurationMinutes, v.CreatedAt);
+}
+
+public sealed record CreateStateRequest(string Name);
+public sealed record UpdateStateRequest(string Name);
+public sealed record CreateStateValueRequest(string Name, bool IsDefault = false, int? DurationMinutes = null);
+public sealed record UpdateStateValueRequest(string Name, bool IsDefault = false, int? DurationMinutes = null);
+
 // Recommendations — always an activity to schedule; timing fields null when no history exists.
 // DaysSinceLast/MedianGapDays/PatternCount are the raw "why" signals; the client composes the
 // user-facing reason text from them. SuggestedStartAt is the best free slot on the target day,
@@ -303,11 +336,11 @@ public sealed record UpdateUserSettingsRequest(
 /// <summary>
 /// One type's *resolved* profile: built-in defaults with the user's overrides applied.
 /// <para>
-/// The first four fields are editable. <paramref name="CadencePriorDays"/>,
-/// <paramref name="MinDueFraction"/>, <paramref name="AnchorType"/> and <paramref name="Adjacency"/>
-/// are read-only, carried so the client can describe what the type actually does without hardcoding
-/// values that would drift out of date. <paramref name="IsCustomised"/> says whether any field
-/// differs from the built-in default, which is what a Reset control keys off.
+/// The first four fields are editable. <paramref name="CadencePriorDays"/> and
+/// <paramref name="MinDueFraction"/> are read-only, carried so the client can describe what the type
+/// actually does without hardcoding values that would drift out of date.
+/// <paramref name="IsCustomised"/> says whether any field differs from the built-in default, which is
+/// what a Reset control keys off.
 /// </para>
 /// </summary>
 public sealed record ActivityProfileDto(
@@ -318,8 +351,6 @@ public sealed record ActivityProfileDto(
     int MaxPerDay,
     double CadencePriorDays,
     double MinDueFraction,
-    string? AnchorType,
-    string Adjacency,
     bool IsCustomised)
 {
     public static ActivityProfileDto From(ActivityType type, ActivityProfile p, bool isCustomised) => new(
@@ -330,8 +361,6 @@ public sealed record ActivityProfileDto(
         p.MaxPerDay,
         p.CadencePriorDays,
         p.MinDueFraction,
-        p.AnchorType?.ToString(),
-        p.Adjacency.ToString(),
         isCustomised);
 }
 

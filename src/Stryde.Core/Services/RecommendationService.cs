@@ -99,8 +99,8 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             .GroupBy(t => t)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        // Occurrences holding a real span on the target day, in start order. Both the free-slot
-        // carve-out and the anchor spans below read from this.
+        // Occurrences holding a real span on the target day, in start order. The free-slot carve-out
+        // below reads from this.
         // Done blocks still occupy their span - that time was spent, and the grid keeps drawing
         // them. Skipped ones don't: skipping is an explicit decision not to, so the time frees up.
         // Due pins (EndAt == null) are deadlines rather than commitments and never block.
@@ -109,16 +109,12 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             .OrderBy(o => o.StartAt!.Value)
             .ToList();
 
-        // What each type covers on the target day: earliest start to latest end across every block
-        // of that type. An anchored suggestion attaches to this rather than to a single occurrence,
-        // so a day split into two work blocks brackets as one - a commute belongs outside the
-        // working day, not in the gap down the middle of it.
-        var anchorSpans = dayBlocks
-            .Where(o => todayTypeByActivity.ContainsKey(o.ActivityId))
-            .GroupBy(o => todayTypeByActivity[o.ActivityId])
-            .ToDictionary(
-                g => g.Key,
-                g => (Start: g.Min(o => o.StartAt!.Value), End: g.Max(o => o.EndAt!.Value)));
+        var dayStart = DayMath.StartOfDay(today, ctx);
+        var dayEnd = DayMath.EndOfDay(today, ctx);
+
+        // What the user's states held over time, and what each activity needs them to hold. Both are
+        // empty for a user who has configured no states, which is the case that has to cost nothing.
+        var (stateTimelines, requirementsByActivity) = await LoadStatesAsync(userId, committedOccurrences);
 
         // Per-activity timing and cadence stats from windowed completed history
         var statsByActivity = completedHistory
@@ -144,11 +140,45 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             var endOfDay = DayMath.EndOfDay(today, ctx);
             freeSlots = ComputeFreeSlots(slotStart, endOfDay, dayBlocks);
 
-            // Hold unanchored suggestions back to a sensible hour, unless that would push them out
-            // of the day entirely (a day boundary late enough to swallow it).
+            // Hold suggestions back to a sensible hour, unless that would push them out of the day
+            // entirely (a day boundary late enough to swallow it).
             var civil = InstantForMinutes(EarliestFallbackStart.Hour * 60 + EarliestFallbackStart.Minute);
             earliestFallback = civil > slotStart && civil < endOfDay ? civil : slotStart;
         }
+
+        var allowedIntervalCache = new Dictionary<Guid, List<(DateTimeOffset Start, DateTimeOffset End)>>();
+
+        // When on the target day this activity's state requirements all hold. Requirements sharing a
+        // state are ORed (the state is one *of* these values); the groups are ANDed, by intersecting.
+        // An activity with no requirements owns the whole day.
+        List<(DateTimeOffset Start, DateTimeOffset End)> AllowedIntervals(Guid activityId)
+        {
+            if (allowedIntervalCache.TryGetValue(activityId, out var cached)) return cached;
+
+            List<(DateTimeOffset Start, DateTimeOffset End)> intervals = [(dayStart, dayEnd)];
+            if (requirementsByActivity.TryGetValue(activityId, out var groups))
+                foreach (var (stateId, allowed) in groups)
+                    intervals = IntersectIntervals(
+                        intervals, stateTimelines[stateId].IntervalsWhere(allowed, dayStart, dayEnd));
+
+            allowedIntervalCache[activityId] = intervals;
+            return intervals;
+        }
+
+        // The gate. An activity whose requirements are never met on the target day is dropped from
+        // every tier, however overdue it is: on a day you never went in, there is nothing for the
+        // commute home to be overdue for. This is the only filter keyed off the day's *contents*
+        // rather than the activity's own history, and the only one that can silence a due activity.
+        bool StateAllows(Guid activityId) =>
+            !requirementsByActivity.ContainsKey(activityId) || AllowedIntervals(activityId).Count > 0;
+
+        // Free time this particular activity may actually use: the day's openings masked by its
+        // requirements. Identical to freeSlots for the overwhelming majority of activities, which have
+        // no requirements at all.
+        List<(DateTimeOffset Start, DateTimeOffset End)> AllowedSlots(Guid activityId) =>
+            requirementsByActivity.ContainsKey(activityId)
+                ? IntersectIntervals(freeSlots!, AllowedIntervals(activityId))
+                : freeSlots!;
 
         // An activity needs a gap big enough for whichever is larger: what it usually takes, or the
         // floor its type declares. Zero on both sides means "no evidence, no floor" - let it through.
@@ -157,8 +187,9 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             if (freeSlots is null) return true;
             statsByActivity.TryGetValue(activityId, out var s);
             var needed = Math.Max(s?.DurationMinutes ?? 0, profileByType[type].MinBlockMinutes);
-            if (needed == 0) return true;
-            return freeSlots.Any(slot => (slot.End - slot.Start).TotalMinutes >= needed);
+            var slots = AllowedSlots(activityId);
+            if (needed == 0) return slots.Count > 0;
+            return slots.Any(slot => (slot.End - slot.Start).TotalMinutes >= needed);
         }
 
         bool StartTimeIsFree(int minutesFromMidnight)
@@ -171,44 +202,27 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         // it goes, so suggestions spread out instead of every one of them picking the same first gap.
         var placedSpans = new List<(DateTimeOffset Start, DateTimeOffset End)>();
 
-        bool CanPlace(DateTimeOffset start, int needed)
+        bool CanPlace(List<(DateTimeOffset Start, DateTimeOffset End)> slots, DateTimeOffset start, int needed)
         {
             var end = start.AddMinutes(needed);
-            if (!freeSlots!.Any(slot => start >= slot.Start && end <= slot.End)) return false;
+            if (!slots.Any(slot => start >= slot.Start && end <= slot.End)) return false;
             return placedSpans.Count(p => start < p.End && end > p.Start) < MaxConcurrentSuggestions;
         }
 
-        // Every quarter-hour opening in the day's free time, in chronological order.
-        IEnumerable<DateTimeOffset> CandidateStarts()
+        // Every quarter-hour opening the activity may use, in chronological order.
+        IEnumerable<DateTimeOffset> CandidateStarts(List<(DateTimeOffset Start, DateTimeOffset End)> slots)
         {
-            foreach (var slot in freeSlots!)
+            foreach (var slot in slots)
                 for (var t = RoundUpToQuarter(slot.Start); t < slot.End; t = t.AddMinutes(PlacementStepMinutes))
                     yield return t;
         }
 
-        // Candidate positions an adjacency offers, flush against the anchor's span and best first.
-        // With both sides open the activity takes the one nearer its own habitual time: that is what
-        // sends the outbound leg of a commute to the morning side and the return leg to the evening
-        // one, out of nothing but their own histories.
-        List<DateTimeOffset> AnchorSides(
-            (DateTimeOffset Start, DateTimeOffset End) span, Adjacency adjacency, int needed, int? habitMinutes)
-        {
-            var sides = new List<DateTimeOffset>();
-            if (adjacency is Adjacency.before or Adjacency.brackets) sides.Add(span.Start.AddMinutes(-needed));
-            if (adjacency is Adjacency.after or Adjacency.brackets) sides.Add(span.End);
-            if (habitMinutes is { } m)
-            {
-                var habitual = InstantForMinutes(m);
-                sides = sides.OrderBy(t => Math.Abs((t - habitual).TotalMinutes)).ToList();
-            }
-            return sides;
-        }
-
-        // Where this activity goes on the target day, given what's already been placed: flush against
-        // its anchor when its type has one, else its habitual time if that still fits, else the free
-        // opening nearest to it, else the first opening inside its type's preferred window. Null when
-        // the day has no room left for it — which is the point: it caps how many ghosts one gap can
-        // absorb, rather than stacking them on one slot.
+        // Where this activity goes on the target day, given what's already been placed: its habitual
+        // time if that still fits, else the free opening nearest to it, else the first opening inside
+        // its type's preferred window. Null when the day has no room left for it — which is the point:
+        // it caps how many ghosts one gap can absorb, rather than stacking them on one slot.
+        // Every candidate comes from AllowedSlots, so a state requirement is a hard mask: the rules
+        // below choose *within* what the requirement permits and can never step outside it.
         DateTimeOffset? PlaceActivity(Guid activityId, ActivityType type)
         {
             if (freeSlots is null) return null;
@@ -217,32 +231,21 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             // No history means no median duration - assume the same span the calendar draws rather
             // than 0, which would "fit" any gap however small.
             var needed = Math.Max(s?.DurationMinutes ?? DefaultSuggestionMinutes, profile.MinBlockMinutes);
+            var slots = AllowedSlots(activityId);
 
             DateTimeOffset? chosen;
-            if (profile.AnchorType is { } anchorType && profile.Adjacency != Adjacency.none
-                && anchorSpans.TryGetValue(anchorType, out var span))
-            {
-                // An anchored activity takes its time from the anchor's actual span, not from an
-                // average of its own completions: that is what makes a commute follow a work day
-                // starting at 08:00 one day and 09:30 the next. Neither side free means no slot -
-                // the recommendation still surfaces, just without a time, which is the honest answer
-                // for a return leg asked about at 19:00 on a day nobody went in.
-                chosen = AnchorSides(span, profile.Adjacency, needed, s?.StartMinutes)
-                    .Cast<DateTimeOffset?>()
-                    .FirstOrDefault(t => CanPlace(t!.Value, needed));
-            }
-            else if (s?.StartMinutes is { } mins)
+            if (s?.StartMinutes is { } mins)
             {
                 // Observed behaviour beats a declared preference: an activity that has a habitual
                 // time keeps it even when the type's window says otherwise. When it is taken, drift
                 // to the nearest opening - but only within MaxHabitualDriftMinutes. Beyond that the
                 // honest answer is no time rather than a time the user would never pick.
                 var habitual = InstantForMinutes(mins);
-                chosen = CanPlace(habitual, needed)
+                chosen = CanPlace(slots, habitual, needed)
                     ? habitual
-                    : CandidateStarts()
+                    : CandidateStarts(slots)
                         .Select(t => (Start: t, Drift: Math.Abs((t - habitual).TotalMinutes)))
-                        .Where(c => c.Drift <= MaxHabitualDriftMinutes && CanPlace(c.Start, needed))
+                        .Where(c => c.Drift <= MaxHabitualDriftMinutes && CanPlace(slots, c.Start, needed))
                         .OrderBy(c => c.Drift)
                         .Select(c => (DateTimeOffset?)c.Start)
                         .FirstOrDefault();
@@ -258,12 +261,12 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
                 // nobody would take.
                 var windowStart = InstantForMinutes(profile.WindowStart.Hour * 60 + profile.WindowStart.Minute);
                 var windowEnd = InstantForMinutes(profile.WindowEnd.Hour * 60 + profile.WindowEnd.Minute);
-                chosen = CandidateStarts()
-                        .Where(t => t >= windowStart && t < windowEnd && CanPlace(t, needed))
+                chosen = CandidateStarts(slots)
+                        .Where(t => t >= windowStart && t < windowEnd && CanPlace(slots, t, needed))
                         .Cast<DateTimeOffset?>()
                         .FirstOrDefault()
-                    ?? CandidateStarts()
-                        .Where(t => t >= earliestFallback && t < windowEnd && CanPlace(t, needed))
+                    ?? CandidateStarts(slots)
+                        .Where(t => t >= earliestFallback && t < windowEnd && CanPlace(slots, t, needed))
                         .Cast<DateTimeOffset?>()
                         .FirstOrDefault();
             }
@@ -309,14 +312,6 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         // MinDueFraction is held back until the activity is that far through its own rhythm, which
         // is what puts rest days between sessions - and, since the measure is per activity, what
         // makes the other half of a split surface instead.
-        // An activity whose type declares an anchor only makes sense on a day that holds the thing it
-        // attaches to. A commute is a consequence of going in, not a rhythm of its own: on a day
-        // with no on-site work there is nothing for it to be overdue for, however long it has been.
-        // This is the only filter that keys off the day's *contents* rather than the activity's own
-        // history, and the only one that can silence an activity that is genuinely due.
-        bool AnchorPresent(ActivityType type) =>
-            profileByType[type].AnchorType is not { } anchor || anchorSpans.ContainsKey(anchor);
-
         bool PastCooldown(Activity activity)
         {
             var min = profileByType[activity.Type].MinDueFraction;
@@ -341,7 +336,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         void AddActivity(int tier, Activity activity)
         {
             if (seenActivityIds.Add(activity.Id) && !todayActivityIds.Contains(activity.Id)
-                && AnchorPresent(activity.Type) && FitsASlot(activity.Id, activity.Type) && PastCooldown(activity))
+                && StateAllows(activity.Id) && FitsASlot(activity.Id, activity.Type) && PastCooldown(activity))
                 goalTierActivities.Add((tier, activity));
         }
 
@@ -383,7 +378,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
 
             habitRecs = patternedActivityIds
                 .Select(p => activities.FirstOrDefault(a => a.Id == p.ActivityId))
-                .Where(a => a is not null && AnchorPresent(a.Type) && FitsASlot(a.Id, a.Type) && PastCooldown(a))
+                .Where(a => a is not null && StateAllows(a.Id) && FitsASlot(a.Id, a.Type) && PastCooldown(a))
                 .Select(a => a!)
                 .ToList();
         }
@@ -429,6 +424,100 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             if (TakeTypeSlot(a.Type))
                 result.Add(MakeActivityRec(3, a));
 
+        return result;
+    }
+
+    /// <summary>
+    /// Everything the state gate needs for one request: a folded timeline per state, and each
+    /// activity's requirements grouped by the state they constrain.
+    /// <para>
+    /// Returns two empty maps for a user with no states configured, which is the case that has to cost
+    /// nothing - one cheap query and then out.
+    /// </para>
+    /// </summary>
+    private async Task<(
+        Dictionary<Guid, StateTimeline> Timelines,
+        Dictionary<Guid, List<(Guid StateId, HashSet<Guid> Allowed)>> RequirementsByActivity)>
+        LoadStatesAsync(Guid userId, List<Occurrence> committedOccurrences)
+    {
+        var states = await db.States
+            .AsNoTracking()
+            .Include(s => s.Values)
+            .Where(s => s.UserId == userId)
+            .ToListAsync();
+
+        if (states.Count == 0) return ([], []);
+
+        var effects = await db.ActivityStateEffects
+            .AsNoTracking()
+            .Where(e => e.Activity.UserId == userId)
+            .Select(e => new { e.ActivityId, e.StateId, e.StateValueId })
+            .ToListAsync();
+
+        var requirements = await db.ActivityStateRequirements
+            .AsNoTracking()
+            .Where(r => r.Activity.UserId == userId)
+            .Select(r => new { r.ActivityId, r.StateValueId })
+            .ToListAsync();
+
+        var valueById = states.SelectMany(s => s.Values).ToDictionary(v => v.Id);
+        var effectsByActivity = effects.GroupBy(e => e.ActivityId).ToDictionary(g => g.Key, g => g.ToList());
+
+        // Sorted here rather than inside the fold so equal instants break on creation order, giving a
+        // day with two setters landing on the same minute a stable answer.
+        var setters = committedOccurrences
+            .Where(o => o.StartAt is not null && effectsByActivity.ContainsKey(o.ActivityId))
+            .Select(o => (At: o.EndAt ?? o.StartAt!.Value, o.CreatedAt, o.ActivityId))
+            .OrderBy(x => x.At)
+            .ThenBy(x => x.CreatedAt)
+            .ToList();
+
+        var settersByState = new Dictionary<Guid, List<StateSetter>>();
+        foreach (var (at, _, activityId) in setters)
+            foreach (var effect in effectsByActivity[activityId])
+            {
+                if (!valueById.TryGetValue(effect.StateValueId, out var value)) continue;
+                if (!settersByState.TryGetValue(effect.StateId, out var list))
+                    settersByState[effect.StateId] = list = [];
+                list.Add(new StateSetter(at, value.Id, value.DurationMinutes));
+            }
+
+        var timelines = states.ToDictionary(
+            s => s.Id,
+            s => StateTimeline.Build(
+                s.Values.FirstOrDefault(v => v.IsDefault)?.Id,
+                settersByState.GetValueOrDefault(s.Id) ?? []));
+
+        var requirementsByActivity = requirements
+            .Where(r => valueById.ContainsKey(r.StateValueId))
+            .GroupBy(r => r.ActivityId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.GroupBy(r => valueById[r.StateValueId].StateId)
+                    .Select(sg => (StateId: sg.Key, Allowed: sg.Select(r => r.StateValueId).ToHashSet()))
+                    .ToList());
+
+        return (timelines, requirementsByActivity);
+    }
+
+    /// <summary>
+    /// Overlap of two sorted, non-overlapping interval lists. Both the free slots and a state's
+    /// allowed stretches come out that way, so a linear sweep is enough.
+    /// </summary>
+    private static List<(DateTimeOffset Start, DateTimeOffset End)> IntersectIntervals(
+        List<(DateTimeOffset Start, DateTimeOffset End)> a,
+        List<(DateTimeOffset Start, DateTimeOffset End)> b)
+    {
+        var result = new List<(DateTimeOffset Start, DateTimeOffset End)>();
+        int i = 0, j = 0;
+        while (i < a.Count && j < b.Count)
+        {
+            var start = a[i].Start > b[j].Start ? a[i].Start : b[j].Start;
+            var end = a[i].End < b[j].End ? a[i].End : b[j].End;
+            if (start < end) result.Add((start, end));
+            if (a[i].End < b[j].End) i++;
+            else j++;
+        }
         return result;
     }
 

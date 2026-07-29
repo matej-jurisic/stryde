@@ -76,6 +76,7 @@ app.MapCheckpointEndpoints();
 app.MapSettingsEndpoints();
 app.MapRecommendationEndpoints();
 app.MapCategoryEndpoints();
+app.MapStateEndpoints();
 app.MapInsightsEndpoints();
 app.MapExportEndpoints();
 

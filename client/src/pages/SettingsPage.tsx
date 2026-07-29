@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { SettingSection, SettingRow, SectionFooter, inputCls } from '@/components/settings/SettingSection'
 import { ActivityTypeSettings } from '@/components/settings/ActivityTypeSettings'
+import { StateSettings } from '@/components/settings/StateSettings'
 import { settingsApi, authApi, exportApi, ApiError } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import { useAuthStore } from '@/store/auth'
@@ -170,6 +171,8 @@ export function SettingsPage() {
               </SettingSection>
 
               <ActivityTypeSettings />
+
+              <StateSettings />
 
               <SettingSection label="Appearance">
                 <SettingRow label="Theme">

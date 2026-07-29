@@ -19,6 +19,7 @@ public class TestContext : IDisposable
     public ActivityProfileService ActivityProfileService { get; }
     public RecommendationService RecommendationService { get; }
     public InsightsService InsightsService { get; }
+    public StateService StateService { get; }
 
     public TestContext()
     {
@@ -50,6 +51,7 @@ public class TestContext : IDisposable
         ActivityProfileService = new ActivityProfileService(Db);
         RecommendationService = new RecommendationService(Db, UserSettingsService, ActivityProfileService);
         InsightsService = new InsightsService(Db, UserSettingsService);
+        StateService = new StateService(Db);
     }
 
     public void Dispose()

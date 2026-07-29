@@ -566,7 +566,7 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_unanchored_suggestion_on_a_future_day_skips_the_small_hours()
+    public async Task GetAsync_suggestion_on_a_future_day_skips_the_small_hours()
     {
         var userId = await CreateUserAsync();
         await AddActivityAsync(userId, "never done", GoalStatus.active);
@@ -618,7 +618,7 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_unanchored_activity_is_placed_inside_its_type_window()
+    public async Task GetAsync_activity_is_placed_inside_its_type_window()
     {
         var userId = await CreateUserAsync();
         await AddActivityAsync(userId, "leg day", GoalStatus.focus, ActivityType.training);
@@ -851,33 +851,67 @@ public class RecommendationServiceTests : IDisposable
         Assert.Single(recs);
     }
 
-    // --- Anchored types ---
+    // --- States ---
 
-    /// <summary>An on-site work occurrence for a commute to attach to.</summary>
-    private async Task AddWorkDayAsync(Guid userId, DateTimeOffset start, DateTimeOffset end)
+    /// <summary>
+    /// A state whose values are given in order. The first is the default, so it cannot carry a
+    /// duration - a duration is a departure from the default and the default has nowhere to fall back
+    /// to.
+    /// </summary>
+    private async Task<State> AddStateAsync(
+        Guid userId, string name, params (string Name, int? DurationMinutes)[] values)
     {
-        var work = await AddActivityAsync(userId, "office day", null, ActivityType.work);
-        await AddOccurrenceAsync(userId, work, startAt: start, endAt: end);
+        var state = new State { UserId = userId, Name = name };
+        for (var i = 0; i < values.Length; i++)
+            state.Values.Add(new StateValue
+            {
+                StateId = state.Id,
+                Name = values[i].Name,
+                IsDefault = i == 0,
+                DurationMinutes = values[i].DurationMinutes,
+                CreatedAt = Now.AddSeconds(i),
+            });
+        _ctx.Db.States.Add(state);
+        await _ctx.Db.SaveChangesAsync();
+        return state;
     }
 
-    private async Task<Activity> AddCommuteAsync(Guid userId, string title, int hour, int minute, int durationMinutes)
+    private static StateValue Value(State state, string name) => state.Values.First(v => v.Name == name);
+
+    /// <summary>Doing this activity puts the state into that value, from the occurrence's end.</summary>
+    private async Task SetsAsync(Activity activity, StateValue value)
     {
-        var a = await AddActivityAsync(userId, title, GoalStatus.focus, ActivityType.commute);
-        foreach (var day in new[] { 2, 6 })
+        _ctx.Db.ActivityStateEffects.Add(new ActivityStateEffect
         {
-            var start = At(day, hour, minute);
-            await CompleteAsync(userId, a, start, start.AddMinutes(durationMinutes));
-        }
-        return a;
+            ActivityId = activity.Id,
+            StateId = value.StateId,
+            StateValueId = value.Id,
+        });
+        await _ctx.Db.SaveChangesAsync();
+    }
+
+    /// <summary>Values are ORed. Call twice for two states, which are ANDed.</summary>
+    private async Task RequiresAsync(Activity activity, params StateValue[] values)
+    {
+        foreach (var value in values)
+            _ctx.Db.ActivityStateRequirements.Add(new ActivityStateRequirement
+            {
+                ActivityId = activity.Id,
+                StateValueId = value.Id,
+            });
+        await _ctx.Db.SaveChangesAsync();
     }
 
     [Fact]
-    public async Task GetAsync_anchored_activity_is_not_suggested_without_its_anchor_on_the_day()
+    public async Task GetAsync_activity_is_not_suggested_when_its_requirement_never_holds()
     {
         var userId = await CreateUserAsync();
-        // Overdue by its own reckoning, and on a focus goal - but nobody is going in that day, so
-        // there is nothing for it to be a commute to.
-        await AddCommuteAsync(userId, "commute home", 17, 30, 30);
+        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+
+        // On a focus goal and overdue by its own reckoning, but nobody went in that day, so there is
+        // nothing for a commute home to be a commute from.
+        var back = await AddActivityAsync(userId, "commute home", GoalStatus.focus);
+        await RequiresAsync(back, Value(location, "Work"));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
@@ -885,66 +919,204 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_anchored_legs_take_the_side_nearest_their_own_habitual_time()
+    public async Task GetAsync_requirement_opens_from_the_setting_occurrences_end()
     {
         var userId = await CreateUserAsync();
-        await AddWorkDayAsync(userId, At(9, 9, 30), At(9, 17));
-        var outbound = await AddCommuteAsync(userId, "commute in", 8, 0, 60);
-        var back = await AddCommuteAsync(userId, "commute home", 17, 30, 60);
+        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+
+        // You are at work once the inbound leg *finishes*, so nothing may be placed before 08:30.
+        var into = await AddActivityAsync(userId, "commute in");
+        await SetsAsync(into, Value(location, "Work"));
+        await AddOccurrenceAsync(userId, into, startAt: At(9, 8), endAt: At(9, 8, 30));
+
+        var back = await AddActivityAsync(userId, "commute home", GoalStatus.focus);
+        await RequiresAsync(back, Value(location, "Work"));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
-        Assert.Equal(2, recs.Count);
-        Assert.Equal(At(9, 8, 30), recs.Single(r => r.Activity.Id == outbound.Id).SuggestedStartAt);
-        Assert.Equal(At(9, 17), recs.Single(r => r.Activity.Id == back.Id).SuggestedStartAt);
+        Assert.Equal(At(9, 8, 30), Assert.Single(recs).SuggestedStartAt);
     }
 
     [Fact]
-    public async Task GetAsync_anchored_placement_follows_the_anchor_rather_than_its_own_history()
+    public async Task GetAsync_requirement_overrides_a_habitual_time_outside_it()
     {
         var userId = await CreateUserAsync();
-        // Habitually a 09:00 commute, but this is an 08:00 start, so it has to leave at 07:30.
-        // Averaging its own completions is exactly what produced "work at 08:00, commute at 09:00".
-        await AddWorkDayAsync(userId, At(9, 8), At(9, 16));
-        await AddCommuteAsync(userId, "commute in", 9, 0, 30);
+        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+
+        var into = await AddActivityAsync(userId, "commute in");
+        await SetsAsync(into, Value(location, "Work"));
+        await AddOccurrenceAsync(userId, into, startAt: At(9, 8), endAt: At(9, 8, 30));
+
+        // Habitually an 08:00 activity, which is before the state permits it. A habitual time beats a
+        // type's window, but not a requirement: the mask is the one thing placement cannot step over.
+        var back = await AddActivityAsync(userId, "swipe out", GoalStatus.focus);
+        await RequiresAsync(back, Value(location, "Work"));
+        foreach (var day in new[] { 2, 6 })
+            await CompleteAsync(userId, back, At(day, 8), At(day, 8, 30));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
-        Assert.Equal(At(9, 7, 30), Assert.Single(recs).SuggestedStartAt);
+        Assert.Equal(At(9, 8, 30), Assert.Single(recs).SuggestedStartAt);
     }
 
     [Fact]
-    public async Task GetAsync_anchored_activity_brackets_a_split_anchor_day_as_one_span()
+    public async Task GetAsync_activity_is_suppressed_while_a_timed_value_is_in_force()
     {
         var userId = await CreateUserAsync();
-        // Two blocks with an hour between them. The gap is free, and it is the wrong answer: a
-        // commute belongs outside the working day, not down the middle of it.
-        await AddWorkDayAsync(userId, At(9, 9), At(9, 12));
-        await AddWorkDayAsync(userId, At(9, 13), At(9, 17));
-        await AddCommuteAsync(userId, "commute home", 17, 30, 30);
+        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 1440));
+
+        // Trained 09:00-10:00, so tired until 10:00 tomorrow. Nothing has to be scheduled to undo it.
+        var legs = await AddActivityAsync(userId, "leg day");
+        await SetsAsync(legs, Value(tired, "Yes"));
+        await CompleteAsync(userId, legs, At(7, 9), At(7, 10));
+
+        var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
+        await RequiresAsync(run, Value(tired, "No"));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Empty(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_activity_returns_once_a_timed_value_has_expired()
+    {
+        var userId = await CreateUserAsync();
+        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 120));
+
+        var legs = await AddActivityAsync(userId, "leg day");
+        await SetsAsync(legs, Value(tired, "Yes"));
+        await CompleteAsync(userId, legs, At(7, 9), At(7, 10));
+
+        var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
+        await RequiresAsync(run, Value(tired, "No"));
+
+        // Two hours from 10:00 puts the state back to No at 12:00, with no occurrence saying so.
+        var afterExpiry = At(7, 12, 30);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, afterExpiry);
+
+        Assert.Equal(At(7, 12, 30), Assert.Single(recs).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_a_timed_value_carries_across_the_day_boundary()
+    {
+        var userId = await CreateUserAsync();
+        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 2880));
+
+        // Two days of soreness from a Tuesday afternoon session, which day-scoped gating could not
+        // express at all.
+        var legs = await AddActivityAsync(userId, "max squats");
+        await SetsAsync(legs, Value(tired, "Yes"));
+        await CompleteAsync(userId, legs, At(7, 12), At(7, 13));
+
+        var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
+        await RequiresAsync(run, Value(tired, "No"));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 8), Now);
+
+        Assert.Empty(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_a_later_setter_extends_a_pending_expiry()
+    {
+        var userId = await CreateUserAsync();
+        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 120));
+
+        var legs = await AddActivityAsync(userId, "leg day");
+        await SetsAsync(legs, Value(tired, "Yes"));
+        // First session would have worn off at 11:00; the second one pushes it out to 12:30.
+        await CompleteAsync(userId, legs, At(7, 8), At(7, 9));
+        await CompleteAsync(userId, legs, At(7, 10), At(7, 10, 30));
+
+        var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
+        await RequiresAsync(run, Value(tired, "No"));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Equal(At(7, 12, 30), Assert.Single(recs).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_a_skipped_setter_leaves_the_state_alone()
+    {
+        var userId = await CreateUserAsync();
+        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+
+        // Skipping is an explicit decision not to, the same reason a skipped block frees its time.
+        var into = await AddActivityAsync(userId, "commute in");
+        await SetsAsync(into, Value(location, "Work"));
+        await AddOccurrenceAsync(userId, into, At(9, 8), At(9, 8, 30), EventStatus.skipped);
+
+        var back = await AddActivityAsync(userId, "commute home", GoalStatus.focus);
+        await RequiresAsync(back, Value(location, "Work"));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
-        Assert.Equal(At(9, 17), Assert.Single(recs).SuggestedStartAt);
+        Assert.Empty(recs);
     }
 
     [Fact]
-    public async Task GetAsync_anchored_activity_has_no_suggested_start_when_neither_side_is_free()
+    public async Task GetAsync_requirements_on_two_states_must_both_hold()
     {
         var userId = await CreateUserAsync();
-        // Asked about at 19:00, after both sides of the working day have gone by. The engine used to
-        // answer 19:00 here, which is the same activity in name only.
-        await AddWorkDayAsync(userId, At(7, 9, 30), At(7, 17));
-        await AddCommuteAsync(userId, "commute home", 17, 30, 30);
+        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 120));
 
-        var evening = new DateTimeOffset(2026, 7, 7, 19, 0, 0, TimeSpan.Zero);
-        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, evening);
+        var into = await AddActivityAsync(userId, "commute in");
+        await SetsAsync(into, Value(location, "Work"));
+        await AddOccurrenceAsync(userId, into, startAt: At(7, 8), endAt: At(7, 8, 30));
 
-        Assert.Null(Assert.Single(recs).SuggestedStartAt);
+        // Rested all day, but at work from 08:30, and the remaining day is all after that.
+        var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
+        await RequiresAsync(run, Value(location, "Home"));
+        await RequiresAsync(run, Value(tired, "No"));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Empty(recs);
     }
 
     [Fact]
-    public async Task GetAsync_unanchored_suggestion_is_never_placed_past_its_window_end()
+    public async Task GetAsync_a_requirement_listing_two_values_holds_for_either()
+    {
+        var userId = await CreateUserAsync();
+        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null), ("OnTrip", null));
+
+        var flight = await AddActivityAsync(userId, "fly out");
+        await SetsAsync(flight, Value(location, "OnTrip"));
+        await AddOccurrenceAsync(userId, flight, startAt: At(7, 8), endAt: At(7, 8, 30));
+
+        // Home before the flight and away after it, so the two allowed stretches meet and the whole
+        // day is open.
+        var stretch = await AddActivityAsync(userId, "stretch", GoalStatus.focus);
+        await RequiresAsync(stretch, Value(location, "Home"), Value(location, "OnTrip"));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Equal(At(7, 12), Assert.Single(recs).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_an_activity_without_requirements_ignores_states_entirely()
+    {
+        var userId = await CreateUserAsync();
+        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+
+        var into = await AddActivityAsync(userId, "commute in");
+        await SetsAsync(into, Value(location, "Work"));
+        await AddOccurrenceAsync(userId, into, startAt: At(7, 8), endAt: At(7, 8, 30));
+
+        var admin = await AddActivityAsync(userId, "inbox", GoalStatus.focus);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        Assert.Equal(admin.Id, Assert.Single(recs).Activity.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_suggestion_is_never_placed_past_its_window_end()
     {
         var userId = await CreateUserAsync();
         await AddActivityAsync(userId, "leg day", GoalStatus.focus, ActivityType.training);

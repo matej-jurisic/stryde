@@ -5,8 +5,10 @@ import { activitiesApi, activitySubtasksApi } from '@/lib/api'
 import type { Activity, ActivityType, Goal, Category } from '@/lib/types'
 import { ACTIVITY_TYPES, activityTypeMeta, profileHint } from '@/lib/activityTypes'
 import { useActivityProfiles } from '@/lib/useActivityProfiles'
+import { useStates } from '@/lib/useStates'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { StateValuePicker } from './StateValuePicker'
 
 interface ActivityModalProps {
   open: boolean
@@ -29,16 +31,29 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
   const [newSubtask, setNewSubtask] = useState('')
   const newSubtaskRef = useRef<HTMLInputElement>(null)
   const profiles = useActivityProfiles()
+  const { states } = useStates()
+  const [sets, setSets] = useState<string[]>(activity?.setsStateValueIds ?? [])
+  const [requires, setRequires] = useState<string[]>(activity?.requiredStateValueIds ?? [])
 
   const mutation = useMutation({
     mutationFn: () => {
-      const body = { title: title.trim(), goalId: goalId || null, categoryId: categoryId || null, type }
+      const body = {
+        title: title.trim(),
+        goalId: goalId || null,
+        categoryId: categoryId || null,
+        type,
+        setsStateValueIds: sets,
+        requiredStateValueIds: requires,
+      }
       return isEdit
         ? activitiesApi.update(activity!.id, { ...body, excludeFromRecommendations })
         : activitiesApi.create(body)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['activities'] })
+      // State requirements decide whether an activity is suggested at all, so the panel is stale
+      // the moment they change.
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
   })
@@ -126,6 +141,40 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
           {profileHint(activityTypeMeta(type), profiles?.get(type))}
         </p>
       </div>
+
+      {/* Hidden entirely until the user has defined a state: two empty pickers on every activity form
+          would be pure noise for anyone who never opens the States section. */}
+      {states.some((s) => s.values.length > 0) && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">
+              Only suggest when <span className="font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <StateValuePicker states={states} value={requires} onChange={setRequires} />
+            <p className="text-xs text-muted-foreground">
+              Suggested only while every state you pick from holds one of its chosen values. Leave a
+              state alone to ignore it.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">
+              Changes <span className="font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <StateValuePicker
+              states={states}
+              value={sets}
+              onChange={setSets}
+              singlePerState
+              showDurations
+            />
+            <p className="text-xs text-muted-foreground">
+              Doing this puts the state into that value, from the moment the occurrence ends. Only
+              occurrences on the calendar count, not suggestions.
+            </p>
+          </div>
+        </>
+      )}
 
       {activeGoals.length > 0 && (
         <div className="flex flex-col gap-1.5">

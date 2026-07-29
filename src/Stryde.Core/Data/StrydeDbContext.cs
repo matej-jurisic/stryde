@@ -19,6 +19,10 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
     public DbSet<ActivityTypeSetting> ActivityTypeSettings => Set<ActivityTypeSetting>();
     public DbSet<ActivitySubtask> ActivitySubtasks => Set<ActivitySubtask>();
     public DbSet<OccurrenceSubtask> OccurrenceSubtasks => Set<OccurrenceSubtask>();
+    public DbSet<State> States => Set<State>();
+    public DbSet<StateValue> StateValues => Set<StateValue>();
+    public DbSet<ActivityStateEffect> ActivityStateEffects => Set<ActivityStateEffect>();
+    public DbSet<ActivityStateRequirement> ActivityStateRequirements => Set<ActivityStateRequirement>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -134,6 +138,47 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .HasOne(s => s.Occurrence)
             .WithMany(o => o.Subtasks)
             .HasForeignKey(s => s.OccurrenceId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<StateValue>()
+            .HasOne(v => v.State)
+            .WithMany(s => s.Values)
+            .HasForeignKey(v => v.StateId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Keyed by state, not by value: one activity cannot claim to set Location to both Home and
+        // Work, and the constraint is structural rather than a service check.
+        modelBuilder.Entity<ActivityStateEffect>()
+            .HasKey(e => new { e.ActivityId, e.StateId });
+
+        modelBuilder.Entity<ActivityStateEffect>()
+            .HasOne(e => e.Activity)
+            .WithMany(a => a.StateEffects)
+            .HasForeignKey(e => e.ActivityId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Cascading from the value is what lets a whole state be deleted in one go. Deleting a single
+        // value that activities still point at is refused earlier, by StateService, with a Conflict.
+        modelBuilder.Entity<ActivityStateEffect>()
+            .HasOne(e => e.StateValue)
+            .WithMany()
+            .HasForeignKey(e => e.StateValueId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // One row per allowed value: rows sharing a state are ORed, groups are ANDed.
+        modelBuilder.Entity<ActivityStateRequirement>()
+            .HasKey(r => new { r.ActivityId, r.StateValueId });
+
+        modelBuilder.Entity<ActivityStateRequirement>()
+            .HasOne(r => r.Activity)
+            .WithMany(a => a.StateRequirements)
+            .HasForeignKey(r => r.ActivityId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ActivityStateRequirement>()
+            .HasOne(r => r.StateValue)
+            .WithMany()
+            .HasForeignKey(r => r.StateValueId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
