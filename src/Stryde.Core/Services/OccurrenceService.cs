@@ -17,12 +17,13 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
             ?? ValidateDuration(req.IsPlanned, req.StartAt, req.EndAt, req.DurationMinutes);
         if (err is not null) return Result<OccurrenceDto>.Fail(err);
 
-        var activity = await db.Activities
-            .Include(a => a.Category)
-            .Include(a => a.Goal)
-            .Include(a => a.Subtasks)
-            .FirstOrDefaultAsync(a => a.Id == req.ActivityId && a.UserId == userId);
+        var activity = await FindActivityAsync(req.ActivityId, userId);
         if (activity is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Activity not found."));
+        // An event's activity is a backing row owned by exactly one occurrence, so it is never a
+        // target here: CreateEventAsync is the only thing allowed to attach one.
+        if (activity.Kind == ActivityKind.@event)
+            return Result<OccurrenceDto>.Fail(new Error(ErrorType.Validation,
+                "An occurrence cannot be created on an event."));
 
         var o = new Occurrence
         {
@@ -137,6 +138,27 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var o = await WithFullIncludes()
             .FirstOrDefaultAsync(o => o.Id == id && o.UserId == userId);
         if (o is null) return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Occurrence not found."));
+
+        // Re-pointing at a different activity. Both ends must be activity-kind: an event's activity
+        // is a backing row this occurrence owns outright (DeleteAsync removes it, UpdateEventAsync
+        // edits it in place), so moving either end of that pair would orphan a row on one side or
+        // give a backing activity two occurrences on the other.
+        if (req.ActivityId is { } targetId && targetId != o.ActivityId)
+        {
+            if (o.Activity.Kind == ActivityKind.@event)
+                return Result<OccurrenceDto>.Fail(new Error(ErrorType.Validation,
+                    "An event cannot be moved to another activity."));
+
+            var target = await FindActivityAsync(targetId, userId);
+            if (target is null)
+                return Result<OccurrenceDto>.Fail(new Error(ErrorType.NotFound, "Activity not found."));
+            if (target.Kind == ActivityKind.@event)
+                return Result<OccurrenceDto>.Fail(new Error(ErrorType.Validation,
+                    "An occurrence cannot be moved onto an event."));
+
+            o.ActivityId = target.Id;
+            o.Activity = target;
+        }
 
         o.Title = string.IsNullOrWhiteSpace(req.Title) ? null : req.Title.Trim();
         o.StartAt = req.StartAt;
@@ -351,6 +373,17 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         var ctx = await settings.GetDayContextAsync(userId);
         return OccurrenceDto.FromEntity(o, ctx, DateTimeOffset.UtcNow);
     }
+
+    /// <summary>
+    /// The activity an occurrence hangs off, with everything <see cref="ToDtoAsync"/> needs loaded.
+    /// Shared by create and by re-pointing, so both paths return an equally complete DTO.
+    /// </summary>
+    private Task<Activity?> FindActivityAsync(Guid activityId, Guid userId) =>
+        db.Activities
+            .Include(a => a.Category)
+            .Include(a => a.Goal)
+            .Include(a => a.Subtasks)
+            .FirstOrDefaultAsync(a => a.Id == activityId && a.UserId == userId);
 
     private IQueryable<Occurrence> WithFullIncludes() =>
         db.Occurrences

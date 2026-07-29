@@ -16,6 +16,7 @@ public class TestContext : IDisposable
     public OccurrenceService OccurrenceService { get; }
     public CheckpointService CheckpointService { get; }
     public UserSettingsService UserSettingsService { get; }
+    public ActivityProfileService ActivityProfileService { get; }
     public RecommendationService RecommendationService { get; }
     public InsightsService InsightsService { get; }
 
@@ -46,7 +47,8 @@ public class TestContext : IDisposable
         ActivityService = new ActivityService(Db);
         OccurrenceService = new OccurrenceService(Db, UserSettingsService);
         CheckpointService = new CheckpointService(Db);
-        RecommendationService = new RecommendationService(Db, UserSettingsService);
+        ActivityProfileService = new ActivityProfileService(Db);
+        RecommendationService = new RecommendationService(Db, UserSettingsService, ActivityProfileService);
         InsightsService = new InsightsService(Db, UserSettingsService);
     }
 

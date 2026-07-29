@@ -421,28 +421,22 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
               ) : (
                 <>
                   <label className="text-sm font-medium text-foreground">Activity</label>
-                  {isEdit ? (
-                    <div className="flex h-10 items-center rounded-lg border border-border bg-muted/40 px-3 text-sm text-foreground">
-                      {occurrence?.activity.title}
-                    </div>
-                  ) : (
-                    <Select
-                      value={form.activityId}
-                      onChange={(v) => {
-                        setForm((f) => ({ ...f, activityId: v }))
-                        setShowNewActivity(false)
-                      }}
-                      options={activities.map((a) => ({
-                        value: a.id,
-                        label: a.title,
-                        sublabel: a.goal?.title,
-                      }))}
-                      placeholder="Select an activity..."
-                      error={Boolean(errors.activityId)}
-                      onCreateNew={() => setShowNewActivity(true)}
-                      createNewLabel="+ Create new activity"
-                    />
-                  )}
+                  <Select
+                    value={form.activityId}
+                    onChange={(v) => {
+                      setForm((f) => ({ ...f, activityId: v }))
+                      setShowNewActivity(false)
+                    }}
+                    options={activities.map((a) => ({
+                      value: a.id,
+                      label: a.title,
+                      sublabel: a.goal?.title,
+                    }))}
+                    placeholder="Select an activity..."
+                    error={Boolean(errors.activityId)}
+                    onCreateNew={!isEdit ? () => setShowNewActivity(true) : undefined}
+                    createNewLabel="+ Create new activity"
+                  />
                 </>
               )}
             </div>

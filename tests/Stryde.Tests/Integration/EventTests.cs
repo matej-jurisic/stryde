@@ -147,8 +147,135 @@ public class OccurrenceTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
     }
 
+    // --- Re-pointing an occurrence at another activity ---
+
+    [Fact]
+    public async Task UpdateOccurrence_MovesItToAnotherActivity()
+    {
+        var token = await _client.SetupUserAsync();
+        _client.UseBearer(token);
+        var from = await CreateActivityAsync("Commute");
+        var to = await CreateActivityAsync("Commute home");
+
+        var occ = await (await _client.PostAsJsonAsync("/api/occurrences", new { activityId = from }))
+            .ReadAsync<OccurrenceDto>();
+
+        var res = await _client.PutAsJsonAsync($"/api/occurrences/{occ.Id}", new
+        {
+            activityId = to,
+            isAllDay = false,
+            isPlanned = false,
+        });
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var updated = await res.ReadAsync<OccurrenceDto>();
+        Assert.Equal(to, updated.ActivityId);
+        Assert.Equal("Commute home", updated.EffectiveTitle);
+    }
+
+    [Fact]
+    public async Task UpdateOccurrence_WithoutActivityId_LeavesTheLinkAlone()
+    {
+        var token = await _client.SetupUserAsync();
+        _client.UseBearer(token);
+        var activityId = await CreateActivityAsync();
+
+        var occ = await (await _client.PostAsJsonAsync("/api/occurrences", new { activityId }))
+            .ReadAsync<OccurrenceDto>();
+
+        // Omitting the field is how every existing caller updates an occurrence
+        var res = await _client.PutAsJsonAsync($"/api/occurrences/{occ.Id}", new
+        {
+            title = "Renamed",
+            isAllDay = false,
+            isPlanned = false,
+        });
+
+        var updated = await res.ReadAsync<OccurrenceDto>();
+        Assert.Equal(activityId, updated.ActivityId);
+        Assert.Equal("Renamed", updated.EffectiveTitle);
+    }
+
+    [Fact]
+    public async Task UpdateOccurrence_ToAnUnknownActivity_Returns404()
+    {
+        var token = await _client.SetupUserAsync();
+        _client.UseBearer(token);
+        var activityId = await CreateActivityAsync();
+
+        var occ = await (await _client.PostAsJsonAsync("/api/occurrences", new { activityId }))
+            .ReadAsync<OccurrenceDto>();
+
+        var res = await _client.PutAsJsonAsync($"/api/occurrences/{occ.Id}", new
+        {
+            activityId = Guid.NewGuid(),
+            isAllDay = false,
+            isPlanned = false,
+        });
+
+        Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateOccurrence_CannotMoveAnEventToAnActivity()
+    {
+        var token = await _client.SetupUserAsync();
+        _client.UseBearer(token);
+        var activityId = await CreateActivityAsync();
+
+        // An event's activity is a backing row it owns 1:1, not a link the user chose
+        var evt = await (await _client.PostAsJsonAsync("/api/occurrences/event", new { title = "Theater" }))
+            .ReadAsync<OccurrenceDto>();
+
+        var res = await _client.PutAsJsonAsync($"/api/occurrences/{evt.Id}", new
+        {
+            activityId,
+            isAllDay = false,
+            isPlanned = false,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateOccurrence_CannotMoveAnOccurrenceOntoAnEvent()
+    {
+        var token = await _client.SetupUserAsync();
+        _client.UseBearer(token);
+        var activityId = await CreateActivityAsync();
+
+        var evt = await (await _client.PostAsJsonAsync("/api/occurrences/event", new { title = "Theater" }))
+            .ReadAsync<OccurrenceDto>();
+        var occ = await (await _client.PostAsJsonAsync("/api/occurrences", new { activityId }))
+            .ReadAsync<OccurrenceDto>();
+
+        // Would give the backing activity two occurrences, and deleting either would take both
+        var res = await _client.PutAsJsonAsync($"/api/occurrences/{occ.Id}", new
+        {
+            activityId = evt.ActivityId,
+            isAllDay = false,
+            isPlanned = false,
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateOccurrence_OnAnEventActivity_Returns400()
+    {
+        var token = await _client.SetupUserAsync();
+        _client.UseBearer(token);
+
+        var evt = await (await _client.PostAsJsonAsync("/api/occurrences/event", new { title = "Theater" }))
+            .ReadAsync<OccurrenceDto>();
+
+        var res = await _client.PostAsJsonAsync("/api/occurrences", new { activityId = evt.ActivityId });
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
     public void Dispose() => _factory.Dispose();
 
     private sealed record ActivityDto(Guid Id);
-    private sealed record OccurrenceDto(Guid Id, string? Title, string EffectiveTitle, string Status, DateTimeOffset? StartAt, DateTimeOffset? WindowStart, DateTimeOffset? WindowEnd, int? WindowDurationMinutes);
+    private sealed record OccurrenceDto(Guid Id, Guid ActivityId, string? Title, string EffectiveTitle, string Status, DateTimeOffset? StartAt, DateTimeOffset? WindowStart, DateTimeOffset? WindowEnd, int? WindowDurationMinutes);
 }

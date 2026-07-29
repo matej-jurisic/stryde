@@ -1,8 +1,10 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download, LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
+import { SettingSection, SettingRow, SectionFooter, inputCls } from '@/components/settings/SettingSection'
+import { ActivityTypeSettings } from '@/components/settings/ActivityTypeSettings'
 import { settingsApi, authApi, exportApi, ApiError } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import { useAuthStore } from '@/store/auth'
@@ -22,52 +24,6 @@ const THEME_OPTIONS: { value: ThemePref; label: string; Icon: typeof Sun }[] = [
   { value: 'dark',   label: 'Dark',   Icon: Moon },
   { value: 'system', label: 'System', Icon: Monitor },
 ]
-
-// ── layout primitives ──────────────────────────────────────────────────────
-
-function SettingSection({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <section>
-      <p className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <div className="overflow-hidden rounded-lg border border-border bg-card divide-y divide-border">
-        {children}
-      </div>
-    </section>
-  )
-}
-
-function SettingRow({ label, hint, children }: { label: string; hint?: string; children?: ReactNode }) {
-  return (
-    <div className="flex items-center gap-4 px-4 py-3.5">
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-foreground">{label}</p>
-        {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
-      </div>
-      {children && <div className="shrink-0">{children}</div>}
-    </div>
-  )
-}
-
-function SectionFooter({ status, error, onSave, isPending, label = 'Save changes' }: {
-  status?: string
-  error?: string | null
-  onSave: () => void
-  isPending: boolean
-  label?: string
-}) {
-  return (
-    <div className="flex items-center justify-end gap-3 bg-muted/40 px-4 py-3">
-      {error && <span className="text-xs text-destructive">{error}</span>}
-      {status && !error && <span className="text-xs text-muted-foreground">{status}</span>}
-      <Button size="sm" onClick={onSave} loading={isPending}>{label}</Button>
-    </div>
-  )
-}
-
-const inputCls =
-  'h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring'
 
 // ── page ───────────────────────────────────────────────────────────────────
 
@@ -173,6 +129,7 @@ export function SettingsPage() {
                 <SettingRow label="Day start">
                   <input
                     type="time"
+                    lang="en-GB"
                     value={form.dayBoundaryTime}
                     onChange={(e) => { setSaved(false); setForm((f) => ({ ...f, dayBoundaryTime: e.target.value })) }}
                     className={inputCls}
@@ -211,6 +168,8 @@ export function SettingsPage() {
                   isPending={saveMutation.isPending}
                 />
               </SettingSection>
+
+              <ActivityTypeSettings />
 
               <SettingSection label="Appearance">
                 <SettingRow label="Theme">

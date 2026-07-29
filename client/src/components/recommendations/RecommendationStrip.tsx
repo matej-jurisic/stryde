@@ -6,8 +6,6 @@ import type { Activity, GoalStatus, Occurrence, Recommendation } from '@/lib/typ
 import { toastError } from '@/store/toasts'
 import { Badge } from '@/components/ui/Badge'
 
-type ActivityRecommendation = Extract<Recommendation, { type: 'activity' }>
-
 export interface ActivityTiming {
   durationMinutes: number | null
   startTime: string | null
@@ -82,7 +80,7 @@ function weekdayPlural(date: string): string {
 
 // Why this activity is being suggested, from the raw signals on the DTO. Phrased relative to the
 // target day rather than to now, since the panel can be pointed at any date. Null = no history.
-function reasonText(rec: ActivityRecommendation, date: string): string | null {
+function reasonText(rec: Recommendation, date: string): string | null {
   if (rec.patternCount) return `Usually on ${weekdayPlural(date)}, ${rec.patternCount}x lately`
   if (rec.daysSinceLast === null) return null
   if (rec.daysSinceLast === 0) return 'Done earlier today'
@@ -143,7 +141,7 @@ function ActivityRecItem({
   onQuickSchedule,
   isScheduling,
 }: {
-  rec: ActivityRecommendation
+  rec: Recommendation
   date: string
   onCreate: () => void
   onQuickSchedule: () => void
@@ -212,7 +210,7 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
   // One-click scheduling into the server-picked slot. The modal path stays available on the
   // row body for anything that needs adjusting.
   const scheduleMutation = useMutation({
-    mutationFn: (rec: ActivityRecommendation) => {
+    mutationFn: (rec: Recommendation) => {
       const startAt = rec.suggestedStartAt!
       const endAt = rec.typicalDurationMinutes
         ? new Date(new Date(startAt).getTime() + rec.typicalDurationMinutes * 60000).toISOString()
@@ -252,14 +250,12 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
     return order.map((label) => ({ label, items: map.get(label)! }))
   }, [recommendations])
 
-  // Planned floating occurrences not already in the recs list; unplanned
-  // floating ones live in the Daily Plan's Floating group instead.
-  const floatingOnly = useMemo(() => {
-    const recIds = new Set(
-      recommendations.flatMap((r) => (r.type === 'occurrence' ? [r.occurrence.id] : [])),
-    )
-    return allFloating.filter((o) => o.isPlanned && !recIds.has(o.id))
-  }, [allFloating, recommendations])
+  // Planned floating occurrences; unplanned floating ones live in the Daily Plan's
+  // Floating group instead.
+  const floatingOnly = useMemo(
+    () => allFloating.filter((o) => o.isPlanned),
+    [allFloating],
+  )
 
   function renderBody() {
     if (isLoading || isLoadingFloating) {
@@ -317,27 +313,19 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
               </span>
             </div>
             <ul className="flex flex-col gap-0.5">
-              {group.items.map((rec, i) =>
-                rec.type === 'occurrence' ? (
-                  <OccurrenceRecItem
-                    key={rec.occurrence.id}
-                    occurrence={rec.occurrence}
-                    onSchedule={() => onOccurrenceClick(rec.occurrence)}
-                  />
-                ) : (
-                  <ActivityRecItem
-                    key={rec.activity.id + i}
-                    rec={rec}
-                    date={date}
-                    onCreate={() => onActivityClick(rec.activity, { durationMinutes: rec.typicalDurationMinutes, startTime: rec.typicalStartTime })}
-                    onQuickSchedule={() => scheduleMutation.mutate(rec)}
-                    isScheduling={
-                      scheduleMutation.isPending &&
-                      scheduleMutation.variables?.activity.id === rec.activity.id
-                    }
-                  />
-                )
-              )}
+              {group.items.map((rec, i) => (
+                <ActivityRecItem
+                  key={rec.activity.id + i}
+                  rec={rec}
+                  date={date}
+                  onCreate={() => onActivityClick(rec.activity, { durationMinutes: rec.typicalDurationMinutes, startTime: rec.typicalStartTime })}
+                  onQuickSchedule={() => scheduleMutation.mutate(rec)}
+                  isScheduling={
+                    scheduleMutation.isPending &&
+                    scheduleMutation.variables?.activity.id === rec.activity.id
+                  }
+                />
+              ))}
             </ul>
           </div>
         ))}

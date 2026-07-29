@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { activitiesApi, activitySubtasksApi } from '@/lib/api'
 import type { Activity, ActivityType, Goal, Category } from '@/lib/types'
-import { ACTIVITY_TYPES, activityTypeMeta } from '@/lib/activityTypes'
+import { ACTIVITY_TYPES, activityTypeMeta, profileHint } from '@/lib/activityTypes'
+import { useActivityProfiles } from '@/lib/useActivityProfiles'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 
@@ -27,6 +28,7 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
   const [subtasks, setSubtasks] = useState(activity?.subtasks ?? [])
   const [newSubtask, setNewSubtask] = useState('')
   const newSubtaskRef = useRef<HTMLInputElement>(null)
+  const profiles = useActivityProfiles()
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -120,7 +122,9 @@ export function ActivityModal({ open, onClose, activity, goals, categories }: Ac
             )
           })}
         </div>
-        <p className="text-xs text-muted-foreground">{activityTypeMeta(type).hint}</p>
+        <p className="text-xs text-muted-foreground">
+          {profileHint(activityTypeMeta(type), profiles?.get(type))}
+        </p>
       </div>
 
       {activeGoals.length > 0 && (

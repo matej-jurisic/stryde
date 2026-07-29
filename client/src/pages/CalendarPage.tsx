@@ -1345,7 +1345,7 @@ export function CalendarPage() {
     if (!showSuggestions) return []
     return (suggestionQueries[idx]?.data ?? [])
       .flatMap((rec) =>
-        rec.type === 'activity' && rec.suggestedStartAt
+        rec.suggestedStartAt
           ? [{
               activity: rec.activity,
               startAt: rec.suggestedStartAt,

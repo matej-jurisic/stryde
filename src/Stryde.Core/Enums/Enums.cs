@@ -11,5 +11,12 @@ public enum ActivityKind { activity, @event }
 /// Distinct from <see cref="ActivityKind"/>, which is the internal activity/event split.
 /// See <see cref="Common.ActivityProfiles"/> for what each one does.
 /// </summary>
-public enum ActivityType { general, habit, eveningHabit, training, deepWork, chore, admin, recovery }
+public enum ActivityType { general, training, deepWork, work, commute }
+
+/// <summary>
+/// Where a type anchored to another type is placed relative to it. See
+/// <see cref="Common.ActivityProfile.AnchorType"/>.
+/// </summary>
+public enum Adjacency { none, before, after, brackets }
+
 public enum GoalKind { milestone, ongoing }

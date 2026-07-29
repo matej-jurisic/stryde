@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
-import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, ActivityProfile, Recommendation, Category, Activity, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -138,7 +138,8 @@ export const occurrencesApi = {
   create: (body: { activityId: string; title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null }) =>
     request<Occurrence>('/api/occurrences', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null; subtasks?: SubtaskInput[] }) =>
+  // activityId re-points the occurrence at another activity; omit it to leave the link alone.
+  update: (id: string, body: { activityId?: string; title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null; subtasks?: SubtaskInput[] }) =>
     request<Occurrence>(`/api/occurrences/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   delete: (id: string) => request<void>(`/api/occurrences/${id}`, { method: 'DELETE' }),
@@ -195,6 +196,20 @@ export const settingsApi = {
   get: () => request<UserSettings>('/api/settings'),
   update: (body: { maxFocusGoals: number; dayBoundaryTime: string; timezone: string; maxCalendarSuggestions: number }) =>
     request<UserSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
+}
+
+/** All three calls return the full resolved set, so the cache is replaced rather than patched. */
+export const activityProfilesApi = {
+  list: () => request<ActivityProfile[]>('/api/settings/activity-types'),
+  update: (
+    type: ActivityType,
+    body: { windowStart: string; windowEnd: string; minBlockMinutes: number; maxPerDay: number },
+  ) => request<ActivityProfile[]>(`/api/settings/activity-types/${type}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }),
+  reset: (type: ActivityType) =>
+    request<ActivityProfile[]>(`/api/settings/activity-types/${type}`, { method: 'DELETE' }),
 }
 
 export const categoriesApi = {

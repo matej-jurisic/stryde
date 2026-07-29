@@ -1,3 +1,4 @@
+using Stryde.Core.Dtos;
 using Stryde.Core.Entities;
 using Stryde.Core.Enums;
 
@@ -82,10 +83,9 @@ public class RecommendationServiceTests : IDisposable
 
         Assert.Equal(2, recs.Count);
         Assert.Equal(1, recs[0].Tier);
-        Assert.Equal("activity", recs[0].Type);
-        Assert.Equal(focus.Id, recs[0].Activity!.Id);
+        Assert.Equal(focus.Id, recs[0].Activity.Id);
         Assert.Equal(2, recs[1].Tier);
-        Assert.Equal(active.Id, recs[1].Activity!.Id);
+        Assert.Equal(active.Id, recs[1].Activity.Id);
     }
 
     [Fact]
@@ -101,6 +101,19 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_activity_completed_today_is_excluded()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "already done", GoalStatus.focus);
+        await CompleteAsync(userId, activity, At(7, 9), At(7, 10));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        // Doing it has to count for at least as much as merely planning it
+        Assert.Empty(recs);
+    }
+
+    [Fact]
     public async Task GetAsync_activity_scheduled_on_another_day_is_still_suggested()
     {
         var userId = await CreateUserAsync();
@@ -110,7 +123,7 @@ public class RecommendationServiceTests : IDisposable
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Single(recs);
-        Assert.Equal(activity.Id, recs[0].Activity!.Id);
+        Assert.Equal(activity.Id, recs[0].Activity.Id);
     }
 
     [Fact]
@@ -127,8 +140,7 @@ public class RecommendationServiceTests : IDisposable
 
         Assert.Single(recs);
         Assert.Equal(3, recs[0].Tier);
-        Assert.Equal("activity", recs[0].Type);
-        Assert.Equal(activity.Id, recs[0].Activity!.Id);
+        Assert.Equal(activity.Id, recs[0].Activity.Id);
     }
 
     [Fact]
@@ -205,7 +217,7 @@ public class RecommendationServiceTests : IDisposable
 
         Assert.Single(recs);
         Assert.Equal(2, recs[0].Tier);
-        Assert.Equal(activity.Id, recs[0].Activity!.Id);
+        Assert.Equal(activity.Id, recs[0].Activity.Id);
     }
 
     [Fact]
@@ -222,7 +234,7 @@ public class RecommendationServiceTests : IDisposable
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Single(recs);
-        Assert.Equal(tomorrowLocal.Id, recs[0].Activity!.Id);
+        Assert.Equal(tomorrowLocal.Id, recs[0].Activity.Id);
     }
 
     [Fact]
@@ -244,8 +256,8 @@ public class RecommendationServiceTests : IDisposable
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Equal(2, recs.Count);
-        Assert.Equal(overdue.Id, recs[0].Activity!.Id);
-        Assert.Equal(recent.Id, recs[1].Activity!.Id);
+        Assert.Equal(overdue.Id, recs[0].Activity.Id);
+        Assert.Equal(recent.Id, recs[1].Activity.Id);
     }
 
     [Fact]
@@ -266,8 +278,8 @@ public class RecommendationServiceTests : IDisposable
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Equal(2, recs.Count);
-        Assert.Equal(evening.Id, recs[0].Activity!.Id);
-        Assert.Equal(morning.Id, recs[1].Activity!.Id);
+        Assert.Equal(evening.Id, recs[0].Activity.Id);
+        Assert.Equal(morning.Id, recs[1].Activity.Id);
     }
 
     [Fact]
@@ -282,7 +294,7 @@ public class RecommendationServiceTests : IDisposable
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 1), Now);
 
         Assert.Single(recs);
-        Assert.Equal(activity.Id, recs[0].Activity!.Id);
+        Assert.Equal(activity.Id, recs[0].Activity.Id);
     }
 
     [Fact]
@@ -297,7 +309,7 @@ public class RecommendationServiceTests : IDisposable
 
         var open = await _ctx.RecommendationService.GetAsync(userId, tomorrow, Now);
         Assert.Single(open);
-        Assert.Equal(activity.Id, open[0].Activity!.Id);
+        Assert.Equal(activity.Id, open[0].Activity.Id);
 
         // Block tomorrow 00:30-23:30: only two 30-min gaps remain, the 60-min activity no longer fits.
         // The old from-now slot math would have counted the span between now and the block as free.
@@ -389,10 +401,11 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_suggested_start_falls_back_to_next_quarter_of_the_first_gap()
     {
         var userId = await CreateUserAsync();
-        // Habitual time is 09:00, already behind us at 12:07 — the slot itself is the fallback
-        var activity = await AddActivityAsync(userId, "morning task", GoalStatus.active);
-        await CompleteAsync(userId, activity, At(2, 9), At(2, 10));
-        await CompleteAsync(userId, activity, At(4, 9), At(4, 10));
+        // Habitual time is 12:00, a few minutes behind us at 12:07 — well inside the drift bound,
+        // so the fallback is the slot itself, rounded up to the next quarter
+        var activity = await AddActivityAsync(userId, "midday task", GoalStatus.active);
+        await CompleteAsync(userId, activity, At(2, 12), At(2, 13));
+        await CompleteAsync(userId, activity, At(4, 12), At(4, 13));
 
         var now = new DateTimeOffset(2026, 7, 7, 12, 7, 0, TimeSpan.Zero);
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, now);
@@ -402,12 +415,32 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_no_suggested_start_when_every_opening_is_far_from_the_habitual_time()
+    {
+        var userId = await CreateUserAsync();
+        // Habitual time is 09:00 and the day is only asked about at 19:00. Every remaining opening is
+        // hours away from when this is actually done, so the engine offers no time rather than one
+        // the user would never pick. The recommendation itself still stands.
+        var activity = await AddActivityAsync(userId, "morning commute", GoalStatus.active);
+        await CompleteAsync(userId, activity, At(2, 9), At(2, 9, 30));
+        await CompleteAsync(userId, activity, At(4, 9), At(4, 9, 30));
+
+        var evening = new DateTimeOffset(2026, 7, 7, 19, 0, 0, TimeSpan.Zero);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, evening);
+
+        Assert.Single(recs);
+        Assert.Equal(activity.Id, recs[0].Activity.Id);
+        Assert.Null(recs[0].SuggestedStartAt);
+    }
+
+    [Fact]
     public async Task GetAsync_suggested_start_skips_a_gap_too_short_for_the_activity()
     {
         var userId = await CreateUserAsync();
+        // Habitual 14:00, so 15:00 is a one hour displacement - inside the drift bound
         var activity = await AddActivityAsync(userId, "two hour block", GoalStatus.active);
-        await CompleteAsync(userId, activity, At(2, 9), At(2, 11));
-        await CompleteAsync(userId, activity, At(4, 9), At(4, 11));
+        await CompleteAsync(userId, activity, At(2, 14), At(2, 16));
+        await CompleteAsync(userId, activity, At(4, 14), At(4, 16));
 
         // Busy 12:00-13:00 and 14:00-15:00, leaving a 1h gap at 13:00 that cannot hold 2h
         var blocker = await AddActivityAsync(userId, "blocker");
@@ -445,7 +478,7 @@ public class RecommendationServiceTests : IDisposable
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
-        var rec = recs.Single(r => r.Activity!.Id == activity.Id);
+        var rec = recs.Single(r => r.Activity.Id == activity.Id);
         Assert.Null(rec.TypicalDurationMinutes);
         Assert.Equal(At(7, 14), rec.SuggestedStartAt);
     }
@@ -461,7 +494,7 @@ public class RecommendationServiceTests : IDisposable
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
-        var rec = recs.Single(r => r.Activity!.Id == activity.Id);
+        var rec = recs.Single(r => r.Activity.Id == activity.Id);
         Assert.Equal(At(7, 13), rec.SuggestedStartAt);
     }
 
@@ -476,7 +509,7 @@ public class RecommendationServiceTests : IDisposable
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
-        var rec = recs.Single(r => r.Activity!.Id == activity.Id);
+        var rec = recs.Single(r => r.Activity.Id == activity.Id);
         Assert.Equal(At(7, 12), rec.SuggestedStartAt);
     }
 
@@ -581,14 +614,14 @@ public class RecommendationServiceTests : IDisposable
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
 
         var rec = Assert.Single(recs);
-        Assert.Equal(normal.Id, rec.Activity!.Id);
+        Assert.Equal(normal.Id, rec.Activity.Id);
     }
 
     [Fact]
     public async Task GetAsync_unanchored_activity_is_placed_inside_its_type_window()
     {
         var userId = await CreateUserAsync();
-        await AddActivityAsync(userId, "inbox zero", GoalStatus.focus, ActivityType.admin);
+        await AddActivityAsync(userId, "leg day", GoalStatus.focus, ActivityType.training);
 
         // Future day, entirely free: without a type this would land at the 08:00 default
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
@@ -601,13 +634,13 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_habitual_time_beats_the_type_window()
     {
         var userId = await CreateUserAsync();
-        var a = await AddActivityAsync(userId, "morning admin", GoalStatus.focus, ActivityType.admin);
+        var a = await AddActivityAsync(userId, "morning run", GoalStatus.focus, ActivityType.training);
         await CompleteAsync(userId, a, At(2, 7), At(2, 8));
         await CompleteAsync(userId, a, At(4, 7), At(4, 8));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
-        // 07:00 is outside the admin window, but observed behaviour wins over a declared preference
+        // 07:00 is outside the training window, but observed behaviour wins over a declared preference
         var rec = Assert.Single(recs);
         Assert.Equal(At(9, 7), rec.SuggestedStartAt);
     }
@@ -617,45 +650,31 @@ public class RecommendationServiceTests : IDisposable
     {
         var userId = await CreateUserAsync();
         // Same goal status, same age, no history: only the cadence prior separates them
-        var chore = await AddActivityAsync(userId, "chore", GoalStatus.focus, ActivityType.chore, At(1, 0));
-        var habit = await AddActivityAsync(userId, "habit", GoalStatus.focus, ActivityType.habit, At(1, 0));
+        var general = await AddActivityAsync(userId, "anything", GoalStatus.focus, ActivityType.general, At(1, 0));
+        var training = await AddActivityAsync(userId, "push day", GoalStatus.focus, ActivityType.training, At(1, 0));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         Assert.Equal(2, recs.Count);
-        Assert.Equal(habit.Id, recs[0].Activity!.Id);
-        Assert.Equal(chore.Id, recs[1].Activity!.Id);
+        Assert.Equal(training.Id, recs[0].Activity.Id);
+        Assert.Equal(general.Id, recs[1].Activity.Id);
     }
 
     [Fact]
     public async Task GetAsync_cold_start_score_does_not_run_away_with_age()
     {
         var userId = await CreateUserAsync();
-        // Created 300 days ago and never done: uncapped, 300/1 would bury a genuinely overdue habit
-        await AddActivityAsync(userId, "ancient", GoalStatus.focus, ActivityType.habit, At(1, 0).AddDays(-300));
-        var real = await AddActivityAsync(userId, "real rhythm", GoalStatus.focus, ActivityType.habit);
+        // Created 300 days ago and never done: uncapped, 300/7 would bury a genuinely overdue activity
+        await AddActivityAsync(userId, "ancient", GoalStatus.focus, ActivityType.general, At(1, 0).AddDays(-300));
+        var real = await AddActivityAsync(userId, "real rhythm", GoalStatus.focus, ActivityType.general);
         await CompleteAsync(userId, real, At(1, 9), At(1, 10));
         await CompleteAsync(userId, real, At(2, 9), At(2, 10));
 
-        // Targets a future day so the 09:00 habit slot is still free and takes no mismatch penalty
+        // Targets a future day so the 09:00 habitual slot is still free and takes no mismatch penalty
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
         // 7 days since last against a 1 day median gap beats the cold-start ceiling of 3
-        Assert.Equal(real.Id, recs[0].Activity!.Id);
-    }
-
-    [Fact]
-    public async Task GetAsync_evening_habit_is_placed_after_the_morning_window()
-    {
-        var userId = await CreateUserAsync();
-        var morning = await AddActivityAsync(userId, "stretch", GoalStatus.focus, ActivityType.habit);
-        var evening = await AddActivityAsync(userId, "read", GoalStatus.focus, ActivityType.eveningHabit);
-
-        // Future day, entirely free: the two share a cadence prior, so only the window separates them
-        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
-
-        Assert.Equal(At(9, 6), recs.Single(r => r.Activity!.Id == morning.Id).SuggestedStartAt);
-        Assert.Equal(At(9, 18), recs.Single(r => r.Activity!.Id == evening.Id).SuggestedStartAt);
+        Assert.Equal(real.Id, recs[0].Activity.Id);
     }
 
     [Fact]
@@ -692,7 +711,7 @@ public class RecommendationServiceTests : IDisposable
 
         // Both fit the day and the cap is 2, so only the cooldown separates them
         var rec = Assert.Single(recs);
-        Assert.Equal(push.Id, rec.Activity!.Id);
+        Assert.Equal(push.Id, rec.Activity.Id);
     }
 
     [Fact]
@@ -706,7 +725,7 @@ public class RecommendationServiceTests : IDisposable
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
         var rec = Assert.Single(recs);
-        Assert.Equal(fresh.Id, rec.Activity!.Id);
+        Assert.Equal(fresh.Id, rec.Activity.Id);
     }
 
     [Fact]
@@ -735,7 +754,7 @@ public class RecommendationServiceTests : IDisposable
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
 
         var rec = Assert.Single(recs);
-        Assert.Equal(normal.Id, rec.Activity!.Id);
+        Assert.Equal(normal.Id, rec.Activity.Id);
     }
 
     [Fact]
@@ -766,5 +785,175 @@ public class RecommendationServiceTests : IDisposable
 
         // The day already holds two deep work blocks, so a third is not offered even though it fits
         Assert.Empty(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_type_cap_counts_activities_already_completed_that_day()
+    {
+        var userId = await CreateUserAsync();
+        for (var i = 0; i < 2; i++)
+        {
+            var finished = await AddActivityAsync(userId, $"finished deep {i}", GoalStatus.focus, ActivityType.deepWork);
+            await CompleteAsync(userId, finished, At(7, 8 + i * 2), At(7, 9 + i * 2));
+        }
+        await AddActivityAsync(userId, "one more", GoalStatus.focus, ActivityType.deepWork);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        // Two deep work blocks are done for the day. Completing them must not reset the cap and
+        // invite a third, which is what counting only pending occurrences used to do.
+        Assert.Empty(recs);
+    }
+
+    // --- User overrides of a type's profile ---
+
+    [Fact]
+    public async Task GetAsync_placement_follows_an_overridden_window()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "leg day", GoalStatus.focus, ActivityType.training);
+        // training defaults to 15:00-21:00
+        await _ctx.ActivityProfileService.UpdateAsync(
+            userId, ActivityType.training, new UpdateActivityProfileRequest("10:00", "12:00", 0, 0));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Equal(At(9, 10), Assert.Single(recs).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_type_cap_follows_an_overridden_max_per_day()
+    {
+        var userId = await CreateUserAsync();
+        for (var i = 0; i < 3; i++)
+            await AddActivityAsync(userId, $"deep {i}", GoalStatus.focus, ActivityType.deepWork);
+        // deepWork defaults to a cap of 2
+        await _ctx.ActivityProfileService.UpdateAsync(
+            userId, ActivityType.deepWork, new UpdateActivityProfileRequest("09:00", "17:00", 90, 1));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Single(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_slot_fit_follows_an_overridden_block_floor()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "deep work", GoalStatus.focus, ActivityType.deepWork);
+        // Dropped from 90 to 30, so the last hour of the day now fits it
+        await _ctx.ActivityProfileService.UpdateAsync(
+            userId, ActivityType.deepWork, new UpdateActivityProfileRequest("09:00", "17:00", 30, 2));
+
+        var lateNow = new DateTimeOffset(2026, 7, 7, 23, 0, 0, TimeSpan.Zero);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
+
+        Assert.Single(recs);
+    }
+
+    // --- Anchored types ---
+
+    /// <summary>An on-site work occurrence for a commute to attach to.</summary>
+    private async Task AddWorkDayAsync(Guid userId, DateTimeOffset start, DateTimeOffset end)
+    {
+        var work = await AddActivityAsync(userId, "office day", null, ActivityType.work);
+        await AddOccurrenceAsync(userId, work, startAt: start, endAt: end);
+    }
+
+    private async Task<Activity> AddCommuteAsync(Guid userId, string title, int hour, int minute, int durationMinutes)
+    {
+        var a = await AddActivityAsync(userId, title, GoalStatus.focus, ActivityType.commute);
+        foreach (var day in new[] { 2, 6 })
+        {
+            var start = At(day, hour, minute);
+            await CompleteAsync(userId, a, start, start.AddMinutes(durationMinutes));
+        }
+        return a;
+    }
+
+    [Fact]
+    public async Task GetAsync_anchored_activity_is_not_suggested_without_its_anchor_on_the_day()
+    {
+        var userId = await CreateUserAsync();
+        // Overdue by its own reckoning, and on a focus goal - but nobody is going in that day, so
+        // there is nothing for it to be a commute to.
+        await AddCommuteAsync(userId, "commute home", 17, 30, 30);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Empty(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_anchored_legs_take_the_side_nearest_their_own_habitual_time()
+    {
+        var userId = await CreateUserAsync();
+        await AddWorkDayAsync(userId, At(9, 9, 30), At(9, 17));
+        var outbound = await AddCommuteAsync(userId, "commute in", 8, 0, 60);
+        var back = await AddCommuteAsync(userId, "commute home", 17, 30, 60);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Equal(2, recs.Count);
+        Assert.Equal(At(9, 8, 30), recs.Single(r => r.Activity.Id == outbound.Id).SuggestedStartAt);
+        Assert.Equal(At(9, 17), recs.Single(r => r.Activity.Id == back.Id).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_anchored_placement_follows_the_anchor_rather_than_its_own_history()
+    {
+        var userId = await CreateUserAsync();
+        // Habitually a 09:00 commute, but this is an 08:00 start, so it has to leave at 07:30.
+        // Averaging its own completions is exactly what produced "work at 08:00, commute at 09:00".
+        await AddWorkDayAsync(userId, At(9, 8), At(9, 16));
+        await AddCommuteAsync(userId, "commute in", 9, 0, 30);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Equal(At(9, 7, 30), Assert.Single(recs).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_anchored_activity_brackets_a_split_anchor_day_as_one_span()
+    {
+        var userId = await CreateUserAsync();
+        // Two blocks with an hour between them. The gap is free, and it is the wrong answer: a
+        // commute belongs outside the working day, not down the middle of it.
+        await AddWorkDayAsync(userId, At(9, 9), At(9, 12));
+        await AddWorkDayAsync(userId, At(9, 13), At(9, 17));
+        await AddCommuteAsync(userId, "commute home", 17, 30, 30);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Equal(At(9, 17), Assert.Single(recs).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_anchored_activity_has_no_suggested_start_when_neither_side_is_free()
+    {
+        var userId = await CreateUserAsync();
+        // Asked about at 19:00, after both sides of the working day have gone by. The engine used to
+        // answer 19:00 here, which is the same activity in name only.
+        await AddWorkDayAsync(userId, At(7, 9, 30), At(7, 17));
+        await AddCommuteAsync(userId, "commute home", 17, 30, 30);
+
+        var evening = new DateTimeOffset(2026, 7, 7, 19, 0, 0, TimeSpan.Zero);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, evening);
+
+        Assert.Null(Assert.Single(recs).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_unanchored_suggestion_is_never_placed_past_its_window_end()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "leg day", GoalStatus.focus, ActivityType.training);
+
+        // 21:30, past the 21:00 end of the training window. There is room left in the day and the
+        // fallback used to take it, which is how a workout ghost landed at 22:45.
+        var lateNow = new DateTimeOffset(2026, 7, 7, 21, 30, 0, TimeSpan.Zero);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
+
+        Assert.Null(Assert.Single(recs).SuggestedStartAt);
     }
 }

@@ -6,7 +6,7 @@ using Stryde.Core.Entities;
 
 namespace Stryde.Core.Services;
 
-public class ExportService(StrydeDbContext db)
+public class ExportService(StrydeDbContext db, ActivityProfileService profiles)
 {
     public async Task<Result<ExportDto>> GetAsync(Guid userId)
     {
@@ -34,6 +34,9 @@ public class ExportService(StrydeDbContext db)
             DateTimeOffset.UtcNow,
             UserDto.FromEntity(user),
             UserSettingsDto.FromEntity(settings, user.Timezone),
+            // Resolved rather than raw overrides: an export should say what the engine was doing,
+            // not require the defaults table to interpret it.
+            await profiles.GetDtosAsync(userId),
             categories.OrderBy(c => c.CreatedAt).Select(CategoryDto.FromEntity).ToList(),
             goals.OrderBy(g => g.CreatedAt).Select(g => GoalDto.FromEntity(g)).ToList(),
             activities.OrderBy(a => a.CreatedAt).Select(ActivityDto.FromEntity).ToList(),

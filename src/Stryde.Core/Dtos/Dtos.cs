@@ -141,6 +141,11 @@ public sealed record CreateOccurrenceRequest(
     DateTimeOffset? WindowEnd,
     int? WindowDurationMinutes);
 
+/// <param name="ActivityId">
+/// Re-points the occurrence at a different activity. Null leaves it where it is, so a caller that
+/// does not care about the link can omit the field entirely. Only valid between activity-kind
+/// activities: an event's activity is a backing row owned 1:1 by the occurrence, not a choice.
+/// </param>
 public sealed record UpdateOccurrenceRequest(
     string? Title,
     DateTimeOffset? StartAt,
@@ -148,7 +153,8 @@ public sealed record UpdateOccurrenceRequest(
     bool IsAllDay,
     bool IsPlanned,
     int? DurationMinutes,
-    List<OccurrenceSubtaskInput>? Subtasks = null);
+    List<OccurrenceSubtaskInput>? Subtasks = null,
+    Guid? ActivityId = null);
 
 public sealed record SetOccurrenceStatusRequest(EventStatus Status);
 
@@ -207,15 +213,14 @@ public sealed record CategoryDto(Guid Id, Guid UserId, string Name, string Color
 public sealed record CreateCategoryRequest(string Name, string Color, string? Icon);
 public sealed record UpdateCategoryRequest(string Name, string Color, string? Icon);
 
-// Recommendations — "activity" for all tiers; timing fields null when no history exists.
+// Recommendations — always an activity to schedule; timing fields null when no history exists.
 // DaysSinceLast/MedianGapDays/PatternCount are the raw "why" signals; the client composes the
 // user-facing reason text from them. SuggestedStartAt is the best free slot on the target day,
-// null when nothing fits (or the day is in the past, where slots are not computed).
+// null when nothing fits, when the day is in the past (slots are not computed), or when the
+// activity's habitual time is taken and every opening is too far from it.
 public sealed record RecommendationDto(
     int Tier,
-    string Type,
-    OccurrenceDto? Occurrence,
-    ActivityDto? Activity,
+    ActivityDto Activity,
     int? TypicalDurationMinutes,
     string? TypicalStartTime,
     int? DaysSinceLast,
@@ -277,6 +282,7 @@ public sealed record ExportDto(
     DateTimeOffset ExportedAt,
     UserDto User,
     UserSettingsDto Settings,
+    List<ActivityProfileDto> ActivityProfiles,
     List<CategoryDto> Categories,
     List<GoalDto> Goals,
     List<ActivityDto> Activities,
@@ -292,3 +298,42 @@ public sealed record UserSettingsDto(
 
 public sealed record UpdateUserSettingsRequest(
     int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions);
+
+// Activity type profiles
+/// <summary>
+/// One type's *resolved* profile: built-in defaults with the user's overrides applied.
+/// <para>
+/// The first four fields are editable. <paramref name="CadencePriorDays"/>,
+/// <paramref name="MinDueFraction"/>, <paramref name="AnchorType"/> and <paramref name="Adjacency"/>
+/// are read-only, carried so the client can describe what the type actually does without hardcoding
+/// values that would drift out of date. <paramref name="IsCustomised"/> says whether any field
+/// differs from the built-in default, which is what a Reset control keys off.
+/// </para>
+/// </summary>
+public sealed record ActivityProfileDto(
+    string Type,
+    string WindowStart,
+    string WindowEnd,
+    int MinBlockMinutes,
+    int MaxPerDay,
+    double CadencePriorDays,
+    double MinDueFraction,
+    string? AnchorType,
+    string Adjacency,
+    bool IsCustomised)
+{
+    public static ActivityProfileDto From(ActivityType type, ActivityProfile p, bool isCustomised) => new(
+        type.ToString(),
+        p.WindowStart.ToString("HH:mm"),
+        p.WindowEnd.ToString("HH:mm"),
+        p.MinBlockMinutes,
+        p.MaxPerDay,
+        p.CadencePriorDays,
+        p.MinDueFraction,
+        p.AnchorType?.ToString(),
+        p.Adjacency.ToString(),
+        isCustomised);
+}
+
+public sealed record UpdateActivityProfileRequest(
+    string WindowStart, string WindowEnd, int MinBlockMinutes, int MaxPerDay);

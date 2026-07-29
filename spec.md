@@ -69,23 +69,27 @@ only user-supplied input to suggestion behaviour beyond the mute switch, and exi
 the engine something to work with before an activity has any completed history — until then every
 signal it uses (cadence, habitual time, typical duration) is empty.
 
-Presets only: a type is a fixed bundle of five engine settings, not individually editable knobs.
+A type is a preset: a bundle of engine settings, four of which the user can retune per type
+(see **Editing a type** below). The table gives the built-in defaults.
 
-| Type | UI label | Window | Min block | Cadence prior | Max/day | Cooldown |
-|---|---|---|---|---|---|---|
-| `general` | General | 08:00-21:00 | - | 7d | - | - |
-| `habit` | Morning habit | 06:00-12:00 | - | 1d | - | - |
-| `eveningHabit` | Evening habit | 18:00-22:00 | - | 1d | - | - |
-| `training` | Training | 15:00-21:00 | 45 min | 2.5d | 2 | 0.5 |
-| `deepWork` | Deep work | 09:00-17:00 | 90 min | 3d | 2 | - |
-| `chore` | Chore | 08:00-21:00 | - | 7d | - | - |
-| `admin` | Admin | 15:00-21:00 | - | 7d | - | - |
-| `recovery` | Recovery | 12:00-22:00 | - | 2d | 2 | - |
+| Type | UI label | Window | Min block | Cadence prior | Max/day | Cooldown | Anchor |
+|---|---|---|---|---|---|---|---|
+| `general` | General | 08:00-21:00 | - | 7d | - | - | - |
+| `training` | Training | 15:00-21:00 | 45 min | 2.5d | 2 | 0.5 | - |
+| `deepWork` | Deep work | 09:00-17:00 | 90 min | 3d | 2 | - | - |
+| `work` | Work | 08:00-18:00 | - | 1d | 1 | - | - |
+| `commute` | Commute | 06:00-20:00 | - | 1d | 2 | - | brackets `work` |
 
-- **Window** — where an *unanchored* suggestion is placed. A preference, not a constraint: when the
-  window has no room the suggestion falls back to the first opening after 08:00, as before. An
-  activity with a habitual start time from history ignores its window entirely, because observed
-  behaviour beats a declared preference.
+- **Window** — where a suggestion with no habitual time of its own is placed. The start is a preference: when the window
+  has no room the suggestion falls back to an opening *earlier* than the window rather than going
+  unplaced. The end is not. Nothing is ever placed past the window end, because that is the point
+  where a suggestion of the type stops being plausible - without the bound, a day booked solid until
+  20:00 got its workout ghost at 22:45. An activity that cannot be placed before the window end gets
+  no slot and appears in the panel without a time. An activity with a habitual start time from
+  history ignores its window entirely, because observed behaviour beats a declared preference.
+- **Anchor** — the type this one attaches to. An anchored activity is **only suggested on a day that
+  already holds an occurrence of the anchor type**, and it takes its time from that occurrence's span
+  rather than from its own history. See **Anchored types** below.
 - **Min block** — contiguous free time the activity needs regardless of its median duration. This is
   the only setting that can make an activity ineligible: without it a `deepWork` or `training`
   activity with no history is sized at the 30-minute default and would be offered a 30-minute crack.
@@ -107,17 +111,76 @@ first `training` activity suggested spends the allowance for all of them. **Cool
 activity.** That is why `training` caps at 2 rather than 1: spacing is the cooldown's job, and a cap
 of 1 would stop a run and a lift ever being suggested on the same day even when both are due.
 
-`habit` and `eveningHabit` are one cadence with two windows rather than one type with a wide window:
-placement takes the *first* opening inside the window, so a 06:00-22:00 habit would still land at
-dawn. `training` sits between them and `chore` on cadence, because a training split repeats every
-few days and neither a 1-day nor a 7-day prior describes that.
+The list is deliberately short. A type earns its place by having values the engine acts on
+differently, not by naming a category of activity: `training` and `deepWork` both carry a block floor
+and a cap that change what gets suggested, while `general` is the unconstrained default everything
+else falls into. Grouping and labelling are what categories and goals are for.
 
-Deliberately out of this slice: per-type energy spacing, and surfacing `recovery` more heavily on
-dense days. `recovery` currently differs from the other types only in its window, prior, and cap.
-Its `Max/day` is per *type*, so unrelated leisure activities filed under it compete for the same two
-daily slots. Also absent: any notion of an activity that needs another person (a coffee or a dinner
-is not unilaterally schedulable, so no slot the engine picks is actionable) — mute is the answer for
-now.
+#### Anchored types
+
+Some activities are not habits with a rhythm of their own - they are consequences of something else
+happening. A commute is the worked example: it has no cadence, it exists because you went in, and it
+happens at whatever time the working day happens to start. Ranking it by overdueness and placing it
+at the average of its own completions produces exactly the two failures it was built to fix: a
+commute offered at 19:00 on a day nobody went in, and a commute at 09:00 on a day work starts at
+08:00.
+
+An anchored type declares two things: the type it attaches to, and where it sits relative to it.
+
+- **The gate.** An anchored activity is dropped from every tier on a day that holds no occurrence of
+  the anchor type. This is the only filter keyed off the day's *contents* rather than the activity's
+  own history, and the only one that can silence an activity that is genuinely due.
+- **The placement.** It is put flush against the anchor's span on that day - `before` ends where the
+  anchor starts, `after` starts where it ends, `brackets` offers both sides. This is what lets it
+  follow a work day starting at 08:00 on Monday and 09:30 on Tuesday. Where both sides are open, the
+  activity takes the one nearer its own habitual time, which is what sends the outbound leg of a
+  commute to the morning side and the return leg to the evening one, out of nothing but their
+  histories. When neither side is free the activity gets **no slot** and surfaces without a time.
+- **The span is the whole day's worth of the anchor type**, earliest start to latest end. A day split
+  into two work blocks brackets as one: a commute belongs outside the working day, not in the gap
+  down the middle of it.
+- The anchored type's **window and block floor are not consulted** while an anchor is present. They
+  are left at vacuous values, and the settings UI hides the window inputs for such a type rather than
+  offering a control that does nothing.
+
+Two modelling consequences, both deliberate:
+
+- **Model each direction as its own activity** ("Commute in", "Commute home"). One activity emitting
+  two suggestions would break the dedupe set, the per-activity cooldown and the already-scheduled
+  exclusion, all of which assume one suggestion per activity. Separate legs also give each a habitual
+  time that means something: a single commute activity has a *bimodal* start-time history, and the
+  engine's modal start time collapses that to whichever of the two happens to be more frequent.
+- **Model a day worked from home as a different activity of a different type** (`general` or
+  `deepWork`, not `work`). The gate cannot otherwise tell the two apart, and would offer a commute on
+  a day spent at the desk at home.
+
+What this does **not** express is pairing: "never offer the return leg unless the outbound one
+happened". Direction is a fact about an instance rather than a class, so encoding it here would mean
+splitting `commute` into two enum values. Per-activity anchors are the right tool for that, and can
+be layered on later without discarding any of the above.
+
+#### Editing a type
+
+The **Window**, **Min block** and **Max/day** columns are editable per type on the Settings page,
+under Activity types. **Cadence prior** and **Cooldown** are not: both are measured against an
+activity's own completion history rather than the clock, so a number typed into a form has no
+predictable effect. **Anchor** is not either: it is part of what the type *is* rather than a value to
+tune, and an anchored type hides its window inputs entirely since nothing reads them. All three are
+described in the UI, not exposed.
+
+Overrides are stored sparsely - a row exists only for a type the user has edited, and only the
+fields that actually differ from the default are written. Retuning a built-in default therefore
+still reaches every knob nobody has touched. Resetting a type deletes its row. Editing a type
+changes suggestions everywhere at once: the values are resolved per request, and the hint copy shown
+under the type picker is generated from the resolved profile rather than written by hand.
+
+Validation: the window must start before it ends (placement walks candidate starts forward, so a
+window wrapping past midnight would match nothing), Min block is 0-480 minutes, and Max/day is 0-24
+(0 = unlimited on both).
+
+Deliberately out of this slice: per-type energy spacing, and any notion of an activity that needs
+another person (a coffee or a dinner is not unilaterally schedulable, so no slot the engine picks is
+actionable) - mute is the answer for now.
 
 **Occurrence** — a scheduled (or floating) instance of an Activity.
 
@@ -177,6 +240,17 @@ When marking an occurrence skipped, the user may optionally reschedule it: a mod
 ### Creation
 
 Occurrences are created via a modal. Creating an occurrence requires selecting an Activity (or quick-creating one inline).
+
+### Re-pointing
+
+An occurrence's Activity can be changed after creation, from the same picker used to create it. `activityId` on the update request is optional: omitting it leaves the link alone, so a caller that only wants to move a time never has to resend it. The picker is only offered on edit; quick-creating an activity inline stays a creation-time affordance.
+
+The link is only mutable between **activity-kind** activities, and the rule is enforced on both ends:
+
+- An **event** occurrence cannot be moved onto an activity. An event's Activity is a backing row it owns 1:1 - deleting the occurrence deletes it, and editing the event's title edits it in place - so re-pointing would orphan that row. Events have no activity picker in the UI at all; they have a Title field.
+- No occurrence can be moved **onto** an event's backing activity, and none can be created on one either. That would give the backing row two occurrences, and deleting either would cascade both away. The activity list endpoint already filters to activity-kind, so the picker cannot offer one; the guard is for direct API use.
+
+The main use is correcting history in bulk after splitting one activity into several, which is exactly what modelling a commute as two directional legs requires - the engine derives a habitual start time per activity, so a leg with no history of its own cannot pick a side.
 
 ---
 
@@ -277,11 +351,11 @@ Recommendations are ranked — all tiers surface **activities** (not occurrences
 2. Activities linked to Active goals
 3. Activities with a day-of-week pattern matching today (>=2 completions on this weekday in the past 6 weeks), where no instance is already on today's schedule — sorted by frequency descending
 
-Activities already scheduled today are excluded from all tiers. Activities linked to Bench or Closed goals never appear. Activities flagged "exclude from suggestions" never appear. An activity appears at most once.
+Activities already **scheduled or completed** today are excluded from all tiers - doing something counts for at least as much as planning it. A skipped occurrence does not exclude, matching how skipped time is freed back up for placement. Activities linked to Bench or Closed goals never appear. Activities flagged "exclude from suggestions" never appear. Activities whose type declares an **anchor** never appear on a day holding no occurrence of the anchor type (see Anchored types). An activity appears at most once.
 
 **Ranking within tiers:** Tiers 1 and 2 rank by overdueness relative to the activity's own rhythm: days since last completion divided by the median gap between completion days. An activity completed today scores ~0 and sinks (natural cooldown); one past its usual gap floats up. A single completion has no derivable gap, so the activity type's cadence prior stands in. An activity with **no completions at all** is measured from its creation date instead, against the same prior - one added today has not had a chance to be due yet, one added three weeks ago with a daily cadence plainly has - and that score is clamped to 3.0, since none of it is actual evidence and an ancient untouched activity would otherwise outrank everything with a real rhythm. An activity whose typical start time falls inside already-occupied or past time is downranked (score halved). Tier 3 keeps its frequency-descending sort.
 
-**Type caps:** Types with a `Max/day` (see Activity Types) stop being suggested once the day holds that many, counting occurrences already scheduled for the day alongside suggestions already emitted. The cap is applied in rank order and before placement, so a capped-out activity does not consume a slot on its way to being dropped.
+**Type caps:** Types with a `Max/day` (see Activity Types) stop being suggested once the day holds that many, counting occurrences already scheduled **or completed** for the day alongside suggestions already emitted. Completing the day's two deep work blocks must not reset the cap and invite a third. The cap is applied in rank order and before placement, so a capped-out activity does not consume a slot on its way to being dropped.
 
 **Timing hints:** Each recommendation is enriched with the activity's median duration and most common start time (rounded to 15 min, in user's timezone) from completed history in the **last 90 days** - older habits age out of both timing hints and cadence. When the user schedules from a suggestion, these values pre-fill the modal (start time + computed end time if both are available).
 
@@ -296,13 +370,15 @@ Gaps are carved out by occurrences that hold a real span (both a start and an en
 
 **Reason signals:** Each recommendation carries the raw signals behind it - `daysSinceLast` (relative to the target day), `medianGapDays`, and `patternCount` (tier 3 weekday matches). The server ships numbers only; the panel composes the user-facing sentence ("6d since last, usually every 2d" / "Usually on Tuesdays, 3x lately"). An activity with no completion history carries no signals and shows no reason line.
 
-**Suggested slot:** Each recommendation carries `suggestedStartAt`, its placement on the target day. An activity with no completion history has no median duration and is placed as if it needed 30 minutes, matching the span the calendar draws for it. It is null on past days (no slots are computed) and when nothing fits.
+**Suggested slot:** Each recommendation carries `suggestedStartAt`, its placement on the target day. An activity with no completion history has no median duration and is placed as if it needed 30 minutes, matching the span the calendar draws for it. It is null on past days (no slots are computed), when nothing fits, when an activity with a habitual time is displaced too far from it, and when an anchored type has neither side of its anchor free (see below).
 
 Placement is **stateful and runs in rank order**, so the highest-ranked activity picks first and each suggestion consumes the room it takes. Without this every suggestion answers the same question against the same empty day and they all land on the first gap that fits.
 
 - **At most two suggestions may cover the same instant.** Two ghosts side by side read as "pick one", which is useful; more than that is unreadable. An activity that cannot be placed within this limit gets a null slot and appears in the panel without a time.
-- **Anchored activities** (those with a habitual start time) take it when it still fits, ignoring their type's window. When it doesn't, they take the free opening *nearest* to the habit, so a displaced suggestion stays next to its usual time rather than jumping to the start of the day. Ties break toward the earlier slot.
-- **Unanchored activities** (no history, or no habitual time) take the first opening inside their type's preferred window. When the window has no room, they fall back to the first opening at or after 08:00 local - the day boundary is usually the small hours, and a suggestion at 04:00 is noise.
+- **Activities of an anchored type** are placed flush against the anchor's span on that day, before every other rule and regardless of what their own history says. See **Anchored types** above. Neither side free means a null slot.
+- **Habit-anchored activities** (those with a habitual start time) take it when it still fits, ignoring their type's window. When it doesn't, they take the free opening *nearest* to the habit, so a displaced suggestion stays next to its usual time rather than jumping to the start of the day. Ties break toward the earlier slot.
+- **Displacement is bounded to 2 hours.** Past that the activity gets a null slot and appears in the panel without a time. An 08:00 gym session offered at 19:00 is the same activity in name only, and the drift is unbounded in the worst case: every opening left in the day can be hours from the habit. Note this bounds the *slot*, not the recommendation - an occupied habitual time is already a downrank (score halved), not a disqualification, and that stands.
+- **Unhabituated activities** (no history, or no habitual time) take the first opening inside their type's preferred window. When the window has no room they fall back to the first opening at or after 08:00 local - the day boundary is usually the small hours, and a suggestion at 04:00 is noise - but **never past the window end**. A day with room left only after the window closes yields a null slot rather than a ghost at an hour nobody would take.
 
 Candidate positions are on the quarter hour. When present, the panel offers one-click scheduling at that time, creating the occurrence directly with `endAt` derived from the median duration. The modal path remains available for anything needing adjustment.
 
@@ -324,7 +400,7 @@ Only these views are in scope for v1:
 | Goals | Goal list with progress insight per goal. Checkpoint management. |
 | Activities | Manage activity definitions: create, edit, delete. Title search, an All / Suggested / Muted filter, and a Goal / Type / Category grouping toggle. Rows carry the activity's type (hidden when `general`), category, goal, and subtask count; muting stays a one-tap bulb, edit and delete live in the row's action menu. |
 | Insights | Completion stats: headline counts, streak, 14-day chart, category breakdown. |
-| Settings | Timezone, day boundary, max Focus goals, appearance, JSON data export, sign out. |
+| Settings | Timezone, day boundary, max Focus goals, activity type tuning, appearance, JSON data export, sign out. |
 
 Additional views (Cockpit, Lab) are deferred — defined during development if needed.
 
@@ -356,6 +432,7 @@ Read-only stats over **done occurrences**, computed server-side (`GET /api/insig
 | Day boundary | Time at which the day rolls over. |
 | Timezone | Set automatically on registration from browser locale. Editable on the Settings page. |
 | Calendar suggestions | How many suggestion ghosts the calendar draws per day (1-12, default 6). |
+| Activity types | Per-type window, minimum block, and max/day. See Activity Types. Each type shows its resolved values, is flagged when customised, and can be reset to the built-in default. |
 | Theme | Light / dark / system. Client-side preference (localStorage), defaults to system. |
 
 ---

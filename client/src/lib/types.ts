@@ -18,15 +18,8 @@ export type CheckpointSize = 'tiny' | 'small' | 'normal' | 'big' | 'huge'
 export type ActivityKind = 'activity' | 'event'
 
 /** Scheduling profile - drives when and how often the engine suggests the activity. */
-export type ActivityType =
-  | 'general'
-  | 'habit'
-  | 'eveningHabit'
-  | 'training'
-  | 'deepWork'
-  | 'chore'
-  | 'admin'
-  | 'recovery'
+export type ActivityType = 'general' | 'training' | 'deepWork' | 'work' | 'commute'
+export type Adjacency = 'none' | 'before' | 'after' | 'brackets'
 
 export interface GoalSummary {
   id: string
@@ -129,21 +122,21 @@ export interface Occurrence {
   activity: Activity
 }
 
-/** Raw "why" signals; the panel composes the reason text from them. */
-interface RecommendationSignals {
+/** An activity to schedule, plus the raw "why" signals the panel composes its reason text from. */
+export interface Recommendation {
   tier: number
+  activity: Activity
   typicalDurationMinutes: number | null
   typicalStartTime: string | null
   daysSinceLast: number | null
   medianGapDays: number | null
   patternCount: number | null
-  /** Best free slot on the target day, null when nothing fits or the day is past. */
+  /**
+   * Best free slot on the target day. Null when nothing fits, when the day is past, or when the
+   * activity's habitual time is taken and every opening is too far from it.
+   */
   suggestedStartAt: string | null
 }
-
-export type Recommendation =
-  | (RecommendationSignals & { type: 'occurrence'; occurrence: Occurrence; activity: null })
-  | (RecommendationSignals & { type: 'activity'; occurrence: null; activity: Activity })
 
 export interface InsightsActivity {
   activityId: string
@@ -203,4 +196,27 @@ export interface UserSettings {
   timezone: string // IANA id
   /** Suggestion ghosts drawn per day on the calendar. */
   maxCalendarSuggestions: number
+}
+
+/**
+ * One activity type's resolved scheduling profile: built-in defaults with the user's overrides
+ * applied. The first four fields are editable; `cadencePriorDays` and `minDueFraction` are
+ * read-only, carried so hint copy can describe the engine without hardcoding numbers.
+ */
+export interface ActivityProfile {
+  type: ActivityType
+  windowStart: string // "HH:mm"
+  windowEnd: string // "HH:mm"
+  minBlockMinutes: number
+  /** 0 = unlimited. */
+  maxPerDay: number
+  cadencePriorDays: number
+  /** 0 = no cooldown. Fraction of the activity's own rhythm. */
+  minDueFraction: number
+  /** Type this one attaches to. When set, it is only suggested on days holding one of those. */
+  anchorType: ActivityType | null
+  /** Where it sits relative to the anchor. `none` leaves placement to the ordinary rules. */
+  adjacency: Adjacency
+  /** True when any field differs from the built-in default. */
+  isCustomised: boolean
 }

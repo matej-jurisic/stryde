@@ -53,18 +53,27 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Backend (`Stryde.Core`)**
 - `Entities/` — POCOs; `Guid Id = Guid.NewGuid()` + `DateTimeOffset CreatedAt`, no base class.
-  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, UserSettings`.
+  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, UserSettings, ActivityTypeSetting`
+  (`ActivityTypeSetting` is the exception to the shape above: composite key `UserId, Type`, no `Id`,
+  no `CreatedAt`, and sparse — a row exists only for a type the user edited, holding only the
+  fields that differ from the default).
 - `Enums/` — stored as strings (`HasConversion<string>`).
 - `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. `Occurrence → Activity` cascade delete; `Activity → Category/Goal` set-null.
 - `Common/Result.cs` — `Result`/`Result<T>` + `Error(ErrorType, msg)`. **Expected failures = Results, not exceptions.**
 - `Common/Validators.cs` — shared static validation rules.
-- `Common/ActivityProfiles.cs` — the `ActivityType` preset table (window, min block, cadence prior, max/day, cooldown).
-  Every type-driven decision in `RecommendationService` reads from here; add a type by adding a row.
+- `Common/ActivityProfiles.cs` — the `ActivityType` **default** table (window, min block, cadence prior, max/day, cooldown, anchor).
+  Add a type by adding a row; `ActivityType` is stored as a string, so a new value needs no migration.
+  The engine never reads it directly: it resolves per user through
+  `ActivityProfileService.ResolveAsync`, which layers `ActivityTypeSetting` overrides on top.
+  Window / min block / max/day are user-editable; cadence prior, cooldown and anchor are not.
+  An **anchored** type (`AnchorType` + `Adjacency`, e.g. `commute` brackets `work`) is only suggested
+  on days holding an occurrence of the anchor type, and is placed flush against that day's span of it
+  rather than by window or habit. Its own window is never read. See `spec.md` → Anchored types.
 - `Common/DayMath.cs` — all "which day / is this overdue?" logic goes through here, in the user's IANA
   timezone offset by `DayBoundaryTime`. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
   Key methods: `OccurrenceDay(Occurrence, DayContext)`, `IsOverdue(Occurrence, DayContext, DateTimeOffset)`.
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
-  Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split — and `Type`, the scheduling profile), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (discriminated: `type: 'occurrence' | 'activity'`), `CategoryDto`/`CategorySummaryDto`, `CheckpointDto` (has `Size` enum — not numeric progress).
+  Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split — and `Type`, the scheduling profile), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (always an activity to schedule; `SuggestedStartAt` nullable), `CategoryDto`/`CategorySummaryDto`, `CheckpointDto` (has `Size` enum — not numeric progress).
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
 - ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
   It also **can't translate a `DateTimeOffset` range `WHERE`** (EF throws at execution — stored as offset-bearing
@@ -77,14 +86,15 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   Both `JwtSecurityTokenHandler.DefaultMapInboundClaims = false` and `options.MapInboundClaims = false`
   must be set — the static property alone is not enough.
 - `Endpoints/*Endpoints.cs` — thin: parse → service → `result.ToProblem()`. Auth required on all routes except `/api/auth/*`.
-  Key endpoint files: `ActivityEndpoints.cs` (`/api/activities`), `OccurrenceEndpoints.cs` (`/api/occurrences`).
+  Key endpoint files: `ActivityEndpoints.cs` (`/api/activities`), `OccurrenceEndpoints.cs` (`/api/occurrences`),
+  `SettingsEndpoints.cs` (`/api/settings` + `/api/settings/activity-types`).
 - `Endpoints/ApiResults.cs` — `Error.ToProblem()` + `principal.GetUserId()` (reads `sub` claim).
 
 **Frontend (`client/src`)**
 - `App.tsx` — auth-gated routing; index → `/plan`.
 - `pages/` — `PlanPage`, `CategoriesPage`, `CalendarPage`, `GoalsPage`, `ActivitiesPage`, `InsightsPage`, `SettingsPage`.
 - `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`.
-- `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Recommendation` (discriminated union).
+- `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Recommendation` (flat; `activity` always present).
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
 - `store/toasts.ts` — Zustand toast store; `toastError(err)` for mutation failures without inline error display.
@@ -99,8 +109,15 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `components/goals/OccurrenceBar.tsx` — done/skipped/pending counts bar for ongoing goals on GoalsPage; data from `GoalDto.OccurrenceStats`.
 - `components/layout/useUncategorizedCount.ts` — shared nav badge hook (shares `['events', 'all']` cache with CategoriesPage; predicate in `lib/categories.ts`).
 - `components/layout/BottomNav.tsx` — mobile nav: 4 tabs + "More" bottom sheet (Activities, Insights, Settings). Max 5 slots; new pages go in the sheet.
-- `lib/activityTypes.ts` — labels, icons, and hint copy for `ActivityType`. The client mirror of
-  `ActivityProfiles.cs`; the hints describe real engine behaviour, so update both together.
+- `lib/activityTypes.ts` — labels, icons, and a non-numeric `blurb` per `ActivityType`, plus
+  `describeProfile`/`profileHint`, which **generate** the numeric hint copy from a resolved profile.
+  Never hardcode a window or block size in client copy: the values are per user.
+- `lib/useActivityProfiles.ts` — `['activityProfiles']` query as a `Map<ActivityType, ActivityProfile>`.
+- `components/settings/SettingSection.tsx` — `SettingSection`/`SettingRow`/`SectionFooter`/`inputCls`,
+  shared by `SettingsPage` and its section editors.
+- `components/settings/ActivityTypeSettings.tsx` — per-type window / min block / max/day editor.
+  Saves via `PUT /api/settings/activity-types/{type}`, resets via `DELETE`; both return the full
+  resolved set, which replaces the cache.
 - `lib/quotes.ts` — local array of motivational quotes; Plan page picks one by day-of-year.
 
 **Tests**
@@ -116,6 +133,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - **Result pattern, not exceptions.** `Error(ErrorType, msg)` → `error.ToProblem()`
   (Validation→400, NotFound→404, Conflict→409, Unauthorized→401, Forbidden→403).
 - **No em dashes in client-facing text.** Use a hyphen, comma, or colon. Code comments are exempt.
+- **24h clock everywhere.** Never render AM/PM. Format times as `HH:mm`; native `<input type="time">`
+  needs `lang="en-GB"` or the browser falls back to its own locale.
 - **Shared validation** in `Common/Validators.cs`. Cross-field rules live in the service.
 - **DTOs** in `Core/Dtos/Dtos.cs`; map via `FromEntity`. Don't leak entities.
 - **Auth model:** JWT access token in response body (~15 min); 6-month refresh token in httpOnly
@@ -133,7 +152,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   server state; Zustand for auth (access token in memory).
 - **Query keys:** every occurrence list lives under `['events', ...]` (`['events', 'all']` for Categories page + nav
   badge, `['events', 'calendar', ...]` for calendar ranges). After any occurrence write invalidate `['events']`
-  and `['recommendations']`. After any activity write invalidate `['activities']`. After any goal write also invalidate `['goals']`.
+  and `['recommendations']`. After any activity write invalidate `['activities']`. After an activity
+  type profile write invalidate `['recommendations']` (the engine reads the profiles per request). After any goal write also invalidate `['goals']`.
 - **Design:** see `design.md`. Use semantic color tokens, not hardcoded values.
 
 ## Gotchas

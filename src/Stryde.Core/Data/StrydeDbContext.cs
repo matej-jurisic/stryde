@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Stryde.Core.Entities;
 using Stryde.Core.Enums;
 
@@ -15,6 +16,7 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
     public DbSet<Checkpoint> Checkpoints => Set<Checkpoint>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
     public DbSet<Category> Categories => Set<Category>();
+    public DbSet<ActivityTypeSetting> ActivityTypeSettings => Set<ActivityTypeSetting>();
     public DbSet<ActivitySubtask> ActivitySubtasks => Set<ActivitySubtask>();
     public DbSet<OccurrenceSubtask> OccurrenceSubtasks => Set<OccurrenceSubtask>();
 
@@ -94,6 +96,28 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
                 v => v.ToString("HH:mm:ss"),
                 v => TimeOnly.ParseExact(v, "HH:mm:ss"));
 
+
+        // One row per (user, type), and only for types the user has actually edited.
+        modelBuilder.Entity<ActivityTypeSetting>()
+            .HasKey(s => new { s.UserId, s.Type });
+
+        modelBuilder.Entity<ActivityTypeSetting>()
+            .Property(s => s.Type)
+            .HasConversion<string>();
+
+        // Declared over the non-nullable TimeOnly so EF keeps handling the nulls itself: a null
+        // column means "no override", and must not reach ParseExact.
+        var timeOnlyToString = new ValueConverter<TimeOnly, string>(
+            v => v.ToString("HH:mm:ss"),
+            v => TimeOnly.ParseExact(v, "HH:mm:ss"));
+
+        modelBuilder.Entity<ActivityTypeSetting>()
+            .Property(s => s.WindowStart)
+            .HasConversion(timeOnlyToString);
+
+        modelBuilder.Entity<ActivityTypeSetting>()
+            .Property(s => s.WindowEnd)
+            .HasConversion(timeOnlyToString);
 
         modelBuilder.Entity<Checkpoint>()
             .HasOne(c => c.Goal)
