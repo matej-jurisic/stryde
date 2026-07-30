@@ -30,7 +30,7 @@ export function statsOf(rec: Recommendation): RecommendationStats {
   }
 }
 
-/** Weeks of day cells in the strip. 12 keeps a quarter's rhythm visible without wrapping on mobile. */
+/** Rows in the strip, one per week. 12 shows a quarter, which is where a weekly rhythm becomes legible. */
 const STRIP_WEEKS = 12
 const RECENT_LIMIT = 10
 const GOAL_TONE: Record<string, 'focus' | 'active' | 'bench' | 'neutral'> = {
@@ -159,39 +159,37 @@ function Stat({ label, value }: { label: string; value: string | null }) {
 }
 
 /**
- * One cell per day for the last twelve weeks, newest column on the right, so a habit that lapsed a
- * month ago is visible without reading a single date. This is the part the activities page cannot do:
- * a flat list makes you reconstruct the rhythm yourself.
+ * One cell per day for the last twelve weeks, laid out the way a calendar is: a column per weekday
+ * under its name, a row per week, the current week last. A habit that only ever happens at the
+ * weekend is then a vertical stripe, and one that lapsed a month ago stops partway down. This is the
+ * part the activities page cannot do: a flat list makes you reconstruct the rhythm yourself.
  */
 function DayStrip({ occurrences }: { occurrences: Occurrence[] }) {
-  const { columns, weekdayOfRow } = useMemo(() => buildStrip(occurrences), [occurrences])
+  const { weeks, weekdays } = useMemo(() => buildStrip(occurrences), [occurrences])
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex gap-[3px] overflow-x-auto">
-        <div className="flex shrink-0 flex-col gap-[3px] pr-1">
-          {weekdayOfRow.map((label, row) => (
-            <span
-              key={row}
-              className="flex h-3 items-center text-[9px] leading-none text-muted-foreground"
-            >
-              {row % 2 === 0 ? label : ''}
+    <div className="flex flex-col items-center gap-1.5">
+      <div className="flex flex-col gap-1">
+        <div className="flex gap-1">
+          {weekdays.map((label) => (
+            <span key={label} className="w-7 text-center text-[10px] leading-none text-muted-foreground">
+              {label}
             </span>
           ))}
         </div>
-        {columns.map((col, i) => (
-          <div key={i} className="flex shrink-0 flex-col gap-[3px]">
-            {col.map((cell, row) => (
+        {weeks.map((week, w) => (
+          <div key={w} className="flex gap-1">
+            {week.map((cell, d) => (
               <span
-                key={row}
+                key={d}
                 title={cell.title}
-                className={`h-3 w-3 rounded-[3px] ${cellCls(cell.kind)}`}
+                className={`h-7 w-7 rounded-[4px] ${cellCls(cell.kind)}`}
               />
             ))}
           </div>
         ))}
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
         <span className="flex items-center gap-1"><span className={`h-2.5 w-2.5 rounded-[3px] ${cellCls('done')}`} /> done</span>
         <span className="flex items-center gap-1"><span className={`h-2.5 w-2.5 rounded-[3px] ${cellCls('skipped')}`} /> skipped</span>
         <span className="flex items-center gap-1"><span className={`h-2.5 w-2.5 rounded-[3px] ${cellCls('pending')}`} /> pending</span>
@@ -217,11 +215,11 @@ interface Cell {
 }
 
 /**
- * The strip laid out as week columns of seven day rows, ending on the week that holds today. A day
- * with more than one occurrence takes the strongest of them: done beats skipped beats pending, since
- * the strip answers "did it happen".
+ * The strip laid out as week rows of seven weekday columns, ending on the week that holds today. A
+ * day with more than one occurrence takes the strongest of them: done beats skipped beats pending,
+ * since the strip answers "did it happen".
  */
-function buildStrip(occurrences: Occurrence[]): { columns: Cell[][]; weekdayOfRow: string[] } {
+function buildStrip(occurrences: Occurrence[]): { weeks: Cell[][]; weekdays: string[] } {
   const byDay = new Map<string, CellKind>()
   const rank: Record<string, number> = { pending: 1, skipped: 2, done: 3 }
   for (const o of occurrences) {
@@ -232,7 +230,7 @@ function buildStrip(occurrences: Occurrence[]): { columns: Cell[][]; weekdayOfRo
     if (!held || rank[kind] > rank[held]) byDay.set(key, kind)
   }
 
-  // Columns start on Monday, so the row a day lands in is stable across the strip.
+  // Weeks start on Monday, so the column a day lands in is the one under its own name.
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const mondayOffset = (today.getDay() + 6) % 7
@@ -241,25 +239,25 @@ function buildStrip(occurrences: Occurrence[]): { columns: Cell[][]; weekdayOfRo
   const first = new Date(lastMonday)
   first.setDate(first.getDate() - (STRIP_WEEKS - 1) * 7)
 
-  const columns: Cell[][] = []
+  const weeks: Cell[][] = []
   for (let w = 0; w < STRIP_WEEKS; w++) {
-    const col: Cell[] = []
+    const row: Cell[] = []
     for (let d = 0; d < 7; d++) {
       const day = new Date(first)
       day.setDate(day.getDate() + w * 7 + d)
       if (day > today) {
-        col.push({ kind: 'outside', title: '' })
+        row.push({ kind: 'outside', title: '' })
         continue
       }
       const kind = byDay.get(dayKey(day)) ?? 'empty'
       const date = day.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-      col.push({ kind, title: kind === 'empty' ? date : `${date}: ${kind}` })
+      row.push({ kind, title: kind === 'empty' ? date : `${date}: ${kind}` })
     }
-    columns.push(col)
+    weeks.push(row)
   }
 
-  const weekdayOfRow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  return { columns, weekdayOfRow }
+  const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  return { weeks, weekdays }
 }
 
 function RecentRow({ occ }: { occ: Occurrence }) {

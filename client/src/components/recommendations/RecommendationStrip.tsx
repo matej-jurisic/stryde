@@ -209,14 +209,16 @@ function ActivityRecItem({
             </div>
           )}
         </button>
-        <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
+        {/* h-5 is the title line's height: the group centres on it whether it holds bare icons or the
+            taller bordered pill, so the duration/time meta never floats above the controls. */}
+        <div className="flex h-5 shrink-0 items-center gap-1.5">
           <HistoryButton onClick={onHistory} />
           {rec.suggestedStartAt ? (
             <button
               onClick={onQuickSchedule}
               disabled={isScheduling}
               title={`Schedule at ${formatClock(rec.suggestedStartAt)}`}
-              className="flex shrink-0 items-center gap-0.5 rounded-md border border-border py-1 pl-1 pr-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+              className="flex h-5 shrink-0 items-center gap-0.5 rounded-md border border-border pl-1 pr-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary disabled:opacity-50"
             >
               <Plus className="h-3 w-3" strokeWidth={2.5} />
               {formatClock(rec.suggestedStartAt)}
