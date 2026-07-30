@@ -696,7 +696,10 @@ interface DayColumnProps {
   overlay: { topPx: number; heightPx: number } | null
   moveOverlay: { topPx: number; heightPx: number } | null
   resizeOverlay: { topPx: number; heightPx: number } | null
-  isToday: boolean
+  // Whether this column holds the current wall-clock time. Deliberately NOT the day-boundary
+  // "effective today": the grid is a plain 00:00-24:00 calendar day, so the now line belongs on the
+  // calendar date `now` actually falls in. Before the boundary those two are different days.
+  showNowLine: boolean
   borderLeft: boolean
   borderRight: boolean
   onEventMoveStart: (e: React.PointerEvent, event: Occurrence, topPx: number) => void
@@ -713,7 +716,7 @@ interface DayColumnProps {
   navCount: number
 }
 
-function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx, likelyFree, suggestions, onSuggestionClick, onSuggestionHistory, animateDir, navCount }: DayColumnProps) {
+function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, showNowLine, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx, likelyFree, suggestions, onSuggestionClick, onSuggestionHistory, animateDir, navCount }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
@@ -785,7 +788,7 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
         />
       ))}
       {/* Current time indicator */}
-      {isToday && (
+      {showNowLine && (
         <div
           className="pointer-events-none absolute inset-x-0 z-[5] flex items-center"
           style={{ top: nowPx }}
@@ -3261,7 +3264,7 @@ export function CalendarPage() {
                   overlay={dragOverlays.get(idx) ?? null}
                   moveOverlay={moveOverlay?.dayIdx === idx ? { topPx: moveOverlay.topPx, heightPx: moveOverlay.heightPx } : null}
                   resizeOverlay={resizeOverlay.get(idx) ?? null}
-                  isToday={isSameDay(day, effectiveToday)}
+                  showNowLine={isSameDay(day, new Date())}
                   borderLeft={idx === 0}
                   borderRight={true}
                   onEventMoveStart={handleEventMoveStart}

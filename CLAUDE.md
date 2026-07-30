@@ -114,16 +114,24 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   `StateService.LoadContextAsync` (`StateContext.Empty` when the user has no states, the case that must
   cost nothing). `AllowedIntervals` intersects the groups over the day; `StateAllows` is the gate;
   `AllowedSlots` masks `freeSlots` per activity and every placement branch draws candidates from it.
-  The `chain` parameter picks between two loops over one `candidates` list. Strict places in rank
-  order after filtering; **chained** defers `StateAllows`/`FitsASlot` into the loop (`StateFiltersPass`
-  is the switch), because what a candidate may do depends on where the ones above it landed - each
-  placement calls `FoldIn`, which appends a provisional `StateSetter` and rebuilds the timelines, then
-  the scan **restarts from the top** so a just-unlocked candidate gets its rank back. A pass that
-  places nothing ends it, and the survivors are dropped exactly as strict mode drops them. The closing
-  sweep exists because placement is greedy by rank, not chronological: a setter folded in late can
-  land on a span decided earlier, and that suggestion loses its time rather than being backtracked.
-  `UnlockedBy` is null for anything that would have surfaced anyway - it is what the UI reads to tell a
-  real opening from a conditional one. See `spec.md` → Recommendations → Suggestion mode.
+  ⚠️ **`candidates` is rank order; `ByPlacement` is placement order** — habit-anchored first, then the
+  rest, `OrderBy` being stable so rank survives inside each group. Rank still owns the returned list
+  (hence the `rank` index and the final `OrderBy`) and the order type caps are consumed in. Placing in
+  rank order let two habitless suggestions fill the 08:00 fallback and knock a real 08:00 habit off its
+  own hour, which in chained mode took out the entire day that habit unlocks.
+  The `chain` parameter picks between two loops over that list. Strict admits by cap in rank order,
+  then places; **chained** defers `StateAllows`/`FitsASlot` into the loop (`StateFiltersPass` is the
+  switch), because what a candidate may do depends on where the ones before it landed - each placement
+  calls `FoldIn`, which appends a provisional `StateSetter` and rebuilds the timelines, then the scan
+  **restarts from the top**. A candidate leaves `pending` only when it is actually placed: finding no
+  room is not a verdict, since a later leg can put the state back (hence `HasTypeSlot` split off
+  `TakeTypeSlot`, so a failed attempt does not spend the cap). Leftovers surface timeless or are
+  dropped. `RevocationFloor` is the other half: a suggestion that takes a state out of a value an
+  already-placed one requires may not start before that one ends - without it a habitless trip home
+  lands right after the trip in and closes the working day. The closing sweep is the backstop for what
+  the floor cannot see. `UnlockedBy` names only setters into a value the activity *accepts*, so a
+  revoker is never reported as the reason something surfaced.
+  See `spec.md` → Recommendations → Suggestion mode.
 - `Services/ActivityTypeService.cs` — type CRUD, `ResolveAsync` for the engine, and
   `SeedDefaultsAsync`/`DefaultsFor`, which `AuthService.RegisterAsync` calls (types cannot fall back
   to a built-in table the way `UserSettings` does — the rows *are* the list). Anything seeded must be

@@ -204,7 +204,7 @@ public class RecommendationService(
         // Empty in strict mode, which is what makes every state-aware helper below answer identically
         // in both modes until the first FoldIn.
         var provisional = new List<(Guid StateId, StateSetter Setter)>();
-        var provisionalBy = new List<(Guid StateId, DateTimeOffset At, string Title)>();
+        var provisionalBy = new List<(Guid StateId, Guid ValueId, DateTimeOffset At, string Title)>();
 
         var allowedIntervalCache = new Dictionary<Guid, List<(DateTimeOffset Start, DateTimeOffset End)>>();
 
@@ -252,7 +252,7 @@ public class RecommendationService(
             foreach (var e in effects)
             {
                 provisional.Add((e.StateId, new StateSetter(endsAt, e.StateValueId, e.DurationMinutes)));
-                provisionalBy.Add((e.StateId, endsAt, activity.Title));
+                provisionalBy.Add((e.StateId, e.StateValueId, endsAt, activity.Title));
             }
 
             stateTimelines = stateCtx.Rebuild(provisional);
@@ -261,8 +261,9 @@ public class RecommendationService(
 
         // Which placed suggestions this one is standing on: per state it constrains, whichever
         // provisional setter put that state into the value it needs at the moment it was placed. A
-        // suggestion that got unlocked but found no slot has no such moment, so it names every
-        // provisional setter on a state it requires - still the honest answer to "why is this here".
+        // suggestion that got no slot has no such moment, so it names every provisional setter that
+        // put one of its states into a value it accepts - never one that took a state *out* of such a
+        // value, which is a suggestion it is blocked by rather than standing on.
         // Null in strict mode, and null for anything that would have been suggested anyway.
         List<string>? UnlockedBy(Guid activityId, DateTimeOffset? at)
         {
@@ -270,15 +271,39 @@ public class RecommendationService(
             if (!requirementsByActivity.TryGetValue(activityId, out var groups)) return null;
 
             var titles = new List<string>();
-            foreach (var (stateId, _) in groups)
+            foreach (var (stateId, allowed) in groups)
             {
                 var since = at is { } instant ? stateTimelines[stateId].SegmentAt(instant).Since : null;
                 titles.AddRange(provisionalBy
-                    .Where(p => p.StateId == stateId && (at is null || p.At == since))
+                    .Where(p => p.StateId == stateId
+                        && (at is { } ? p.At == since : allowed.Contains(p.ValueId)))
                     .Select(p => p.Title));
             }
 
             return titles.Count == 0 ? null : titles.Distinct().ToList();
+        }
+
+        // Spans handed to suggestions already placed, by activity. Chained mode reads it to keep a
+        // state change from landing on top of something placed because of the value it changes.
+        var placedByActivity = new Dictionary<Guid, (DateTimeOffset Start, DateTimeOffset End)>();
+
+        // Would doing this activity take a state out of a value that one needs?
+        bool Revokes(Guid activityId, Guid otherId) =>
+            stateCtx.EffectsByActivity.TryGetValue(activityId, out var effects)
+            && requirementsByActivity.TryGetValue(otherId, out var groups)
+            && effects.Any(e => groups.Any(g => g.StateId == e.StateId && !g.Allowed.Contains(e.StateValueId)));
+
+        // Earliest a state-changing suggestion may start without pulling the rug from under one already
+        // placed: you do not head home while the day's work block is still running. Only *placed* spans
+        // count - a candidate still pending has claimed no time to be protected, and floor-ing against
+        // every pending one would push a commute past the whole day it makes possible.
+        DateTimeOffset? RevocationFloor(Guid activityId)
+        {
+            DateTimeOffset? floor = null;
+            foreach (var (otherId, span) in placedByActivity)
+                if (otherId != activityId && Revokes(activityId, otherId) && (floor is null || span.End > floor))
+                    floor = span.End;
+            return floor;
         }
 
         // An activity needs a gap big enough for whichever is larger: what it usually takes, or the
@@ -326,7 +351,8 @@ public class RecommendationService(
         // below choose *within* what the requirement permits and can never step outside it.
         // Returns the whole span rather than the start: chained mode needs the end, which is where a
         // setter fires, and deriving it again at the call site would mean recomputing `needed`.
-        (DateTimeOffset Start, DateTimeOffset End)? PlaceActivity(Guid activityId, Guid? typeId)
+        (DateTimeOffset Start, DateTimeOffset End)? PlaceActivity(
+            Guid activityId, Guid? typeId, DateTimeOffset? notBefore = null)
         {
             if (freeSlots is null) return null;
             statsByActivity.TryGetValue(activityId, out var s);
@@ -335,6 +361,11 @@ public class RecommendationService(
             // than 0, which would "fit" any gap however small.
             var needed = Math.Max(s?.DurationMinutes ?? DefaultSuggestionMinutes, profile.MinBlockMinutes);
             var slots = AllowedSlots(activityId);
+
+            // Clipping the slots rather than filtering candidates applies the floor to the habitual
+            // branch too, which is the one that would otherwise step over it.
+            if (notBefore is { } earliest)
+                slots = earliest < dayEnd ? Intervals.Intersect(slots, [(earliest, dayEnd)]) : [];
 
             DateTimeOffset? chosen;
             if (s?.StartMinutes is { } mins)
@@ -521,79 +552,108 @@ public class RecommendationService(
         }
 
         // A type's MaxPerDay is a ceiling on the whole day, seeded with what is already scheduled.
-        bool TakeTypeSlot(Guid? typeId)
+        // Asking is separate from taking because chained placement has to know whether an activity
+        // could be placed before it tries, and a failed attempt must not have spent the cap.
+        bool HasTypeSlot(Guid? typeId)
         {
             // No type is the unconstrained profile, which declares no cap to take a slot from.
             if (typeId is not { } id) return true;
 
             var max = Profile(id).MaxPerDay;
             typeCounts.TryGetValue(id, out var used);
-            if (max > 0 && used >= max) return false;
-            typeCounts[id] = used + 1;
+            return max <= 0 || used < max;
+        }
+
+        bool TakeTypeSlot(Guid? typeId)
+        {
+            if (!HasTypeSlot(typeId)) return false;
+            if (typeId is { } id) typeCounts[id] = typeCounts.GetValueOrDefault(id) + 1;
             return true;
         }
 
-        var result = new List<RecommendationDto>();
-
-        // Tiers 1/2 rank by overdueness within the tier; tier 3 keeps its frequency order (spec).
-        // Order is materialised first because placement is stateful - each suggestion consumes the
-        // gap it takes, so the best-ranked activity must get first pick of the day. The type cap is
-        // checked before MakeActivityRec, so a capped-out activity does not consume a slot on its
-        // way to being dropped.
+        // Tiers 1/2 rank by overdueness within the tier; tier 3 keeps its frequency order (spec). This
+        // is the order of the returned list, and the order type caps are consumed in.
         var candidates = goalTierActivities
             .OrderBy(x => x.tier).ThenByDescending(x => Score(x.activity))
             .Concat(habitRecs.Select(a => (tier: 3, activity: a)))
+            .Select((c, rank) => (c.tier, c.activity, rank))
             .ToList();
+
+        // **Placement order is not rank order.** Placement is stateful - each suggestion consumes the
+        // room it takes - so whoever goes first gets the day. An activity with a habitual start time
+        // has a real claim on a particular hour; one without has only the engine's civil-hour floor,
+        // which is a last resort rather than a preference. Letting the floor take the morning ahead of
+        // observed behaviour is how an 08:00 commute ended up drifted back to 06:30, and in chained
+        // mode how the entire day that commute unlocks disappeared: the 08:00 pile-up displaced it,
+        // and everything downstream was measured against the displacement.
+        // OrderBy is stable, so rank still decides within each group.
+        bool HasHabit(Activity a) => statsByActivity.TryGetValue(a.Id, out var s) && s.StartMinutes is not null;
+        List<(int tier, Activity activity, int rank)> ByPlacement(
+            IEnumerable<(int tier, Activity activity, int rank)> xs) =>
+            xs.OrderBy(x => HasHabit(x.activity) ? 0 : 1).ToList();
 
         if (!chaining)
         {
-            foreach (var (tier, activity) in candidates)
-                if (TakeTypeSlot(activity.ActivityTypeId))
-                    result.Add(MakeActivityRec(
-                        tier, activity, PlaceActivity(activity.Id, activity.ActivityTypeId)?.Start));
+            // Caps first, in rank order, so a capped-out activity does not consume a slot on its way
+            // to being dropped - and so which activities are admitted does not depend on placement.
+            var admitted = candidates.Where(c => TakeTypeSlot(c.activity.ActivityTypeId)).ToList();
 
-            return result;
+            var slotByRank = new Dictionary<int, DateTimeOffset?>();
+            foreach (var c in ByPlacement(admitted))
+                slotByRank[c.rank] = PlaceActivity(c.activity.Id, c.activity.ActivityTypeId)?.Start;
+
+            return admitted
+                .Select(c => MakeActivityRec(c.tier, c.activity, slotByRank[c.rank]))
+                .ToList();
         }
 
         // Chained placement. The state filters can only be applied here, one candidate at a time,
-        // because what a candidate is allowed to do depends on where the ones above it landed. After
-        // every placement the scan restarts from the top, so an activity that was impossible a moment
-        // ago gets its rank back rather than being reached only after everything below it.
-        // A pass that places nothing means the rest are blocked by states nothing on the day can move,
-        // and they are dropped exactly as strict mode drops them.
-        var placedByActivity = new Dictionary<Guid, (DateTimeOffset Start, DateTimeOffset End)>();
-        var pending = candidates.ToList();
-        bool progressed;
-        do
+        // because what a candidate is allowed to do depends on where the ones before it landed. Only
+        // a candidate that actually gets a slot leaves the queue, and after each one the scan restarts
+        // from the top: an activity that was impossible - or merely had nowhere to go - a moment ago
+        // gets its turn back, which is what lets the evening fill in once the trip home reopens it.
+        // A failed attempt costs nothing, since placement only claims its span on success.
+        var placedRecs = new List<(int rank, RecommendationDto rec)>();
+        var pending = ByPlacement(candidates);
+        while (true)
         {
-            progressed = false;
+            var placedOne = false;
             for (var i = 0; i < pending.Count; i++)
             {
-                var (tier, activity) = pending[i];
+                var (tier, activity, rank) = pending[i];
                 if (!StateAllows(activity.Id) || !FitsASlot(activity.Id, activity.ActivityTypeId)) continue;
+                if (!HasTypeSlot(activity.ActivityTypeId)) continue;
+
+                var span = PlaceActivity(activity.Id, activity.ActivityTypeId, RevocationFloor(activity.Id));
+                if (span is not { } s) continue;
 
                 pending.RemoveAt(i);
-                progressed = true;
-                if (!TakeTypeSlot(activity.ActivityTypeId)) break;
-
-                var span = PlaceActivity(activity.Id, activity.ActivityTypeId);
-                result.Add(MakeActivityRec(tier, activity, span?.Start));
-                // Only a suggestion with a slot can set state: a setter fires at an instant, and one
-                // the day had no room for never claimed one.
-                if (span is { } s)
-                {
-                    placedByActivity[activity.Id] = s;
-                    FoldIn(activity, s.End);
-                }
+                TakeTypeSlot(activity.ActivityTypeId);
+                placedByActivity[activity.Id] = s;
+                placedRecs.Add((rank, MakeActivityRec(tier, activity, s.Start)));
+                FoldIn(activity, s.End);
+                placedOne = true;
                 break;
             }
-        } while (progressed);
 
-        // Placement is greedy by rank, not chronological, so a setter folded in late can land on top of
-        // a suggestion placed earlier - nothing stops the evening's trip home being decided after the
-        // afternoon's work block. Rather than backtrack, such a suggestion keeps its place in the list
-        // and loses its time, which is the answer the engine already gives when a day has no room for
-        // one. Recomputed against the final timelines, so this is the state of the world as proposed.
+            if (!placedOne) break;
+        }
+
+        // Whatever is left could never be given a time. The ones the states still permit surface
+        // without one, exactly as they do in strict mode; the rest are blocked by a state nothing on
+        // the day can move, and are dropped. Caps are consumed in rank order here, as everywhere.
+        foreach (var (tier, activity, rank) in pending.OrderBy(x => x.rank))
+            if (StateAllows(activity.Id) && FitsASlot(activity.Id, activity.ActivityTypeId)
+                && TakeTypeSlot(activity.ActivityTypeId))
+                placedRecs.Add((rank, MakeActivityRec(tier, activity, null)));
+
+        var result = placedRecs.OrderBy(x => x.rank).Select(x => x.rec).ToList();
+
+        // The floor above stops a state change landing on a suggestion placed *before* it, but a
+        // candidate reached later can still be placed inside a stretch a subsequent fold reopens
+        // differently. Rather than backtrack, such a suggestion keeps its place in the list and loses
+        // its time, which is the answer the engine already gives when a day has no room for one.
+        // Recomputed against the final timelines, so this is the state of the world as proposed.
         allowedIntervalCache.Clear();
         for (var i = 0; i < result.Count; i++)
         {

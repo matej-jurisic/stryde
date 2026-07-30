@@ -532,9 +532,15 @@ occurrences holding a real span (both a start and an end) on that day:
 ### Placement
 
 `suggestedStartAt` is the activity's slot on the target day, on the quarter hour. Placement is
-**stateful and runs in rank order**, so the highest-ranked activity picks first and each suggestion
-consumes the room it takes - without that, every suggestion answers the same question against the
-same empty day and they all land on the first gap that fits.
+**stateful**, so each suggestion consumes the room it takes - without that, every suggestion answers
+the same question against the same empty day and they all land on the first gap that fits.
+
+**Placement order is not rank order.** Activities with a habitual start time are placed first, and
+ranking decides the order only within that split (and the order of the returned list, and the order
+type caps are consumed in). A habitual time is evidence of a claim on a particular hour; an activity
+without one has only the 08:00 fallback floor, which is a last resort rather than a preference.
+Placed in rank order, two habitless suggestions fill the concurrency cap at 08:00 and push an
+activity that has genuinely been started at 08:00 for months off its own hour.
 
 - **State requirements mask the day before any other rule runs.** Every candidate is drawn from the
   free slots intersected with the permitted stretches.
@@ -574,13 +580,29 @@ cache side by side and flipping between them costs nothing after the first look.
 
 Chained mode widens what a requirement is measured against; it is **not** an override. An activity
 requiring a value nothing produces is still dropped, per-day type caps and cooldowns still apply, and
-every slot still comes from the permitted stretches. Placement stays greedy in rank order, so a
-suggestion placed early can be overtaken by a state change decided later; when that happens it keeps
-its place in the list and loses its time, which is the same answer the engine gives for a day with no
-room left.
+every slot still comes from the permitted stretches.
+
+Two rules keep a chained day coherent, because placement is greedy and a state change is not
+symmetric with the things that depend on it:
+
+- **A state change waits for what still needs the value.** A suggestion whose effect would take a
+  state out of a value that an *already-placed* suggestion requires cannot start before that
+  suggestion ends. Without it, a trip home with no habitual hour takes the first opening its own
+  requirement allows - the moment the trip in ends - and closes the working day it is meant to end,
+  which then fits nowhere and vanishes from the list. Only placed suggestions count: waiting for
+  every *pending* one would push the commute past the whole day it makes possible.
+- **A candidate leaves the queue only when it is actually placed.** Finding no room is not a verdict,
+  because a later leg can put the state back: the activities that need to be at home get their slot
+  once the trip home reopens the evening. The scan repeats until a full pass places nothing, and
+  whatever is left surfaces without a time or is dropped, exactly as in direct mode.
+
+A suggestion reached late can still be overtaken by a subsequent fold; when that happens it keeps its
+place in the list and loses its time, the same answer the engine gives for a day with no room left.
 
 `unlockedBy` is null for anything that would have been suggested anyway, which is what lets the UI
-tell an opening you can take now from a conditional one.
+tell an opening you can take now from a conditional one. It names only suggestions that put a state
+into a value this activity **accepts** - never one that took a state out of such a value, which is a
+suggestion it is blocked by rather than standing on.
 
 ### Where suggestions appear
 

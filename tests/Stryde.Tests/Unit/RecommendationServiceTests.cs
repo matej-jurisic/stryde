@@ -1547,6 +1547,99 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_habitual_time_outranks_the_fallback_floor_for_first_pick()
+    {
+        var userId = await CreateUserAsync();
+
+        // Created early, so cold-start scoring ranks these above the one with a real rhythm.
+        foreach (var name in new[] { "no habit a", "no habit b" })
+            await AddActivityAsync(userId, name, GoalStatus.focus, createdAt: At(1, 12));
+
+        var habitual = await AddActivityAsync(userId, "eight sharp", GoalStatus.focus);
+        foreach (var day in new[] { 2, 6 })
+            await CompleteAsync(userId, habitual, At(day, 8), At(day, 8, 30));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        // Both habitless suggestions fall back to the civil-hour floor and fill the concurrency cap
+        // there. Placed in rank order they push an activity that has actually been started at 08:00
+        // off its own hour - a guess displacing evidence. Placement order is therefore not rank
+        // order: a habitual time gets first pick, and ranking still decides the list.
+        Assert.Equal(At(9, 8), recs.Single(r => r.Activity.Id == habitual.Id).SuggestedStartAt);
+    }
+
+    /// <summary>
+    /// A commute home with no habitual hour of its own: three completions, no two close enough to
+    /// cluster, so it falls back to the civil-hour floor like anything else without a rhythm.
+    /// </summary>
+    private async Task<(State Location, Activity Into, Activity Work, Activity Back)> UnanchoredCommuteDayAsync(Guid userId)
+    {
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
+
+        var into = await AddActivityAsync(userId, "work commute", GoalStatus.focus);
+        await SetsAsync(into, Value(location, "Work"));
+        await RequiresAsync(into, Value(location, "Home"));
+
+        var work = await AddActivityAsync(userId, "work", GoalStatus.focus);
+        await RequiresAsync(work, Value(location, "Work"));
+
+        var back = await AddActivityAsync(userId, "home commute", GoalStatus.focus);
+        await SetsAsync(back, Value(location, "Home"));
+        await RequiresAsync(back, Value(location, "Work"));
+
+        foreach (var day in new[] { 2, 6 })
+        {
+            await CompleteAsync(userId, into, At(day, 8), At(day, 8, 30));
+            await CompleteAsync(userId, work, At(day, 9), At(day, 17));
+        }
+        foreach (var (day, hour) in new[] { (2, 17), (4, 19), (6, 21) })
+            await CompleteAsync(userId, back, At(day, hour), At(day, hour + 1));
+
+        return (location, into, work, back);
+    }
+
+    [Fact]
+    public async Task GetAsync_chained_state_change_waits_for_what_still_needs_the_value()
+    {
+        var userId = await CreateUserAsync();
+        var (_, _, work, back) = await UnanchoredCommuteDayAsync(userId);
+
+        var recs = await _ctx.RecommendationService.GetAsync(
+            userId, new DateOnly(2026, 7, 9), Now, chain: true);
+
+        var byId = recs.ToDictionary(r => r.Activity.Id);
+        Assert.Equal(At(9, 9), byId[work.Id].SuggestedStartAt);
+        // Without a habit the trip home takes the first opening the state allows, which is the moment
+        // the trip in ends - putting it in the middle of the working day it is supposed to end, and
+        // taking Location out of Work under the block that needed it. It waits for that block instead.
+        Assert.Equal(At(9, 17), byId[back.Id].SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_chained_suggestion_takes_the_slot_a_later_leg_reopens()
+    {
+        var userId = await CreateUserAsync();
+        var (location, _, _, back) = await UnanchoredCommuteDayAsync(userId);
+
+        var chores = await AddActivityAsync(userId, "chores", GoalStatus.focus);
+        await RequiresAsync(chores, Value(location, "Home"));
+        foreach (var (day, hour) in new[] { (1, 11), (3, 14), (5, 20) })
+            await CompleteAsync(userId, chores, At(day, hour), At(day, hour + 2));
+
+        var recs = await _ctx.RecommendationService.GetAsync(
+            userId, new DateOnly(2026, 7, 9), Now, chain: true);
+
+        // Two hours of Home time, and the only Home left before the commute is the small hours. It
+        // gets no slot on the pass that reaches it - and must not be discarded for that, because the
+        // trip home puts Location back later in the same day. A candidate leaves the queue only when
+        // it is actually placed.
+        var rec = recs.Single(r => r.Activity.Id == chores.Id);
+        Assert.Equal(At(9, 18), rec.SuggestedStartAt);
+        Assert.Equal(["home commute"], rec.UnlockedBy);
+        Assert.Equal(At(9, 17), recs.Single(r => r.Activity.Id == back.Id).SuggestedStartAt);
+    }
+
+    [Fact]
     public async Task GetAsync_chained_mode_keeps_a_real_occurrence_ahead_of_a_speculative_one()
     {
         var userId = await CreateUserAsync();
