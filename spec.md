@@ -555,9 +555,9 @@ far, and when state requirements leave no room. The recommendation still surface
 Every suggestion can answer "have I actually been doing this" without leaving the day being planned:
 a panel row has a history icon, and a calendar ghost opens the same dialog on right-click or a hold
 (plain click stays scheduling, which is the common case). It is read-only. It shows last done,
-cadence, usual time and usual length, a twelve-week grid of one cell per day laid out as a calendar
+cadence, usual time and usual length, an eight-week grid of one cell per day laid out as a calendar
 (weekday columns, week rows), and the ten most
-recent occurrences with their status. The cadence figures are the ones the engine already computed
+recent occurrences with their status, in a box that scrolls rather than growing the dialog. The cadence figures are the ones the engine already computed
 for that recommendation, so the dialog and the row's reason line can never disagree; opened from a
 floating occurrence, which has no recommendation behind it, those two tiles fall back to the gap
 between the last two completions or read `Unknown`. `Open activity` leads to the full detail page.

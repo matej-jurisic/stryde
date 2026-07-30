@@ -30,8 +30,9 @@ export function statsOf(rec: Recommendation): RecommendationStats {
   }
 }
 
-/** Rows in the strip, one per week. 12 shows a quarter, which is where a weekly rhythm becomes legible. */
-const STRIP_WEEKS = 12
+/** Rows in the strip, one per week. 8 is two months: enough to read a weekly rhythm without the grid
+ *  dominating the dialog it sits in. */
+const STRIP_WEEKS = 8
 const RECENT_LIMIT = 10
 const GOAL_TONE: Record<string, 'focus' | 'active' | 'bench' | 'neutral'> = {
   focus: 'focus', active: 'active', bench: 'bench', closed: 'neutral',
@@ -65,6 +66,7 @@ export function ActivityHistoryModal({
   })
 
   const summary = useMemo(() => summarise(occurrences ?? []), [occurrences])
+  const loading = isLoading || !occurrences
 
   return (
     <Modal
@@ -86,40 +88,51 @@ export function ActivityHistoryModal({
     >
       {activity && <MetaLine activity={activity} />}
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading history...</p>}
+      {/*
+        Every section below is rendered on the first frame, loaded or not: the tiles and the strip have
+        a data-independent shape, and the list is a fixed-height box that scrolls. The request lands
+        while the panel is still animating in, so a shell that grows into the answer reads as a stutter.
+      */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Stat label="Last done" value={summary.lastDoneLabel} loading={loading} />
+        <Stat label="Cadence" value={cadenceLabel(stats, summary)} loading={loading} />
+        <Stat label="Usual time" value={stats?.typicalStartTime ?? null} loading={loading} />
+        <Stat
+          label="Usual length"
+          value={durationLabel(stats?.typicalDurationMinutes ?? null)}
+          loading={loading}
+        />
+      </div>
 
-      {occurrences && (
-        <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Stat label="Last done" value={summary.lastDoneLabel} />
-            <Stat label="Cadence" value={cadenceLabel(stats, summary)} />
-            <Stat label="Usual time" value={stats?.typicalStartTime ?? null} />
-            <Stat label="Usual length" value={durationLabel(stats?.typicalDurationMinutes ?? null)} />
-          </div>
+      <DayStrip occurrences={occurrences ?? []} loading={loading} />
 
-          <DayStrip occurrences={occurrences} />
-
-          <div className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Recent
-              </h3>
-              <span className="text-[11px] text-muted-foreground">
-                {summary.done} done, {summary.skipped} skipped, {summary.pending} pending
-              </span>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Recent
+          </h3>
+          {loading ? (
+            <span className="h-3 w-32 animate-pulse rounded bg-border" />
+          ) : (
+            <span className="text-[11px] text-muted-foreground">
+              {summary.done} done, {summary.skipped} skipped, {summary.pending} pending
+            </span>
+          )}
+        </div>
+        <div className="h-[11.5rem] overflow-y-auto rounded-lg border border-border">
+          {loading ? (
+            <RecentSkeleton />
+          ) : summary.recent.length === 0 ? (
+            <p className="flex h-full items-center justify-center px-3 text-center text-sm text-muted-foreground">
+              Nothing recorded yet. This suggestion is the first time round.
+            </p>
+          ) : (
+            <div className="divide-y divide-border">
+              {summary.recent.map((o) => <RecentRow key={o.id} occ={o} />)}
             </div>
-            {summary.recent.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nothing recorded yet. This suggestion is the first time round.
-              </p>
-            ) : (
-              <div className="divide-y divide-border rounded-lg border border-border">
-                {summary.recent.map((o) => <RecentRow key={o.id} occ={o} />)}
-              </div>
-            )}
-          </div>
-        </>
-      )}
+          )}
+        </div>
+      </div>
     </Modal>
   )
 }
@@ -147,29 +160,52 @@ function MetaLine({ activity }: { activity: Activity }) {
   )
 }
 
-function Stat({ label, value }: { label: string; value: string | null }) {
+function Stat({ label, value, loading }: { label: string; value: string | null; loading?: boolean }) {
   return (
     <div className="rounded-lg border border-border bg-muted/40 px-2.5 py-2">
       <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`mt-0.5 text-sm ${value ? 'text-foreground' : 'text-muted-foreground'}`}>
-        {value ?? 'Unknown'}
-      </p>
+      {loading ? (
+        <span className="mt-0.5 flex h-5 items-center" aria-hidden="true">
+          <span className="h-3 w-12 animate-pulse rounded bg-border" />
+        </span>
+      ) : (
+        <p className={`mt-0.5 text-sm ${value ? 'text-foreground' : 'text-muted-foreground'}`}>
+          {value ?? 'Unknown'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** Fills the recent box while the occurrences load; the box owns the height, these own the shape. */
+function RecentSkeleton() {
+  return (
+    <div className="animate-pulse divide-y divide-border" aria-busy="true" aria-label="Loading history">
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} className="flex h-9 items-center gap-3 px-3">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-border" />
+          <span className="h-3 flex-1 rounded bg-border" />
+          <span className="h-3 w-10 shrink-0 rounded bg-border" />
+        </div>
+      ))}
     </div>
   )
 }
 
 /**
- * One cell per day for the last twelve weeks, laid out the way a calendar is: a column per weekday
+ * One cell per day for the last eight weeks, laid out the way a calendar is: a column per weekday
  * under its name, a row per week, the current week last. A habit that only ever happens at the
  * weekend is then a vertical stripe, and one that lapsed a month ago stops partway down. This is the
  * part the activities page cannot do: a flat list makes you reconstruct the rhythm yourself.
+ *
+ * The grid is the same size empty as full, so it renders while loading too - only the fills wait.
  */
-function DayStrip({ occurrences }: { occurrences: Occurrence[] }) {
+function DayStrip({ occurrences, loading }: { occurrences: Occurrence[]; loading?: boolean }) {
   const { weeks, weekdays } = useMemo(() => buildStrip(occurrences), [occurrences])
 
   return (
     <div className="flex flex-col items-center gap-1.5">
-      <div className="flex flex-col gap-1">
+      <div className={`flex flex-col gap-1 ${loading ? 'animate-pulse' : ''}`}>
         <div className="flex gap-1">
           {weekdays.map((label) => (
             <span key={label} className="w-7 text-center text-[10px] leading-none text-muted-foreground">
