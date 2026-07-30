@@ -328,40 +328,7 @@ public sealed record InsightsDto(
     List<InsightsGapDto> LargestGaps,
     List<InsightsUnusedBlockDto> UnusedBlocks);
 
-// Export — flat JSON snapshot of all user data, meant for external analysis.
-// Not a backup format: there is no import path and the shape may change freely.
-public sealed record ExportOccurrenceDto(
-    Guid Id,
-    Guid ActivityId,
-    string Title,
-    string Status,
-    DateTimeOffset? StartAt,
-    DateTimeOffset? EndAt,
-    bool IsAllDay,
-    bool IsPlanned,
-    int? DurationMinutes,
-    DateTimeOffset? WindowStart,
-    DateTimeOffset? WindowEnd,
-    int? WindowDurationMinutes,
-    DateTimeOffset CreatedAt,
-    List<OccurrenceSubtaskDto> Subtasks)
-{
-    public static ExportOccurrenceDto FromEntity(Occurrence o) => new(
-        o.Id, o.ActivityId, o.Title ?? o.Activity.Title, o.Status.ToString(),
-        o.StartAt, o.EndAt, o.IsAllDay, o.IsPlanned, o.DurationMinutes,
-        o.WindowStart, o.WindowEnd, o.WindowDurationMinutes, o.CreatedAt,
-        o.Subtasks.OrderBy(s => s.CreatedAt).Select(OccurrenceSubtaskDto.FromEntity).ToList());
-}
-
-public sealed record ExportDto(
-    DateTimeOffset ExportedAt,
-    UserDto User,
-    UserSettingsDto Settings,
-    List<ActivityTypeDto> ActivityTypes,
-    List<CategoryDto> Categories,
-    List<GoalDto> Goals,
-    List<ActivityDto> Activities,
-    List<ExportOccurrenceDto> Occurrences);
+// Export has no DTOs: it is a Markdown document, rendered by ExportMarkdown straight off the entities.
 
 // UserSettings
 public sealed record UserSettingsDto(

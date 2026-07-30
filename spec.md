@@ -625,9 +625,8 @@ Day, 3-day, and week views (choice persisted), with prev/next, jump-to-today, an
   modal. Clicking (or tapping) **empty** grid opens the state snapshot for that quarter-hour - see
   States → Reading a state at an instant. Creating still takes a drag, or a long press on touch, so
   the cheaper gesture answers rather than writes.
-- On touch only a **deliberate tap** counts: short, still, on a grid that is not moving and was not
-  gliding when the finger landed. A scrolling finger looks like a tap at several points - stopping
-  momentum, resting before a flick - and none of those may open anything.
+- On touch a **tap** is whatever the browser calls a tap: a finger that scrolls, swipes to another day,
+  pinches to zoom or holds long enough to create opens nothing.
 
 ### Categories
 
@@ -696,16 +695,30 @@ is genuinely free time, since everything is assumed logged.
 | Calendar suggestions | How many suggestion ghosts the calendar draws per day, 1-12, default 6. |
 | Theme | Light / dark / system. Client-side preference in `localStorage`, defaults to system. |
 | Server URL | Native shells only: where the app points its API calls. |
-| Export data | Downloads `stryde-export-<date>.json`. |
+| Export data | Downloads `stryde-export-<date>.md`. |
 | Account | Username and sign out. |
 
 Settings holds preferences only. Activity types and states are user vocabulary and live on the
 Activities page.
 
-**Data export** (`GET /api/export`) is a single JSON document: user, settings, activity types,
-categories, goals with checkpoints, activities with subtasks and state links, and flat occurrences
-(effective title, no nested activity). Good enough to hand to a person or an LLM for analysis; not a
-backup format, since there is no import path and the shape may change freely.
+**Data export** (`GET /api/export`) is one Markdown document, `text/markdown`, meant to be handed to
+a person or an LLM to explain how the app is being used. Sections in order: header, a glossary of the
+app's own words, at-a-glance counts with occurrences per month, settings, activity types, states,
+categories, goals with checkpoints, activities grouped by category, and the full occurrence history
+newest day first.
+
+It is prose, not a data format. There is no import path, so it optimises for reading:
+
+- **No ids.** Everything references everything else by name.
+- **Every stored number is spelled out** in the words the UI uses for it: a type's window, block,
+  cap, cadence and cooldown become sentences, and 0 becomes "no cap" rather than vanishing.
+- **All instants are local** to the user's timezone on a 24h clock.
+- **Event-kind activities are not listed** among activities - they are backing rows for one-off
+  occurrences and appear only in the history, tagged as such.
+- **An occurrence's `CreatedAt` prints only when it disagrees with its own day**, where it says
+  something (planned ahead, or written up later) rather than restating the heading.
+- Cross-references go both ways: a type lists the activities using it, a state lists what sets it
+  and what requires it, a goal lists the activities serving it.
 
 ---
 

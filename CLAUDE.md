@@ -116,6 +116,11 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   move the default onto a sibling. **Durations are not here** — they live on the effect, so
   `ActivityService.ApplyStatesAsync` validates them via `Validators.ValidateStateDuration`
   (1..`MaxStateDurationMinutes`, and none on a change to the state's default value).
+- `Services/ExportService.cs` + `Services/ExportMarkdown.cs` — the export loads the whole account and
+  renders it as **one Markdown document**, not JSON. It has no DTOs and no import path, so the writer
+  is free to drop ids, name everything, and turn stored numbers into the sentences the UI uses. Any
+  new user-facing field belongs in `ExportMarkdown` too, phrased for someone who has never seen the
+  app. See `spec.md` → Settings → Data export.
 - ⚠️ **A child with a pre-set `Guid Id` added to a *tracked* parent's nav collection is treated as an
   existing row** (change detection sees a non-default key) and issues an UPDATE matching nothing. Use
   `db.Set<T>().Add(...)` explicitly — see `StateService.CreateValueAsync` and
@@ -147,7 +152,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   The three activity routes are one screen in three tabs: `/activities`, `/activities/types`,
   `/activities/states`. Types and states are user vocabulary, not app preferences, so they live here
   rather than in Settings. Their static segments outrank `/activities/:id`.
-- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`, `statesApi` (incl. `snapshot(atIso)`)/`stateValuesApi`, `activityTypesApi`.
+- `lib/api.ts` — `send` (bearer + one-shot 401 refresh) under `request<T>` for JSON and `requestText`
+  for the Markdown export. Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`, `statesApi` (incl. `snapshot(atIso)`)/`stateValuesApi`, `activityTypesApi`, `exportApi`.
   On `activitiesApi.create`/`update`, **omitting** `setsStateValues`/`requiredStateValueIds` leaves them untouched
   and `[]` clears them — which is what lets `BulkAssignModal` resend everything else without knowing about states.
 - `lib/types.ts` — mirrors backend DTOs. Key types: `Activity` (has `activityTypeId` plus an embedded `type` summary), `Occurrence` (has `effectiveTitle`), `Recommendation` (flat; `activity` always present), `State`/`StateValue`, `StateSnapshot`/`StateSnapshotEntry`, `ActivityType`.
@@ -204,13 +210,16 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   owns its own instance of the dialog, so all three pages that render it get the feature.
 - `components/states/StateSnapshotModal.tsx` — read-only "what did the world look like here", opened by
   clicking empty calendar grid (`CalendarPage.openStateSnapshot`, reached from the mouse no-drag path
-  and from the touch tap in `handleGridPointerUp`). Queries `['states', 'snapshot', iso]`; silent when
+  and, on touch, from `handleGridClick`). Queries `['states', 'snapshot', iso]`; silent when
   the user has no states. Creating an occurrence still needs a drag or a long press, so the plain click
   was free to take.
-  ⚠️ The touch tap is guarded by four clauses (`TAP_MAX_MS`, `SCROLL_SETTLE_MS`, no latched swipe,
-  unchanged `scrollTop`) because a scrolling finger produces near-taps constantly, and the mouse path
-  additionally requires `lastPointerTypeRef.current === 'mouse'`: a touch reaches it a second time as a
-  compatibility mouse event, which would otherwise walk straight past all four.
+  ⚠️ The touch tap hangs off **`click`**, not pointerup: the Android WebView claims a pan within its own
+  touch slop almost immediately and cancels the pointer, so a tap's pointerup often never arrives (the
+  same takeover `onEarlyCancel` works around for event blocks) - which is why the earlier pointerup
+  heuristic never fired in the app. `handleGridPointerDown` arms `tapArmedRef` with the grid position and
+  every gesture that becomes something else (drag, swipe, pinch, >15px move) disarms it; `pointercancel`
+  deliberately does **not**. The mouse path stays on mouseup and is kept out of the click handler by
+  `lastPointerTypeRef.current !== 'touch'`, since a touch arrives there again as a compatibility event.
 - `components/settings/SettingSection.tsx` — `SettingSection`/`SettingRow`/`SectionFooter`, the layout
   primitives `SettingsPage` is built from. Settings now holds preferences only.
 - `components/activities/ActivitiesTabs.tsx` — the underline tab strip the three activity routes share.

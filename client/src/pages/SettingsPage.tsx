@@ -72,12 +72,12 @@ export function SettingsPage() {
   async function handleExport() {
     setExporting(true)
     try {
-      const data = await exportApi.get()
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const markdown = await exportApi.get()
+      const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `stryde-export-${new Date().toISOString().slice(0, 10)}.json`
+      a.download = `stryde-export-${new Date().toISOString().slice(0, 10)}.md`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
@@ -210,7 +210,7 @@ export function SettingsPage() {
               )}
 
               <SettingSection label="Data">
-                <SettingRow label="Export data" hint="Download everything as JSON: goals, checkpoints, categories, activities, occurrences.">
+                <SettingRow label="Export data" hint="Download everything as a readable Markdown document: settings, types, states, categories, goals, activities, and the full history. Meant for sharing, not for restoring.">
                   <Button variant="outline" size="sm" onClick={handleExport} loading={exporting}>
                     <Download className="mr-1.5 h-3.5 w-3.5" strokeWidth={2} />
                     Export

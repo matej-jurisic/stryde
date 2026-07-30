@@ -25,14 +25,6 @@ const DEFAULT_SUGGESTION_MINUTES = 30
 // Hold on a suggestion ghost that opens its history instead of the create modal. Longer than the
 // grid's own 350ms long press: this one competes with a tap, not with a scroll.
 const GHOST_HOLD_MS = 400
-// Longest touch that still counts as a tap asking about a moment. A press held past this was going
-// for the long-press create and let go early, or was a finger parked on the grid mid-scroll - neither
-// is a question. Comfortably under the 350ms the long press itself needs.
-const TAP_MAX_MS = 250
-// Momentum scrolling is stopped by landing a finger on it, and that lands as a pointerdown with no
-// movement - a tap in every respect except intent. A touch this soon after the last scroll event is
-// treated as arresting the scroll instead.
-const SCROLL_SETTLE_MS = 400
 // The server spreads suggestions across the day and lets at most two share any
 // instant, so this is a ceiling rather than the main throttle. Only the
 // top-ranked few get drawn; the panel remains the full list. User-tunable via
@@ -1288,14 +1280,13 @@ export function CalendarPage() {
     timer: ReturnType<typeof setTimeout>
     /** Pressed on an event's minimum-height overflow zone: the tap belongs to that event, not the grid. */
     startedOnBlock: boolean
-    downAt: number
-    /** Where the view sat when the finger landed; a change means the grid moved under it. */
-    scrollTop: number
-    /** Landed on a still-scrolling view, so this press is stopping it rather than pointing at a time. */
-    arrestingScroll: boolean
   } | null>(null)
-  /** Last scroll of the time grid, in `performance.now()` terms. See SCROLL_SETTLE_MS. */
-  const lastScrollAtRef = useRef(0)
+  /**
+   * Grid position a touch may still open the state snapshot for, or null once the gesture has become
+   * something else. Read by `handleGridClick`; see the comment there for why the click, and not
+   * pointerup, is what asks.
+   */
+  const tapArmedRef = useRef<{ dayIdx: number; y: number } | null>(null)
   /**
    * Pointer type of the press in progress. A touch is followed by compatibility mouse events, which
    * would otherwise re-enter the mouse handler and open the snapshot past every guard the touch path
@@ -2652,6 +2643,9 @@ export function CalendarPage() {
   function handleGridPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     // Recorded for every pointer type, before the touch-only work below.
     lastPointerTypeRef.current = e.pointerType
+    // Every new press starts disarmed, including a mouse one: the mouse opens the snapshot from its
+    // own mouseup path, and a stale arming from an earlier touch would open it a second time.
+    tapArmedRef.current = null
     if (e.pointerType !== 'touch') return
     if (pinchActiveRef.current) return
     const startClientX = e.clientX
@@ -2671,6 +2665,7 @@ export function CalendarPage() {
     const timer = setTimeout(() => {
       if (!pendingTouchRef.current) return
       pendingTouchRef.current = null
+      tapArmedRef.current = null
       swipeRef.current = null
       try {
         gridRef.current?.setPointerCapture(pointerId)
@@ -2683,11 +2678,11 @@ export function CalendarPage() {
       startAutoScroll(startClientX, startClientY)
       if (navigator.vibrate) navigator.vibrate(30)
     }, 350)
-    pendingTouchRef.current = {
-      pointerId, startClientX, startClientY, startDayIdx, startY, timer, startedOnBlock,
-      downAt: performance.now(),
-      scrollTop: scrollRef.current?.scrollTop ?? 0,
-      arrestingScroll: performance.now() - lastScrollAtRef.current < SCROLL_SETTLE_MS,
+    pendingTouchRef.current = { pointerId, startClientX, startClientY, startDayIdx, startY, timer, startedOnBlock }
+    // Arm the snapshot for this press. An event's overflow zone belongs to that event; a press that
+    // dismisses touch resize mode or an open popover is spending itself on that dismissal.
+    if (!startedOnBlock && !resizingEventId && !viewDropOpen && !datePopOpen) {
+      tapArmedRef.current = { dayIdx: startDayIdx, y: startY }
     }
   }
 
@@ -2706,6 +2701,7 @@ export function CalendarPage() {
       if (dist > 15) {
         clearTimeout(pendingTouchRef.current.timer)
         pendingTouchRef.current = null
+        tapArmedRef.current = null
       }
       return
     }
@@ -2719,6 +2715,9 @@ export function CalendarPage() {
   function commitTouchDrag(clientX: number, clientY: number) {
     stopAutoScroll()
     if (!dragRef.current) return
+    // Only a drag that actually commits takes the tap away: a finger that drifted a few pixels and
+    // lifted reaches here too, and that is still a tap.
+    tapArmedRef.current = null
     const { startDayIdx, startY } = dragRef.current
     dragRef.current = null
     setDragOverlays(new Map())
@@ -2746,30 +2745,19 @@ export function CalendarPage() {
 
   function handleGridPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     if (e.pointerType !== 'touch') return
-    // A tap: quick, still, and on nothing. Creating an event needs the hold, so the tap is free to ask
-    // what the world looks like there instead - but only when it is unambiguously a tap. Everything a
-    // scrolling finger does looks like one at some point: it lands to stop momentum, it rests before
-    // flicking, it grazes the glass. Each clause below rules out one of those, and a press that fails
-    // any of them simply does nothing, which is what it did before this existed.
     const pending = pendingTouchRef.current
-    const wasTap =
-      !!pending
-      && !dragRef.current                                            // the long press never armed a drag
-      && !pending.startedOnBlock                                     // an event's overflow zone, not the grid
-      && swipeRef.current === null                                   // never moved far enough to latch a direction
-      && !pending.arrestingScroll                                    // landed on a view still gliding
-      && performance.now() - pending.downAt < TAP_MAX_MS             // a tap, not a parked finger
-      && (scrollRef.current?.scrollTop ?? 0) === pending.scrollTop   // the grid held still underneath it
     if (pending) {
       clearTimeout(pending.timer)
       pendingTouchRef.current = null
-    }
-    if (wasTap) {
-      openStateSnapshot(pending!.startDayIdx, pending!.startY)
-      return
+      // A press that armed no drag wrote nothing: leave it to the click below to decide whether it was
+      // a tap, and stop here so `commitTouchDrag` doesn't run for a finger that never dragged.
+      if (!dragRef.current && swipeRef.current === null) return
     }
     if (swipeRef.current?.direction === 'horizontal') {
       const dx = e.clientX - swipeRef.current.startX
+      // Only a swipe that carries far enough to move the day takes the tap with it. The direction
+      // latches after 5px, which a finger drifts during any ordinary press.
+      if (Math.abs(dx) > 40) tapArmedRef.current = null
       if (dx > 40) { fireNav('back'); setCurrent((d) => addDays(d, -1)) }
       else if (dx < -40) { fireNav('forward'); setCurrent((d) => addDays(d, 1)) }
       swipeRef.current = null
@@ -2779,6 +2767,38 @@ export function CalendarPage() {
     commitTouchDrag(e.clientX, e.clientY)
   }
 
+  /**
+   * The touch tap that asks what the world looked like at a moment.
+   *
+   * It hangs off `click` rather than pointerup because in the Android WebView the pointer stream is
+   * unreliable for a finger resting on a scrollable grid: the WebView claims a pan within its own touch
+   * slop almost immediately and cancels the pointer, so a tap's pointerup frequently never arrives (the
+   * same takeover the event blocks work around in `onEarlyCancel`). A click always does, and it already
+   * means what this needs it to mean - the browser's own recognizer fires it for a tap and withholds it
+   * for a scroll, which is a better judge of the difference than any timing and slop numbers of ours.
+   *
+   * `tapArmedRef` carries the grid position from the press, so the answer is about where the finger
+   * landed, and lets every gesture that turns into something else - a drag, a swipe, a pinch - take the
+   * tap away as it does so.
+   */
+  function handleGridClick(e: React.MouseEvent<HTMLDivElement>) {
+    const armed = tapArmedRef.current
+    tapArmedRef.current = null
+    if (armed === null) return
+    if (lastPointerTypeRef.current !== 'touch') return
+    // An event block or a suggestion ghost under the finger: that click is theirs.
+    if ((e.target as Element).closest('button')) return
+    // A gesture that already wrote something owns this click. Consuming the flag here matters: nothing
+    // else clears it until the next press on a block, and a stuck flag would mute every later tap.
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      return
+    }
+    openStateSnapshot(armed.dayIdx, armed.y)
+  }
+
+  // Deliberately leaves `tapArmedRef` alone: this cancel is what a tap looks like in the Android
+  // WebView, which takes the pointer over the moment the finger might pan. Only a click decides.
   function handleGridPointerCancel(e: React.PointerEvent<HTMLDivElement>) {
     if (e.pointerType !== 'touch') return
     swipeRef.current = null
@@ -3055,7 +3075,7 @@ export function CalendarPage() {
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       ) : (
-        <div ref={scrollRef} className="scroll-slim flex-1 overflow-y-auto flex flex-col" style={{ WebkitTouchCallout: 'none' }} onScroll={(e) => { lastScrollAtRef.current = performance.now(); setScrollTop(e.currentTarget.scrollTop) }}>
+        <div ref={scrollRef} className="scroll-slim flex-1 overflow-y-auto flex flex-col" style={{ WebkitTouchCallout: 'none' }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
           {/* Multi-day headers + all-day row — sticky, inside scroll container to share column widths */}
           {view !== 'day' && (
             <div className="sticky top-0 z-40 bg-background">
@@ -3210,6 +3230,7 @@ export function CalendarPage() {
               onPointerMove={handleGridPointerMove}
               onPointerUp={handleGridPointerUp}
               onPointerCancel={handleGridPointerCancel}
+              onClick={handleGridClick}
             >
               {days.map((day, idx) => (
                 <DayColumn

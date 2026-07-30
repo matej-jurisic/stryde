@@ -38,7 +38,8 @@ export async function tryRefresh(): Promise<boolean> {
   return refreshPromise
 }
 
-export async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+/** Bearer + one-shot 401 refresh. Returns the raw response so callers can pick how to read it. */
+async function send(path: string, init: RequestInit = {}, retry = true): Promise<Response> {
   const token = useAuthStore.getState().accessToken
   const headers = new Headers(init.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
@@ -48,11 +49,17 @@ export async function request<T>(path: string, init: RequestInit = {}, retry = t
 
   if (res.status === 401 && retry) {
     const ok = await tryRefresh()
-    if (ok) return request<T>(path, init, false)
+    if (ok) return send(path, init, false)
     if (isNative()) setNativeRefreshToken(null)
     useAuthStore.getState().clear()
     throw new ApiError(401, 'Session expired')
   }
+
+  return res
+}
+
+export async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  const res = await send(path, init, retry)
 
   if (res.status === 204) return undefined as T
 
@@ -66,6 +73,23 @@ export async function request<T>(path: string, init: RequestInit = {}, retry = t
   }
 
   return body as T
+}
+
+/** For endpoints that answer with text rather than JSON. Errors still carry a problem-details body. */
+export async function requestText(path: string, init: RequestInit = {}): Promise<string> {
+  const res = await send(path, init)
+  const body = await res.text()
+
+  if (!res.ok) {
+    let message = res.statusText
+    try {
+      const problem = JSON.parse(body) as { detail?: string; title?: string }
+      message = problem.detail ?? problem.title ?? message
+    } catch { /* not a problem-details body */ }
+    throw new ApiError(res.status, message)
+  }
+
+  return body
 }
 
 export const activitiesApi = {
@@ -266,9 +290,10 @@ export const insightsApi = {
   emptyProfile: () => request<InsightsEmptyProfile>('/api/insights/empty-profile'),
 }
 
-// Full data snapshot for external analysis; shape mirrors ExportDto and is not pinned in types.ts.
+// The whole account as one Markdown document, for handing to a person or an LLM. Not a backup: the
+// server renders prose, and there is nothing that reads it back.
 export const exportApi = {
-  get: () => request<Record<string, unknown>>('/api/export'),
+  get: () => requestText('/api/export'),
 }
 
 export const authApi = {

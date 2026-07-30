@@ -1,44 +1,49 @@
 using Microsoft.EntityFrameworkCore;
 using Stryde.Core.Common;
 using Stryde.Core.Data;
-using Stryde.Core.Dtos;
 using Stryde.Core.Entities;
 
 namespace Stryde.Core.Services;
 
-public class ExportService(StrydeDbContext db, ActivityTypeService activityTypes)
+/// <summary>
+/// Loads the whole account and hands it to <see cref="ExportMarkdown"/>. The export is a document to
+/// read, not a data format: there is no import path, so nothing here needs to round-trip.
+/// </summary>
+public class ExportService(StrydeDbContext db)
 {
-    public async Task<Result<ExportDto>> GetAsync(Guid userId)
+    public async Task<Result<string>> GetMarkdownAsync(Guid userId)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
-        if (user is null) return Result<ExportDto>.Fail(new Error(ErrorType.NotFound, "User not found."));
+        if (user is null) return Result<string>.Fail(new Error(ErrorType.NotFound, "User not found."));
 
         var settings = await db.UserSettings.FirstOrDefaultAsync(s => s.UserId == userId)
             ?? new UserSettings { UserId = userId };
 
+        var types = await db.ActivityTypes.Where(t => t.UserId == userId).ToListAsync();
         var categories = await db.Categories.Where(c => c.UserId == userId).ToListAsync();
         var goals = await db.Goals.Include(g => g.Checkpoints).Where(g => g.UserId == userId).ToListAsync();
+        var states = await db.States.Include(s => s.Values).Where(s => s.UserId == userId).ToListAsync();
         var activities = await db.Activities
             .Include(a => a.Subtasks)
             .Include(a => a.Category)
             .Include(a => a.Goal)
             .Include(a => a.Type)
+            .Include(a => a.StateEffects)
+            .Include(a => a.StateRequirements)
             .Where(a => a.UserId == userId)
             .ToListAsync();
         var occurrences = await db.Occurrences
-            .Include(o => o.Activity)
+            .Include(o => o.Activity).ThenInclude(a => a.Category)
+            .Include(o => o.Activity).ThenInclude(a => a.Goal)
             .Include(o => o.Subtasks)
             .Where(o => o.UserId == userId)
             .ToListAsync();
 
-        return Result<ExportDto>.Success(new ExportDto(
-            DateTimeOffset.UtcNow,
-            UserDto.FromEntity(user),
-            UserSettingsDto.FromEntity(settings, user.Timezone),
-            await activityTypes.ListAsync(userId),
-            categories.OrderBy(c => c.CreatedAt).Select(CategoryDto.FromEntity).ToList(),
-            goals.OrderBy(g => g.CreatedAt).Select(g => GoalDto.FromEntity(g)).ToList(),
-            activities.OrderBy(a => a.CreatedAt).Select(ActivityDto.FromEntity).ToList(),
-            occurrences.OrderBy(o => o.CreatedAt).Select(ExportOccurrenceDto.FromEntity).ToList()));
+        var ctx = new DayContext(DayMath.ResolveTimeZone(user.Timezone), settings.DayBoundaryTime);
+        var doc = new ExportMarkdown(
+            ctx, user, settings, types, categories, goals, states, activities, occurrences,
+            DateTimeOffset.UtcNow);
+
+        return Result<string>.Success(doc.Render());
     }
 }
