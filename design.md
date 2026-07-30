@@ -194,13 +194,16 @@ The left sidebar and the middle recommendation panel slide in/out with CSS trans
 
 ## Daily Plan Page
 
-The `/plan` view follows the three-pane layout: recommendations in the middle column, and the right canvas holds (top to bottom):
+The `/plan` view follows the three-pane layout: suggestions in the middle column, and the right canvas holds (top to bottom):
 
-1. **Day header** — date, prev/next/today controls (same pattern as the calendar header).
-2. **Goal health strip** — one compact row per Focus goal: title, believed vs actual progress bars.
-3. **Agenda** — the day's scheduled events as a vertical list (checkbox, title, time range, goal tags), ordered by start time. No hour grid; this is a checklist, not a scheduling surface.
+1. **Day header** — 57px bar: prev/next chevrons, day title (full on `sm+`, compact below), jump-to-today button (only when the viewed day is not today), date input (`sm+` only), and a `+`. Same pattern as the calendar header.
+2. **Briefing hero** — `rounded-xl border` card on a `from-card to-muted/40` gradient: a 56px progress ring (5px stroke, primary) holding the day's completion percentage, a greeting line with a `Sunrise`/`MoonStar` icon, a `text-lg font-semibold` headline, and a stat row (done / left / planned / overdue) where the numbers are `tabular-nums` `text-foreground` and only overdue takes `text-destructive`.
+3. **Focus goal chips** — inside the hero, one bordered chip per Focus goal in a 1-up / `sm:`2-up grid: status dot, title, last-session recency, and either the milestone percentage (mono) or the ongoing occurrence bar.
+4. **Overdue** — `border-destructive/30 bg-destructive/5` card: the count, a "Move to tomorrow" button (`bg-foreground text-background`), then the rows in a plain card list.
+5. **Timeline agenda** — a three-column grid (content-sized time gutter, 0.75rem spine, fluid rows) so every row shares one time column. The spine is a 1px `border` line with a 2px dot per row, ringed in `background`; the current time is a primary label, dot, and hairline splitting past from upcoming. Relative labels ("now", "in 40m") sit under the gutter time. No hour grid: this is a checklist, not a scheduling surface.
+6. **Planned** and **Floating** — uppercase section labels over bordered card lists.
 
-Mobile: single column, agenda first, recommendations collapsed behind a toggle.
+Mobile: single column, suggestions behind the header's `Menu` toggle.
 
 ---
 
@@ -213,9 +216,12 @@ Mobile: single column, agenda first, recommendations collapsed behind a toggle.
 
 ## Insights Page
 
-- **KPI row:** 4 stat tiles (2×2 on mobile, 1×4 on desktop): label in `text-xs text-muted-foreground`, value `text-2xl font-semibold`.
-- **14-day completion chart:** single-series column chart in `bg-primary` — no legend. Columns max 24px wide, 4px rounded top, square baseline on a hairline `border-border`; zero days show a 2px `bg-muted` stub. Per-column hover tooltip (card + `shadow-pop`) with date and count. Values live in tooltips, not on every column.
-- **Category breakdown:** rows with category icon + name (text tokens, never colored text), count right-aligned (`tabular-nums`), and a 4px proportional bar in the category's own color on a `bg-muted` track. Uncategorized uses `CircleDashed` + muted tones.
+One `max-w-2xl` column of sections, each an uppercase label over a bordered card with `divide-y` rows. No chart: every stat here is a duration, and a labelled row with a bar reads better than a column per day.
+
+- **Period toggle:** segmented control (7 days / 30 days) on a `bg-muted` track with a `p-0.5` inset; the active option is a raised `bg-card` chip. Sits above the first section, left-aligned.
+- **Unaccounted time:** headline row (label left, duration right in `tabular-nums`) with the trend against the previous period as a `text-xs text-muted-foreground` line beneath.
+- **Gap lists** (*Biggest empty blocks*, *Often empty*): one row each — day or time range on the left, duration or "empty on X of Y days" right-aligned, all figures `tabular-nums`.
+- **Time by activity / by category:** rows with title (category rows lead with the category icon; never colored text), duration right-aligned (`tabular-nums`), and a 4px proportional bar underneath in the category's own color on a `bg-muted` track. Uncategorized uses `CircleDashed` + muted tones.
 
 ---
 

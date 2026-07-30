@@ -2,7 +2,6 @@
 
 Working guide for the Stryde repository.
 - **`spec.md`** — product spec: what the app does, domain rules, data model fields.
-- **`plan.md`** — build history and upcoming phases.
 - **`design.md`** — visual/UX spec.
 
 ## Doc sync rule
@@ -11,10 +10,13 @@ Working guide for the Stryde repository.
 
 - `CLAUDE.md` — update the file map or conventions if the codebase structure changed.
 - `spec.md` — update if product behaviour, domain rules, or the data model changed.
-- `plan.md` — add an entry (or update a phase) if a feature shipped or a decision was made.
 - `design.md` — update if the UI or visual language changed.
 
-Keep `CLAUDE.md` small: it is a navigation and convention guide, not a product spec. Domain rules belong in `spec.md`; visual rules belong in `design.md`; build history belongs in `plan.md`.
+There is no build-history doc: `spec.md` describes the app as it is now, in the present tense, with no
+record of what it used to do or what is planned. Git history is the changelog. Reasoning worth keeping
+belongs in a code comment next to the thing it explains, not in a doc of past decisions.
+
+Keep `CLAUDE.md` small: it is a navigation and convention guide, not a product spec. Domain rules belong in `spec.md`; visual rules belong in `design.md`.
 
 ## What this is
 
@@ -53,8 +55,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Backend (`Stryde.Core`)**
 - `Entities/` — POCOs; `Guid Id = Guid.NewGuid()` + `DateTimeOffset CreatedAt`, no base class.
-  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, UserSettings, ActivityType,
-  State, StateValue, ActivityStateEffect, ActivityStateRequirement`
+  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, Category, UserSettings, ActivityType,
+  State, StateValue, ActivityStateEffect, ActivityStateRequirement, ActivitySubtask, OccurrenceSubtask`
+  (subtasks are two levels: `ActivitySubtask` is the title-only template, copied into
+  `OccurrenceSubtask` rows — which carry `IsDone` — when an occurrence is created.)
   (the last three are link/child rows keyed by their contents, not by a `Guid Id`: `StateValue` is a
   normal child of `State`, while `ActivityStateEffect` keys on `(ActivityId, StateId)` — one value per
   state, structurally — and `ActivityStateRequirement` on `(ActivityId, StateValueId)` — many per state,
@@ -129,10 +133,14 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Frontend (`client/src`)**
 - `App.tsx` — auth-gated routing; index → `/plan`.
-- `pages/` — `PlanPage`, `CategoriesPage`, `CalendarPage`, `GoalsPage`, `ActivitiesPage`, `ActivityTypesPage`,
-  `StatesPage`, `InsightsPage`, `SettingsPage`. The last three activity routes are one screen in three tabs:
-  `/activities`, `/activities/types`, `/activities/states`. Types and states are user vocabulary, not app
-  preferences, so they live here rather than in Settings. Their static segments outrank `/activities/:id`.
+- `pages/` — `PlanPreviewPage` (**this is `/plan`**), `CalendarPage`, `CategoriesPage`,
+  `GoalsPreviewPage` (**this is `/goals`**), `GoalDetailPage`, `ActivitiesPage`, `ActivityDetailPage`,
+  `ActivityTypesPage`, `StatesPage`, `InsightsPage`, `SettingsPage`. `PlanPage` and `GoalsPage` are the
+  previous layouts, still routed at `/plan-old` and `/goals-old` — check which file a route actually
+  renders before editing either pair.
+  The three activity routes are one screen in three tabs: `/activities`, `/activities/types`,
+  `/activities/states`. Types and states are user vocabulary, not app preferences, so they live here
+  rather than in Settings. Their static segments outrank `/activities/:id`.
 - `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`, `statesApi`/`stateValuesApi`, `activityTypesApi`.
   On `activitiesApi.create`/`update`, **omitting** `setsStateValues`/`requiredStateValueIds` leaves them untouched
   and `[]` clears them — which is what lets `BulkAssignModal` resend everything else without knowing about states.
@@ -150,7 +158,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   it fans out over `PUT /api/activities/{id}`, resending unchanged fields from each activity (the PUT is a full replace).
 - `components/events/SkipRescheduleModal.tsx` — opened after skipping; lets user pick a date and creates a new pending copy on that date.
 - `components/goals/OccurrenceBar.tsx` — done/skipped/pending counts bar for ongoing goals on GoalsPage; data from `GoalDto.OccurrenceStats`.
-- `components/layout/useUncategorizedCount.ts` — shared nav badge hook (shares `['events', 'all']` cache with CategoriesPage; predicate in `lib/categories.ts`).
+- `components/layout/useUncategorizedCount.ts` — nav badge hook (shares `['events', 'all']` cache with CategoriesPage;
+  predicate in `lib/categories.ts`). Currently unreferenced: neither nav renders a badge.
+- `components/layout/Sidebar.tsx` — desktop nav: five page items, then the category list (`Active` =
+  `/categories?all=true`, `No category`, one per category with inline add/edit/delete), Settings pinned at the bottom.
 - `components/layout/BottomNav.tsx` — mobile nav: 4 tabs + "More" bottom sheet (Activities, Insights, Settings). Max 5 slots; new pages go in the sheet.
 - `lib/activityTypes.ts` — `describeProfile`/`profileHint`, which **generate** the numeric hint copy
   from a type row, plus `CADENCE_OPTIONS`/`COOLDOWN_OPTIONS` (the only values those two fields may
