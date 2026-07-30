@@ -21,6 +21,15 @@ public static class StateEndpoints
             return Results.Ok(await svc.ListAsync(userId.Value));
         });
 
+        // Static segment, so it is declared before nothing that could shadow it - there is no
+        // "/api/states/{id}" GET - but it stays above the writes for readability.
+        group.MapGet("/snapshot", async (DateTimeOffset? at, ClaimsPrincipal principal, StateService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            return Results.Ok(await svc.SnapshotAsync(userId.Value, at ?? DateTimeOffset.UtcNow));
+        });
+
         group.MapPost("/", async (CreateStateRequest req, ClaimsPrincipal principal, StateService svc) =>
         {
             var userId = principal.GetUserId();

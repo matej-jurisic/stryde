@@ -7,7 +7,8 @@ using Stryde.Core.Enums;
 
 namespace Stryde.Core.Services;
 
-public class RecommendationService(StrydeDbContext db, UserSettingsService settings, ActivityTypeService activityTypes)
+public class RecommendationService(
+    StrydeDbContext db, UserSettingsService settings, ActivityTypeService activityTypes, StateService states)
 {
     /// <summary>Completed history older than this feeds neither timing hints nor cadence.</summary>
     private const int HistoryWindowDays = 90;
@@ -132,7 +133,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
 
         // What the user's states held over time, and what each activity needs them to hold. Both are
         // empty for a user who has configured no states, which is the case that has to cost nothing.
-        var (stateTimelines, requirementsByActivity) = await LoadStatesAsync(userId, committedOccurrences);
+        var (_, stateTimelines, requirementsByActivity, _) = await states.LoadContextAsync(userId, committedOccurrences);
 
         // Per-activity timing and cadence stats from windowed completed history
         var statsByActivity = completedHistory
@@ -448,81 +449,6 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
                 result.Add(MakeActivityRec(3, a));
 
         return result;
-    }
-
-    /// <summary>
-    /// Everything the state gate needs for one request: a folded timeline per state, and each
-    /// activity's requirements grouped by the state they constrain.
-    /// <para>
-    /// Returns two empty maps for a user with no states configured, which is the case that has to cost
-    /// nothing - one cheap query and then out.
-    /// </para>
-    /// </summary>
-    private async Task<(
-        Dictionary<Guid, StateTimeline> Timelines,
-        Dictionary<Guid, List<(Guid StateId, HashSet<Guid> Allowed)>> RequirementsByActivity)>
-        LoadStatesAsync(Guid userId, List<Occurrence> committedOccurrences)
-    {
-        var states = await db.States
-            .AsNoTracking()
-            .Include(s => s.Values)
-            .Where(s => s.UserId == userId)
-            .ToListAsync();
-
-        if (states.Count == 0) return ([], []);
-
-        var effects = await db.ActivityStateEffects
-            .AsNoTracking()
-            .Where(e => e.Activity.UserId == userId)
-            .Select(e => new { e.ActivityId, e.StateId, e.StateValueId, e.DurationMinutes })
-            .ToListAsync();
-
-        var requirements = await db.ActivityStateRequirements
-            .AsNoTracking()
-            .Where(r => r.Activity.UserId == userId)
-            .Select(r => new { r.ActivityId, r.StateValueId })
-            .ToListAsync();
-
-        var valueById = states.SelectMany(s => s.Values).ToDictionary(v => v.Id);
-        var effectsByActivity = effects.GroupBy(e => e.ActivityId).ToDictionary(g => g.Key, g => g.ToList());
-
-        // Sorted here rather than inside the fold so equal instants break on creation order, giving a
-        // day with two setters landing on the same minute a stable answer.
-        var setters = committedOccurrences
-            .Where(o => o.StartAt is not null && effectsByActivity.ContainsKey(o.ActivityId))
-            .Select(o => (At: o.EndAt ?? o.StartAt!.Value, o.CreatedAt, o.ActivityId))
-            .OrderBy(x => x.At)
-            .ThenBy(x => x.CreatedAt)
-            .ToList();
-
-        var settersByState = new Dictionary<Guid, List<StateSetter>>();
-        foreach (var (at, _, activityId) in setters)
-            foreach (var effect in effectsByActivity[activityId])
-            {
-                if (!valueById.TryGetValue(effect.StateValueId, out var value)) continue;
-                if (!settersByState.TryGetValue(effect.StateId, out var list))
-                    settersByState[effect.StateId] = list = [];
-                // The duration comes off the effect, not the value: the same "Tired: Yes" lasts ten
-                // hours after a run and two days after a hike.
-                list.Add(new StateSetter(at, value.Id, effect.DurationMinutes));
-            }
-
-        var timelines = states.ToDictionary(
-            s => s.Id,
-            s => StateTimeline.Build(
-                s.Values.FirstOrDefault(v => v.IsDefault)?.Id,
-                settersByState.GetValueOrDefault(s.Id) ?? []));
-
-        var requirementsByActivity = requirements
-            .Where(r => valueById.ContainsKey(r.StateValueId))
-            .GroupBy(r => r.ActivityId)
-            .ToDictionary(
-                g => g.Key,
-                g => g.GroupBy(r => valueById[r.StateValueId].StateId)
-                    .Select(sg => (StateId: sg.Key, Allowed: sg.Select(r => r.StateValueId).ToHashSet()))
-                    .ToList());
-
-        return (timelines, requirementsByActivity);
     }
 
     /// <summary>

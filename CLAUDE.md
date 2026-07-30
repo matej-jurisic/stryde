@@ -78,7 +78,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   States. Don't add a field that names a real-life thing (work, commute) instead of a scheduling
   behaviour.
 - `Common/StateTimeline.cs` — folds `StateSetter`s into a state's piecewise value over time, and
-  answers `IntervalsWhere(allowedValueIds, from, to)`. Nothing about a state is persisted: the value at
+  answers `IntervalsWhere(allowedValueIds, from, to)` for the engine's gate and `SegmentAt(instant)`
+  for a snapshot (value + when it began + when it ends). Nothing about a state is persisted: the value at
   an instant is derived from the schedule, so moving an occurrence moves the state with it. A setter
   fires at its occurrence's **end** (`EndAt ?? StartAt`); the setting **effect's** `DurationMinutes`
   decays it back to the state default, so one value can be held for different lengths by different
@@ -96,15 +97,20 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   "sometime that day" (`IsAllDay` alone is a date commitment, `IsPlanned` alone a window - both count).
   `ComputeStats` separately ignores all-day rows for the habitual start time and span-derived duration:
   midnight is not a start time. See `spec.md` → Recommendations.
-  `LoadStatesAsync` builds the per-state timelines and each
-  activity's requirement groups (returns two empty maps when the user has no states, the case that must
+  The per-state timelines and each activity's requirement groups come from
+  `StateService.LoadContextAsync` (`StateContext.Empty` when the user has no states, the case that must
   cost nothing). `AllowedIntervals` intersects the groups over the day; `StateAllows` is the gate;
   `AllowedSlots` masks `freeSlots` per activity and every placement branch draws candidates from it.
 - `Services/ActivityTypeService.cs` — type CRUD, `ResolveAsync` for the engine, and
   `SeedDefaultsAsync`/`DefaultsFor`, which `AuthService.RegisterAsync` calls (types cannot fall back
   to a built-in table the way `UserSettings` does — the rows *are* the list). Anything seeded must be
   expressible in the editor's cadence/cooldown dropdowns, or a built-in becomes unreachable by hand.
-- `Services/StateService.cs` — state + value CRUD. Invariants: exactly one default per state (the first
+- `Services/StateService.cs` — state + value CRUD, plus the two readers of the schedule:
+  `LoadContextAsync` (the `StateContext` the recommendation engine's gate uses - timelines, per-activity
+  requirement groups, and the setters' origins) and `SnapshotAsync` (what every state held at one
+  instant and why, for the calendar dialog). `SetsState` is the one predicate for "does this occurrence
+  set state", so the engine and a snapshot can't disagree about it.
+  Invariants: exactly one default per state (the first
   value is forced to be it), deleting a value still referenced returns `Conflict`, deleting the default
   promotes the oldest survivor. Value writes return the whole parent `StateDto`, since an invariant can
   move the default onto a sibling. **Durations are not here** — they live on the effect, so
@@ -128,7 +134,7 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Endpoints/*Endpoints.cs` — thin: parse → service → `result.ToProblem()`. Auth required on all routes except `/api/auth/*`.
   Key endpoint files: `ActivityEndpoints.cs` (`/api/activities`), `OccurrenceEndpoints.cs` (`/api/occurrences`),
   `SettingsEndpoints.cs` (`/api/settings`), `ActivityTypeEndpoints.cs` (`/api/activity-types`),
-  `StateEndpoints.cs` (`/api/states` + `/api/states/{stateId}/values`).
+  `StateEndpoints.cs` (`/api/states` + `/api/states/snapshot?at=` + `/api/states/{stateId}/values`).
 - `Endpoints/ApiResults.cs` — `Error.ToProblem()` + `principal.GetUserId()` (reads `sub` claim).
 
 **Frontend (`client/src`)**
@@ -141,10 +147,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   The three activity routes are one screen in three tabs: `/activities`, `/activities/types`,
   `/activities/states`. Types and states are user vocabulary, not app preferences, so they live here
   rather than in Settings. Their static segments outrank `/activities/:id`.
-- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`, `statesApi`/`stateValuesApi`, `activityTypesApi`.
+- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`, `statesApi` (incl. `snapshot(atIso)`)/`stateValuesApi`, `activityTypesApi`.
   On `activitiesApi.create`/`update`, **omitting** `setsStateValues`/`requiredStateValueIds` leaves them untouched
   and `[]` clears them — which is what lets `BulkAssignModal` resend everything else without knowing about states.
-- `lib/types.ts` — mirrors backend DTOs. Key types: `Activity` (has `activityTypeId` plus an embedded `type` summary), `Occurrence` (has `effectiveTitle`), `Recommendation` (flat; `activity` always present), `State`/`StateValue`, `ActivityType`.
+- `lib/types.ts` — mirrors backend DTOs. Key types: `Activity` (has `activityTypeId` plus an embedded `type` summary), `Occurrence` (has `effectiveTitle`), `Recommendation` (flat; `activity` always present), `State`/`StateValue`, `StateSnapshot`/`StateSnapshotEntry`, `ActivityType`.
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
 - `store/toasts.ts` — Zustand toast store; `toastError(err)` for mutation failures without inline error display.
@@ -188,6 +194,23 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   between ids and durations. A pick on the state's *default* value gets no duration (it would decay to
   itself), just the words that say why. Changing the unit reinterprets the number rather than
   converting it.
+- `components/activities/ActivityHistoryModal.tsx` — read-only "have I been doing this", opened from a
+  suggestion: the history icon on a `RecommendationPanel` row, or right-click / 400ms hold on a
+  calendar ghost (`SuggestionBlock`, which owns that gesture itself - plain click still schedules).
+  Reads `['events', 'activity', id]`, the same key `ActivityDetailPage` fills, so the two warm each
+  other. Cadence figures are **passed in** as `RecommendationStats` (`statsOf(rec)`) rather than
+  recomputed, so the dialog can't quote a different number than the row that opened it; a caller with
+  no recommendation behind it (a floating occurrence) passes null and those tiles degrade. The panel
+  owns its own instance of the dialog, so all three pages that render it get the feature.
+- `components/states/StateSnapshotModal.tsx` — read-only "what did the world look like here", opened by
+  clicking empty calendar grid (`CalendarPage.openStateSnapshot`, reached from the mouse no-drag path
+  and from the touch tap in `handleGridPointerUp`). Queries `['states', 'snapshot', iso]`; silent when
+  the user has no states. Creating an occurrence still needs a drag or a long press, so the plain click
+  was free to take.
+  ⚠️ The touch tap is guarded by four clauses (`TAP_MAX_MS`, `SCROLL_SETTLE_MS`, no latched swipe,
+  unchanged `scrollTop`) because a scrolling finger produces near-taps constantly, and the mouse path
+  additionally requires `lastPointerTypeRef.current === 'mouse'`: a touch reaches it a second time as a
+  compatibility mouse event, which would otherwise walk straight past all four.
 - `components/settings/SettingSection.tsx` — `SettingSection`/`SettingRow`/`SectionFooter`, the layout
   primitives `SettingsPage` is built from. Settings now holds preferences only.
 - `components/activities/ActivitiesTabs.tsx` — the underline tab strip the three activity routes share.
@@ -239,6 +262,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   embed their activity: its title feeds `effectiveTitle` and its category feeds every row and calendar block's
   colour). After any goal write also invalidate `['goals']`.
   States live under `['states']`; after a state or value write invalidate `['states']` and `['recommendations']`.
+  A snapshot is `['states', 'snapshot', iso]` with `staleTime: 0` - it depends on every occurrence around
+  it, so it re-asks on open rather than being invalidated from the occurrence side.
   Activity types live under `['activityTypes']`; after a type write invalidate all three of
   `['activityTypes']`, `['activities']` (rows embed the type's name and icon) and `['recommendations']`
   (the engine resolves profiles per request).

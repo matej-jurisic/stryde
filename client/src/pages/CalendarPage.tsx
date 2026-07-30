@@ -5,9 +5,12 @@ import { occurrencesApi, settingsApi, insightsApi, recommendationsApi, goalsApi,
 import { toastError } from '@/store/toasts'
 import type { Activity, Occurrence, InsightsFreeRange } from '@/lib/types'
 import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
+import { useStates } from '@/lib/useStates'
 import { EventModal } from '@/components/events/EventModal'
+import { StateSnapshotModal } from '@/components/states/StateSnapshotModal'
 import { EventDetailModal } from '@/components/events/EventDetailModal'
 import { ActivityModal } from '@/components/activities/ActivityModal'
+import { ActivityHistoryModal, statsOf, type RecommendationStats } from '@/components/activities/ActivityHistoryModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 
 const DEFAULT_HOUR_PX = 64
@@ -19,6 +22,17 @@ const MAX_HOUR_PX = 128
 const MIN_EVENT_PX = 16
 // Span drawn for a suggestion whose activity has no duration history.
 const DEFAULT_SUGGESTION_MINUTES = 30
+// Hold on a suggestion ghost that opens its history instead of the create modal. Longer than the
+// grid's own 350ms long press: this one competes with a tap, not with a scroll.
+const GHOST_HOLD_MS = 400
+// Longest touch that still counts as a tap asking about a moment. A press held past this was going
+// for the long-press create and let go early, or was a finger parked on the grid mid-scroll - neither
+// is a question. Comfortably under the 350ms the long press itself needs.
+const TAP_MAX_MS = 250
+// Momentum scrolling is stopped by landing a finger on it, and that lands as a pointerdown with no
+// movement - a tap in every respect except intent. A touch this soon after the last scroll event is
+// treated as arresting the scroll instead.
+const SCROLL_SETTLE_MS = 400
 // The server spreads suggestions across the day and lets at most two share any
 // instant, so this is a ceiling rather than the main throttle. Only the
 // top-ranked few get drawn; the panel remains the full list. User-tunable via
@@ -283,6 +297,8 @@ interface SuggestionGhost {
   activity: Activity
   startAt: string
   durationMinutes: number | null
+  /** Carried through so the history dialog quotes the same cadence figures the panel does. */
+  stats: RecommendationStats
 }
 
 interface LayoutSuggestion {
@@ -293,7 +309,15 @@ interface LayoutSuggestion {
   heightPx: number
 }
 
-function SuggestionBlock({ layout, onClick }: { layout: LayoutSuggestion; onClick: (g: SuggestionGhost) => void }) {
+function SuggestionBlock({
+  layout,
+  onClick,
+  onHistory,
+}: {
+  layout: LayoutSuggestion
+  onClick: (g: SuggestionGhost) => void
+  onHistory: (g: SuggestionGhost) => void
+}) {
   const { ghost, col, totalCols, topPx, heightPx } = layout
   const accentColor = ghost.activity.category?.color ?? 'var(--color-primary)'
   const isHex = accentColor.startsWith('#')
@@ -303,6 +327,37 @@ function SuggestionBlock({ layout, onClick }: { layout: LayoutSuggestion; onClic
   const leftPct = (col / totalCols) * 100
   const widthPct = 100 / totalCols
   const compact = heightPx < 26
+
+  // A ghost is often under 26px tall, so there is no room for a second button on it. History gets the
+  // two gestures scheduling does not use: right-click, and a hold on touch. Plain click stays what it
+  // was, since acting on the suggestion is still the common case.
+  const pressRef = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null)
+  const heldRef = useRef(false)
+
+  function clearPress() {
+    if (pressRef.current) clearTimeout(pressRef.current.timer)
+    pressRef.current = null
+  }
+
+  function handlePointerDown(e: React.PointerEvent) {
+    heldRef.current = false
+    if (e.pointerType !== 'touch') return
+    const x = e.clientX
+    const y = e.clientY
+    const timer = setTimeout(() => {
+      pressRef.current = null
+      heldRef.current = true
+      if (navigator.vibrate) navigator.vibrate(20)
+      onHistory(ghost)
+    }, GHOST_HOLD_MS)
+    pressRef.current = { timer, x, y }
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    const p = pressRef.current
+    if (!p) return
+    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) clearPress()
+  }
 
   return (
     <div
@@ -316,8 +371,18 @@ function SuggestionBlock({ layout, onClick }: { layout: LayoutSuggestion; onClic
       }}
     >
       <button
-        onClick={(e) => { e.stopPropagation(); onClick(ghost) }}
-        title={`Suggested: ${ghost.activity.title} at ${timeLabel(ghost.startAt)}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          // The hold already opened the history; the release that follows it is not a click.
+          if (heldRef.current) { heldRef.current = false; return }
+          onClick(ghost)
+        }}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onHistory(ghost) }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={clearPress}
+        onPointerCancel={clearPress}
+        title={`Suggested: ${ghost.activity.title} at ${timeLabel(ghost.startAt)} (right-click or hold for history)`}
         className="absolute inset-0 overflow-hidden rounded-[4px] text-left opacity-70 transition-opacity hover:opacity-100"
         style={{
           border: `1.5px dotted ${accentColor}`,
@@ -635,11 +700,12 @@ interface DayColumnProps {
   likelyFree: InsightsFreeRange[]
   suggestions: SuggestionGhost[]
   onSuggestionClick: (g: SuggestionGhost) => void
+  onSuggestionHistory: (g: SuggestionGhost) => void
   animateDir?: 'forward' | 'back' | null
   navCount: number
 }
 
-function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx, likelyFree, suggestions, onSuggestionClick, animateDir, navCount }: DayColumnProps) {
+function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeOverlay, isToday, borderLeft, borderRight, onEventMoveStart, onEventResizeStart, suppressClickRef, movingEventId, resizingEventId, hourPx, likelyFree, suggestions, onSuggestionClick, onSuggestionHistory, animateDir, navCount }: DayColumnProps) {
   const dayStart = sod(day)
   const dayEnd = addDays(dayStart, 1)
 
@@ -750,6 +816,7 @@ function DayColumn({ day, allEvents, onEventClick, overlay, moveOverlay, resizeO
               key={l.ghost.activity.id + l.ghost.startAt}
               layout={l}
               onClick={onSuggestionClick}
+              onHistory={onSuggestionHistory}
             />
           ))}
         </div>
@@ -1194,6 +1261,10 @@ export function CalendarPage() {
   const [scheduleMode, setScheduleMode] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailEvent, setDetailEvent] = useState<Occurrence | null>(null)
+  /** The instant a click on empty grid asked about; null when the snapshot dialog is closed. */
+  const [snapshotAt, setSnapshotAt] = useState<Date | null>(null)
+  /** The suggestion whose history is on screen; null when that dialog is closed. */
+  const [historyFor, setHistoryFor] = useState<{ activity: Activity; stats: RecommendationStats } | null>(null)
   const [activityModalOpen, setActivityModalOpen] = useState(false)
   const [editingActivity, setEditingActivity] = useState<Activity | undefined>()
   const [duplicateFromOccurrence, setDuplicateFromOccurrence] = useState<Occurrence | undefined>()
@@ -1215,7 +1286,22 @@ export function CalendarPage() {
     startDayIdx: number
     startY: number
     timer: ReturnType<typeof setTimeout>
+    /** Pressed on an event's minimum-height overflow zone: the tap belongs to that event, not the grid. */
+    startedOnBlock: boolean
+    downAt: number
+    /** Where the view sat when the finger landed; a change means the grid moved under it. */
+    scrollTop: number
+    /** Landed on a still-scrolling view, so this press is stopping it rather than pointing at a time. */
+    arrestingScroll: boolean
   } | null>(null)
+  /** Last scroll of the time grid, in `performance.now()` terms. See SCROLL_SETTLE_MS. */
+  const lastScrollAtRef = useRef(0)
+  /**
+   * Pointer type of the press in progress. A touch is followed by compatibility mouse events, which
+   * would otherwise re-enter the mouse handler and open the snapshot past every guard the touch path
+   * just applied. Pointerdown always precedes them, so this is set by the time they arrive.
+   */
+  const lastPointerTypeRef = useRef<string>('mouse')
   const autoScrollRef = useRef<{ rafId: number; clientX: number; clientY: number } | null>(null)
   const [dragOverlays, setDragOverlays] = useState<Map<number, { topPx: number; heightPx: number }>>(
     () => new Map(),
@@ -1284,6 +1370,10 @@ export function CalendarPage() {
     queryFn: () => categoriesApi.list(),
     enabled: activityModalOpen,
   })
+
+  // Only to decide whether a click on empty grid has anything to say; the snapshot itself is read
+  // server-side. Shares the `['states']` cache with the states admin and the activity modal.
+  const { states } = useStates()
 
   // Effective "today" respecting the day boundary
   const effectiveToday = useMemo(() => {
@@ -1367,6 +1457,7 @@ export function CalendarPage() {
               activity: rec.activity,
               startAt: rec.suggestedStartAt,
               durationMinutes: rec.typicalDurationMinutes,
+              stats: statsOf(rec),
             }]
           : [],
       )
@@ -1634,6 +1725,10 @@ export function CalendarPage() {
     setDefaultStartAt(formatDatetimeLocal(start))
     setDefaultEndAt(formatDatetimeLocal(new Date(start.getTime() + mins * 60000)))
     setModalOpen(true)
+  }
+
+  function openSuggestionHistory(ghost: SuggestionGhost) {
+    setHistoryFor({ activity: ghost.activity, stats: ghost.stats })
   }
 
   function openCreate(startAt?: string, endAt?: string) {
@@ -2365,7 +2460,8 @@ export function CalendarPage() {
     // mousedown bubbles independently of pointerdown, so an event-move or resize
     // that already started via pointerdown would run concurrently. Bail out early.
     if (eventMoveRef.current || resizeDragActiveRef.current || allDayDragActiveRef.current) return
-    if ((e.target as Element).closest('button')) {
+    const startedOnBlock = !!(e.target as Element).closest('button')
+    if (startedOnBlock) {
       // Same minimum-height overflow carve-out as handleGridPointerDown: below
       // the event's true end the press belongs to the grid, not the event.
       const block = (e.target as Element).closest('[data-true-end-px]') as HTMLElement | null
@@ -2401,7 +2497,14 @@ export function CalendarPage() {
       const { startDayIdx, startY, isDrag } = dragRef.current
       dragRef.current = null
       setDragOverlays(new Map())
-      if (!isDrag) return
+      if (!isDrag) {
+        // A press with no drag creates nothing - it asks what the world looks like there. Skipped on
+        // an event's overflow zone, where the browser's click is about to open that event instead, and
+        // for a touch, which reaches this handler again as a compatibility mouse event: that press has
+        // already been judged, more carefully, in handleGridPointerUp.
+        if (!startedOnBlock && lastPointerTypeRef.current === 'mouse') openStateSnapshot(startDayIdx, startY)
+        return
+      }
       // Drags can now start on an event's overflow zone; swallow the click the
       // browser fires on the underlying button so the detail modal doesn't open.
       suppressClickRef.current = true
@@ -2533,14 +2636,30 @@ export function CalendarPage() {
     state.rafId = requestAnimationFrame(tick)
   }
 
+  /**
+   * Opens the state snapshot for the grid position pressed. Snapped to the same quarter-hour grid a
+   * created event would land on, so the moment asked about is the moment the grid draws.
+   * Silent when the user has no states: an empty dialog is worse than the click doing nothing.
+   */
+  function openStateSnapshot(dayIdx: number, y: number) {
+    if (states.length === 0) return
+    // The same press is dismissing an open popover (both close on a document listener), and a click
+    // that closes one thing should not open another.
+    if (viewDropOpen || datePopOpen) return
+    setSnapshotAt(snapToGrid(days[dayIdx], Math.max(0, Math.min(y, hourPxRef.current * 24 - 1)), hourPxRef.current))
+  }
+
   function handleGridPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    // Recorded for every pointer type, before the touch-only work below.
+    lastPointerTypeRef.current = e.pointerType
     if (e.pointerType !== 'touch') return
     if (pinchActiveRef.current) return
     const startClientX = e.clientX
     const startClientY = e.clientY
     const startDayIdx = getDayIdxFromX(startClientX)
     const startY = getYInGrid(startClientY)
-    if ((e.target as Element).closest('button')) {
+    const startedOnBlock = !!(e.target as Element).closest('button')
+    if (startedOnBlock) {
       // Allow drag creation in the minimum-height overflow zone below the event's true end time.
       // Short events get a visual minimum height (MIN_EVENT_PX) that extends their button below
       // their actual end time; without this check the next 15-min slot appears unreachable.
@@ -2564,7 +2683,12 @@ export function CalendarPage() {
       startAutoScroll(startClientX, startClientY)
       if (navigator.vibrate) navigator.vibrate(30)
     }, 350)
-    pendingTouchRef.current = { pointerId, startClientX, startClientY, startDayIdx, startY, timer }
+    pendingTouchRef.current = {
+      pointerId, startClientX, startClientY, startDayIdx, startY, timer, startedOnBlock,
+      downAt: performance.now(),
+      scrollTop: scrollRef.current?.scrollTop ?? 0,
+      arrestingScroll: performance.now() - lastScrollAtRef.current < SCROLL_SETTLE_MS,
+    }
   }
 
   function handleGridPointerMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -2622,9 +2746,27 @@ export function CalendarPage() {
 
   function handleGridPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     if (e.pointerType !== 'touch') return
-    if (pendingTouchRef.current) {
-      clearTimeout(pendingTouchRef.current.timer)
+    // A tap: quick, still, and on nothing. Creating an event needs the hold, so the tap is free to ask
+    // what the world looks like there instead - but only when it is unambiguously a tap. Everything a
+    // scrolling finger does looks like one at some point: it lands to stop momentum, it rests before
+    // flicking, it grazes the glass. Each clause below rules out one of those, and a press that fails
+    // any of them simply does nothing, which is what it did before this existed.
+    const pending = pendingTouchRef.current
+    const wasTap =
+      !!pending
+      && !dragRef.current                                            // the long press never armed a drag
+      && !pending.startedOnBlock                                     // an event's overflow zone, not the grid
+      && swipeRef.current === null                                   // never moved far enough to latch a direction
+      && !pending.arrestingScroll                                    // landed on a view still gliding
+      && performance.now() - pending.downAt < TAP_MAX_MS             // a tap, not a parked finger
+      && (scrollRef.current?.scrollTop ?? 0) === pending.scrollTop   // the grid held still underneath it
+    if (pending) {
+      clearTimeout(pending.timer)
       pendingTouchRef.current = null
+    }
+    if (wasTap) {
+      openStateSnapshot(pending!.startDayIdx, pending!.startY)
+      return
     }
     if (swipeRef.current?.direction === 'horizontal') {
       const dx = e.clientX - swipeRef.current.startX
@@ -2913,7 +3055,7 @@ export function CalendarPage() {
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       ) : (
-        <div ref={scrollRef} className="scroll-slim flex-1 overflow-y-auto flex flex-col" style={{ WebkitTouchCallout: 'none' }} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+        <div ref={scrollRef} className="scroll-slim flex-1 overflow-y-auto flex flex-col" style={{ WebkitTouchCallout: 'none' }} onScroll={(e) => { lastScrollAtRef.current = performance.now(); setScrollTop(e.currentTarget.scrollTop) }}>
           {/* Multi-day headers + all-day row — sticky, inside scroll container to share column widths */}
           {view !== 'day' && (
             <div className="sticky top-0 z-40 bg-background">
@@ -3090,6 +3232,7 @@ export function CalendarPage() {
                   likelyFree={day.getTime() >= effectiveToday.getTime() ? (likelyFreeByWeekday.get(day.getDay()) ?? []) : []}
                   suggestions={suggestionsByDay[idx] ?? []}
                   onSuggestionClick={openFromSuggestion}
+                  onSuggestionHistory={openSuggestionHistory}
                   animateDir={navDir}
                   navCount={navCount}
                 />
@@ -3140,6 +3283,19 @@ export function CalendarPage() {
       )}
 
       </div>
+
+      <StateSnapshotModal
+        open={snapshotAt !== null}
+        at={snapshotAt}
+        onClose={() => setSnapshotAt(null)}
+      />
+
+      <ActivityHistoryModal
+        open={historyFor !== null}
+        activity={historyFor?.activity ?? null}
+        stats={historyFor?.stats}
+        onClose={() => setHistoryFor(null)}
+      />
 
       <EventDetailModal
         open={detailOpen}

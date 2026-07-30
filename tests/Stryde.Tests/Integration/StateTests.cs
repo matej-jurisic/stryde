@@ -178,6 +178,48 @@ public class StateTests : IDisposable
     }
 
     [Fact]
+    public async Task Get_snapshot_requires_authentication()
+    {
+        var res = await _client.GetAsync("/api/states/snapshot?at=2026-07-30T10:00:00Z");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_snapshot_reads_the_value_a_scheduled_occurrence_sets()
+    {
+        await AuthenticateAsync();
+        var state = await CreateStateAsync();
+        await AddValueAsync(state.Id, "Home");
+        var withWork = await AddValueAsync(state.Id, "Work");
+        var work = withWork.Values.Single(v => v.Name == "Work");
+
+        var activity = await (await _client.PostAsJsonAsync("/api/activities", new
+        {
+            title = "commute in",
+            setsStateValues = new[] { new { stateValueId = work.Id } },
+        })).ReadAsync<ActivityDto>();
+
+        var occurrence = await _client.PostAsJsonAsync("/api/occurrences", new
+        {
+            activityId = activity.Id,
+            startAt = "2026-07-30T08:00:00Z",
+            endAt = "2026-07-30T09:00:00Z",
+        });
+        occurrence.EnsureSuccessStatusCode();
+
+        var after = await (await _client.GetAsync("/api/states/snapshot?at=2026-07-30T10:00:00Z"))
+            .ReadAsync<StateSnapshotDto>();
+        var before = await (await _client.GetAsync("/api/states/snapshot?at=2026-07-30T07:00:00Z"))
+            .ReadAsync<StateSnapshotDto>();
+
+        Assert.Equal("Work", Assert.Single(after.States).ValueName);
+        Assert.Equal("commute in", after.States[0].SetBy);
+        // Same schedule, earlier question: the state is a reading of it, not a record kept beside it.
+        Assert.Equal("Home", Assert.Single(before.States).ValueName);
+    }
+
+    [Fact]
     public async Task Activity_rejects_a_state_value_belonging_to_another_user()
     {
         await AuthenticateAsync();

@@ -231,6 +231,20 @@ minutes, hours, or days.
 - Durations cross the day boundary freely. 1-43200 minutes (30 days); past that a "temporary" value
   is just the state's normal value.
 
+#### Reading a state at an instant
+
+Because a state is a reading of the schedule, any instant can be asked about. **Clicking empty space
+on the calendar grid** opens a read-only dialog for that quarter-hour: every state, the value it holds
+then, and why - the occurrence that set it and when, plus when the value ends and what it becomes.
+
+- Answers for a **future** instant exactly as for a past one. The grid already shows what is planned;
+  this says what that plan implies about the world.
+- A value the state simply defaults to names no cause, and neither does one it decayed back to: an
+  expiry is nothing anybody scheduled.
+- Nothing here is editable. A wrong reading is wrong on the calendar or in some activity's **Changes**,
+  and that is where it gets fixed.
+- With no states defined the click does nothing, rather than opening an empty dialog.
+
 #### What requirements do to suggestions
 
 Requirements are **suggestion-only**. Nothing here ever blocks scheduling something by hand.
@@ -536,6 +550,17 @@ far, and when state requirements leave no room. The recommendation still surface
   placement already spreads suggestions and caps overlap at two. Clicking a ghost opens the modal
   pre-filled rather than creating anything.
 
+### Activity history dialog
+
+Every suggestion can answer "have I actually been doing this" without leaving the day being planned:
+a panel row has a history icon, and a calendar ghost opens the same dialog on right-click or a hold
+(plain click stays scheduling, which is the common case). It is read-only. It shows last done,
+cadence, usual time and usual length, a twelve-week strip of one cell per day, and the ten most
+recent occurrences with their status. The cadence figures are the ones the engine already computed
+for that recommendation, so the dialog and the row's reason line can never disagree; opened from a
+floating occurrence, which has no recommendation behind it, those two tiles fall back to the gap
+between the last two completions or read `Unknown`. `Open activity` leads to the full detail page.
+
 ---
 
 ## Views
@@ -596,7 +621,12 @@ Day, 3-day, and week views (choice persisted), with prev/next, jump-to-today, an
   hatched background on today and future columns marking the hours that usually stay empty on that
   weekday.
 - Clicking a block opens the occurrence detail modal; clicking a ghost opens a pre-filled create
-  modal.
+  modal. Clicking (or tapping) **empty** grid opens the state snapshot for that quarter-hour - see
+  States → Reading a state at an instant. Creating still takes a drag, or a long press on touch, so
+  the cheaper gesture answers rather than writes.
+- On touch only a **deliberate tap** counts: short, still, on a grid that is not moving and was not
+  gliding when the finger landed. A scrolling finger looks like a tap at several points - stopping
+  momentum, resting before a flick - and none of those may open anything.
 
 ### Categories
 
@@ -705,6 +735,7 @@ Unauthorized→401, Forbidden→403.
 | `/api/categories[/{id}]` | `GET`, `POST`, `PUT`, `DELETE` |
 | `/api/activity-types[/{id}]` | `GET`, `POST`, `PUT`, `DELETE` |
 | `/api/states[/{id}]` | `GET`, `POST`, `PUT`, `DELETE` |
+| `/api/states/snapshot` | `GET` (`at`, defaults to now) |
 | `/api/states/{stateId}/values[/{id}]` | `POST`, `PUT`, `DELETE` |
 | `/api/recommendations` | `GET` (`date`) |
 | `/api/insights`, `/api/insights/empty-profile` | `GET` (`period`) |

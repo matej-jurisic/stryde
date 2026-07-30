@@ -1,10 +1,11 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarPlus, Plus, Sparkles, X } from 'lucide-react'
+import { CalendarPlus, History, Plus, Sparkles, X } from 'lucide-react'
 import { occurrencesApi, recommendationsApi } from '@/lib/api'
 import type { Activity, GoalStatus, Occurrence, Recommendation } from '@/lib/types'
 import { toastError } from '@/store/toasts'
 import { Badge } from '@/components/ui/Badge'
+import { ActivityHistoryModal, statsOf, type RecommendationStats } from '@/components/activities/ActivityHistoryModal'
 
 export interface ActivityTiming {
   durationMinutes: number | null
@@ -102,7 +103,32 @@ function formatDuration(o: Occurrence): string | null {
   return formatMins(mins)
 }
 
-function OccurrenceRecItem({ occurrence, onSchedule }: { occurrence: Occurrence; onSchedule: () => void }) {
+/**
+ * Reaches the activity's track record without leaving the day being planned. Recedes until the row is
+ * hovered, but never disappears: on touch there is no hover to reveal it with.
+ */
+function HistoryButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title="View history"
+      aria-label="View history"
+      className="shrink-0 text-muted-foreground opacity-50 transition-opacity hover:text-primary group-hover:opacity-100"
+    >
+      <History className="h-4 w-4" />
+    </button>
+  )
+}
+
+function OccurrenceRecItem({
+  occurrence,
+  onSchedule,
+  onHistory,
+}: {
+  occurrence: Occurrence
+  onSchedule: () => void
+  onHistory: () => void
+}) {
   const goal = occurrence.activity.goal
   const duration = formatDuration(occurrence)
 
@@ -123,13 +149,16 @@ function OccurrenceRecItem({ occurrence, onSchedule }: { occurrence: Occurrence;
           </div>
         )}
       </div>
-      <button
-        onClick={onSchedule}
-        title={occurrence.startAt ? 'Edit occurrence' : 'Schedule occurrence'}
-        className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary"
-      >
-        <CalendarPlus className="h-4 w-4" />
-      </button>
+      <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
+        <HistoryButton onClick={onHistory} />
+        <button
+          onClick={onSchedule}
+          title={occurrence.startAt ? 'Edit occurrence' : 'Schedule occurrence'}
+          className="shrink-0 text-muted-foreground hover:text-primary"
+        >
+          <CalendarPlus className="h-4 w-4" />
+        </button>
+      </div>
     </li>
   )
 }
@@ -139,12 +168,14 @@ function ActivityRecItem({
   date,
   onCreate,
   onQuickSchedule,
+  onHistory,
   isScheduling,
 }: {
   rec: Recommendation
   date: string
   onCreate: () => void
   onQuickSchedule: () => void
+  onHistory: () => void
   isScheduling: boolean
 }) {
   const activity = rec.activity
@@ -178,25 +209,28 @@ function ActivityRecItem({
             </div>
           )}
         </button>
-        {rec.suggestedStartAt ? (
-          <button
-            onClick={onQuickSchedule}
-            disabled={isScheduling}
-            title={`Schedule at ${formatClock(rec.suggestedStartAt)}`}
-            className="mt-0.5 flex shrink-0 items-center gap-0.5 rounded-md border border-border py-1 pl-1 pr-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary disabled:opacity-50"
-          >
-            <Plus className="h-3 w-3" strokeWidth={2.5} />
-            {formatClock(rec.suggestedStartAt)}
-          </button>
-        ) : (
-          <button
-            onClick={onCreate}
-            title="Schedule activity"
-            className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary"
-          >
-            <CalendarPlus className="h-4 w-4" />
-          </button>
-        )}
+        <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
+          <HistoryButton onClick={onHistory} />
+          {rec.suggestedStartAt ? (
+            <button
+              onClick={onQuickSchedule}
+              disabled={isScheduling}
+              title={`Schedule at ${formatClock(rec.suggestedStartAt)}`}
+              className="flex shrink-0 items-center gap-0.5 rounded-md border border-border py-1 pl-1 pr-1.5 font-mono text-[11px] text-muted-foreground transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary disabled:opacity-50"
+            >
+              <Plus className="h-3 w-3" strokeWidth={2.5} />
+              {formatClock(rec.suggestedStartAt)}
+            </button>
+          ) : (
+            <button
+              onClick={onCreate}
+              title="Schedule activity"
+              className="shrink-0 text-muted-foreground hover:text-primary"
+            >
+              <CalendarPlus className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
     </li>
   )
@@ -206,6 +240,10 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
   const qc = useQueryClient()
   const label = dayLabel(date, today)
   const isNamedDay = label === 'today' || label === 'tomorrow' || label === 'yesterday'
+
+  // Owned here rather than lifted to a prop: every page that renders the panel wants the same dialog,
+  // and none of them has anything to add to it.
+  const [history, setHistory] = useState<{ activity: Activity; stats: RecommendationStats | null } | null>(null)
 
   // One-click scheduling into the server-picked slot. The modal path stays available on the
   // row body for anything that needs adjusting.
@@ -292,6 +330,7 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
                   key={o.id}
                   occurrence={o}
                   onSchedule={() => onOccurrenceClick(o)}
+                  onHistory={() => setHistory({ activity: o.activity, stats: null })}
                 />
               ))}
             </ul>
@@ -320,6 +359,7 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
                   date={date}
                   onCreate={() => onActivityClick(rec.activity, { durationMinutes: rec.typicalDurationMinutes, startTime: rec.typicalStartTime })}
                   onQuickSchedule={() => scheduleMutation.mutate(rec)}
+                  onHistory={() => setHistory({ activity: rec.activity, stats: statsOf(rec) })}
                   isScheduling={
                     scheduleMutation.isPending &&
                     scheduleMutation.variables?.activity.id === rec.activity.id
@@ -370,6 +410,13 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
           </div>
         </div>
       )}
+
+      <ActivityHistoryModal
+        open={history !== null}
+        activity={history?.activity ?? null}
+        stats={history?.stats}
+        onClose={() => setHistory(null)}
+      />
     </>
   )
 }

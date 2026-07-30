@@ -88,6 +88,21 @@ public sealed class StateTimeline
     }
 
     /// <summary>
+    /// What the state held at one instant: the value, when it took effect and when it stops. Both ends
+    /// are null at the ends of the timeline - <c>Since</c> while the state is still on the segment
+    /// nothing has touched, <c>Until</c> when the value holds indefinitely.
+    /// </summary>
+    public (DateTimeOffset? Since, Guid? ValueId, DateTimeOffset? Until) SegmentAt(DateTimeOffset instant)
+    {
+        var i = _segments.Count - 1;
+        while (i > 0 && _segments[i].Start > instant) i--;
+        return (
+            i == 0 ? null : _segments[i].Start,
+            _segments[i].ValueId,
+            i + 1 < _segments.Count ? _segments[i + 1].Start : null);
+    }
+
+    /// <summary>
     /// The stretches of <c>[from, to)</c> where the state holds one of <paramref name="allowed"/>,
     /// merged and in order. Empty when it never does, which is what silences an activity for the day.
     /// </summary>

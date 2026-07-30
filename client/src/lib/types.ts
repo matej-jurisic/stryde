@@ -252,6 +252,33 @@ export interface State {
   values: StateValue[]
 }
 
+/**
+ * What every state held at one instant. Derived from the schedule server-side, so it answers for a
+ * future instant as readily as a past one, and moving an occurrence moves the reading with it.
+ */
+export interface StateSnapshot {
+  at: string
+  states: StateSnapshotEntry[]
+}
+
+export interface StateSnapshotEntry {
+  stateId: string
+  stateName: string
+  /** Null when the state has no default and nothing has set it. */
+  valueId: string | null
+  valueName: string | null
+  /** The value in force is the state's default, i.e. nothing is holding it. */
+  isDefault: boolean
+  /** When the value took effect; null while nothing has ever set the state. */
+  since: string | null
+  /** When it changes next, by expiry or by another setter; null holds indefinitely. */
+  until: string | null
+  setByOccurrenceId: string | null
+  /** Title of the occurrence that set it; null for an untouched default or a value it decayed back to. */
+  setBy: string | null
+  nextValueName: string | null
+}
+
 export interface StateValue {
   id: string
   stateId: string

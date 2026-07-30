@@ -256,6 +256,33 @@ public sealed record StateValueDto(
         new(v.Id, v.StateId, v.Name, v.IsDefault, v.CreatedAt);
 }
 
+/// <summary>
+/// What every state held at one instant. Derived from the schedule per request, so it answers for a
+/// future instant as readily as a past one - see <c>spec.md</c> -> States.
+/// </summary>
+public sealed record StateSnapshotDto(DateTimeOffset At, List<StateSnapshotEntryDto> States);
+
+/// <param name="ValueId">Null when the state has no default and nothing has set it - it satisfies no requirement.</param>
+/// <param name="IsDefault">Whether the value in force is the state's default, i.e. nothing is holding it.</param>
+/// <param name="Since">When the value took effect; null while nothing has ever set the state.</param>
+/// <param name="Until">When it changes next, by expiry or by another setter; null holds indefinitely.</param>
+/// <param name="SetBy">
+/// Title of the occurrence that set it, null when the value is the untouched default or when the
+/// segment began with an expiry decaying back to it.
+/// </param>
+/// <param name="NextValueName">What it becomes at <paramref name="Until"/>.</param>
+public sealed record StateSnapshotEntryDto(
+    Guid StateId,
+    string StateName,
+    Guid? ValueId,
+    string? ValueName,
+    bool IsDefault,
+    DateTimeOffset? Since,
+    DateTimeOffset? Until,
+    Guid? SetByOccurrenceId,
+    string? SetBy,
+    string? NextValueName);
+
 public sealed record CreateStateRequest(string Name);
 public sealed record UpdateStateRequest(string Name);
 public sealed record CreateStateValueRequest(string Name, bool IsDefault = false);

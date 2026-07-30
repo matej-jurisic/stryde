@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
-import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityStateEffect, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile, State } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityStateEffect, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile, State, StateSnapshot } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -231,6 +231,8 @@ export const categoriesApi = {
 
 export const statesApi = {
   list: () => request<State[]>('/api/states'),
+  /** `at` is an instant (ISO, UTC): what every state held then, and what put it there. */
+  snapshot: (at: string) => request<StateSnapshot>(`/api/states/snapshot?at=${encodeURIComponent(at)}`),
   create: (body: { name: string }) =>
     request<State>('/api/states', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: string, body: { name: string }) =>

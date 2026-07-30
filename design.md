@@ -75,7 +75,7 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - **Content:** "Floating" first (already-committed work needing a time), then activities grouped by recommendation tier label ("Focus Goals", "Active Goals", "Based on Your Habits").
 - **Suggestion list items:** two side-by-side targets, never nested buttons.
   - *Body* (opens the event modal): title, effort floated right (`~45m`), reason line beneath in `text-[11px] text-muted-foreground/80`, goal tag pill below (color-matched to goal status).
-  - *Action* (right edge): when the server returned a suggested slot, an outlined mono pill showing `+ 18:00` that schedules there in one click, hover shifting to primary tint. With no slot it degrades to the plain `CalendarPlus` icon that opens the modal.
+  - *Action* (right edge): a `History` icon at 50% opacity rising to full on row hover, then when the server returned a suggested slot, an outlined mono pill showing `+ 18:00` that schedules there in one click, hover shifting to primary tint. With no slot the pill degrades to the plain `CalendarPlus` icon that opens the modal. The history icon never hides entirely: there is no hover on touch to reveal it with.
   - The reason line is optional: activities with no completion history show title and action only.
 - Separated from canvas by 1px border-r.
 
@@ -86,7 +86,9 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - **Floating row:** All-day row pinned above the time grid — shows floating occurrences as compact chips. Overdue occurrences are rendered in a separate sticky band at the top of the scroll container so they stay visible while scrolling.
 - **Content:** Time-based vertical grid. Hours listed on the far left. Event blocks placed in their time slots.
 - **Event blocks:** Light-tinted background + solid 1px colored left border, matching the event's goal color. Title + time range inside.
-- **Suggestion ghosts:** Toggled by the `Sparkles` button in the top bar (tinted primary when on), capped per day by the `Calendar suggestions` setting. Placeholder blocks drawn where the engine would place a suggested activity: **dotted** 1.5px border in the activity's category color (planned occurrences own the dashed border, real ones the solid one), a very faint tint over an opaque card base, `Sparkles` icon + title, and `opacity-70` rising to full on hover. They render *below* the event layer, so a real block always wins the pixels.
+- **Clicking empty grid** opens the state snapshot dialog for that quarter-hour (see below). Creating an occurrence keeps the drag, and the long press on touch: the gesture that costs nothing answers a question, and the one that writes has to be deliberate.
+- On touch the bar for "a tap" is high, because a scrolling finger keeps producing near-taps: under 250ms, no latched swipe direction, not landed on a still-gliding view, and the scroll position unchanged while it was down. A press that misses any of those does nothing at all - the dialog is a convenience, and a convenience that fires while you are reading the day is worse than no dialog.
+- **Suggestion ghosts:** Toggled by the `Sparkles` button in the top bar (tinted primary when on), capped per day by the `Calendar suggestions` setting. Placeholder blocks drawn where the engine would place a suggested activity: **dotted** 1.5px border in the activity's category color (planned occurrences own the dashed border, real ones the solid one), a very faint tint over an opaque card base, `Sparkles` icon + title, and `opacity-70` rising to full on hover. They render *below* the event layer, so a real block always wins the pixels. A ghost is often under 26px tall, so it gets no second button: click schedules, and **right-click or a 400ms hold** opens the activity history dialog. The `title` names both, since neither gesture announces itself.
 
 ---
 
@@ -129,6 +131,21 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - **One row per state, name in a fixed left column** (`h-8 w-20`, `text-xs text-muted-foreground`, truncating with a `title`), chips wrapping in the rest of the width. A name on its own line above its chips doubles the height of the field and leaves the right half of every row empty.
 - Chips are the activity-type chip: `h-8 rounded-lg border px-2.5 text-xs font-medium`, selected `border-primary bg-primary/10 text-foreground`.
 - Explain a *missing* control where it would have been, in three words, not in a paragraph below: picking a state's default value shows `defaults don't expire` where the duration would sit.
+
+### State snapshot dialog (calendar)
+
+- Opened by clicking empty grid. Titled with the moment itself (`States at Thu 30 Jul, 14:15`), so the dialog needs no restating line inside it.
+- Reuses the activity modal's state panel shape: `divide-y divide-border rounded-lg border border-border bg-muted/40`, one row per state, **name in a fixed left column** (`w-20`, `text-xs text-muted-foreground`), value on the right. The value is the selected chip (`border-primary bg-primary/10`) - the same glyph that would pick it, here just showing it.
+- Under the chip, one `text-xs text-muted-foreground` sentence carrying the cause then the expiry: `Set by commute in at 09:00, until 17:30, then Home`. Two clauses in one line, not a table: the fields are only ever read together, and half of them are absent for a value nothing has touched.
+- **No buttons.** A derived reading has nothing to save, and offering an edit here would invite fixing the symptom instead of the schedule that produced it.
+
+### Activity history dialog
+
+- Titled `<activity> - history`, opened from a suggestion. Meta line first (type, category, goal badge), then four stat tiles, then the day strip, then the recent list. Widest-to-narrowest: the tiles answer the question in one glance, the strip shows the shape, the list is the detail you only sometimes want.
+- **Stat tiles:** `grid-cols-2 sm:grid-cols-4`, each `rounded-lg border border-border bg-muted/40 px-2.5 py-2` with a `text-[10px] uppercase tracking-wide` label over a `text-sm` value. A tile with nothing to show reads `Unknown` in muted text rather than vanishing: a missing figure is itself an answer, and four tiles that come and go make the dialog resize between activities.
+- **Day strip:** twelve week columns of seven `h-3 w-3 rounded-[3px]` cells, Monday at the top, newest column at the right, weekday initials every other row. Done is solid `bg-primary`, skipped `bg-muted-foreground/60`, pending an outlined `border-primary/50 bg-primary/10`, an empty day flat `bg-muted`, and a day that has not happened yet nothing at all. Each cell carries its date as a `title`; the legend spells out the four fills and the window.
+- **Recent list:** the activity detail page's occurrence row, at ten rows: status dot, date with `HH:mm` in mono when the occurrence has a time, status word on the right.
+- **Read-only**, like the state snapshot: the two footer buttons are `Close` and an outlined `Open activity` that leads to the detail page for anything this dialog deliberately leaves out.
 
 ### Checkboxes (events)
 
