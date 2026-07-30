@@ -205,7 +205,8 @@ move a commute and the state moves with it.
 - **Only occurrences on the calendar set state:** `pending` or `done`, with a real start. Pending
   counts because it is intent. **Skipped ones do not** - skipping is an explicit decision not to, the
   same reason a skipped block frees its time. **Suggestions never set state**, only real occurrences,
-  so the engine cannot bootstrap a day out of its own guesses.
+  so the engine cannot bootstrap a day out of its own guesses. **All-day planned occurrences do not
+  either** - a setter needs an instant, and "sometime on Thursday" is not one. See Recommendations.
 - **Ties break on end time then creation**, so two setters landing on the same minute have a stable
   answer.
 - **Lookback is unbounded**, and free: the engine already loads the user's whole occurrence table,
@@ -441,7 +442,11 @@ Recommendations are ranked — all tiers surface **activities** (not occurrences
 2. Activities linked to Active goals
 3. Activities with a day-of-week pattern matching today (>=2 completions on this weekday in the past 6 weeks), where no instance is already on today's schedule — sorted by frequency descending
 
-Activities already **scheduled or completed** today are excluded from all tiers - doing something counts for at least as much as planning it. A skipped occurrence does not exclude, matching how skipped time is freed back up for placement. Activities linked to Bench or Closed goals never appear. Activities flagged "exclude from suggestions" never appear. Activities whose **state requirements** are satisfied nowhere on the target day never appear (see States). An activity appears at most once.
+Activities already **scheduled or completed** today are excluded from all tiers - doing something counts for at least as much as planning it. A skipped occurrence does not exclude, matching how skipped time is freed back up for placement. An **all-day planned** occurrence does not exclude either (see below). Activities linked to Bench or Closed goals never appear. Activities flagged "exclude from suggestions" never appear. Activities whose **state requirements** are satisfied nowhere on the target day never appear (see States). An activity appears at most once.
+
+**All-day planned occurrences are invisible to the engine.** `IsPlanned` already says the time is flexible and all-day says there is no time, so together they mean only "sometime that day" - intent with no position on the clock. The user rearranges these between days freely, and that must not change what any day suggests. Such an occurrence therefore does not hold its day (its activity is still suggested), does not count toward a type's `Max/day`, does not block time, and does not set state. The other two combinations still count for all four: **all-day without `IsPlanned`** is a firm commitment to the date, and **planned with times** is a window.
+
+The exception is a *completed* all-day occurrence, which still feeds the cadence figures - it says the activity was done on that day, and dropping that would make something you actually did look overdue. What it cannot feed is the clock: local midnight is not a habitual start time and an exclusive end date is not a span, so an all-day completion contributes to `daysSinceLast` and `medianGapDays` only, whatever its planned flag says. A `DurationMinutes` typed by hand still counts, being an estimate of effort rather than a reading off the calendar.
 
 **Ranking within tiers:** Tiers 1 and 2 rank by overdueness relative to the activity's own rhythm: days since last completion divided by the median gap between completion days. An activity completed today scores ~0 and sinks (natural cooldown); one past its usual gap floats up. A single completion has no derivable gap, so the activity type's cadence prior stands in. An activity with **no completions at all** is measured from its creation date instead, against the same prior - one added today has not had a chance to be due yet, one added three weeks ago with a daily cadence plainly has - and that score is clamped to 3.0, since none of it is actual evidence and an ancient untouched activity would otherwise outrank everything with a real rhythm. An activity whose typical start time falls inside already-occupied or past time is downranked (score halved). Tier 3 keeps its frequency-descending sort.
 
@@ -457,6 +462,7 @@ Gaps are carved out by occurrences that hold a real span (both a start and an en
 - **Skipped occurrences do not block.** Skipping is an explicit decision not to do something, which frees the time back up.
 - **Due pins do not block.** A pin (start, no end) is a deadline rather than a commitment to a span, so it never removes time from the day even though the grid draws it 30 minutes tall.
 - **Floating occurrences do not block.** They have no time to hold.
+- **All-day planned occurrences do not block.** Same reason: a date is not a span. This matters most for a multi-day one, whose `EndAt` is an exclusive end *date* - read as a span it would swallow its first day whole and leave the day with no free time at all.
 
 **Reason signals:** Each recommendation carries the raw signals behind it - `daysSinceLast` (relative to the target day), `medianGapDays`, and `patternCount` (tier 3 weekday matches). The server ships numbers only; the panel composes the user-facing sentence ("6d since last, usually every 2d" / "Usually on Tuesdays, 3x lately"). An activity with no completion history carries no signals and shows no reason line.
 
@@ -488,7 +494,7 @@ Only these views are in scope for v1:
 | Categories | Occurrence lists per category; "No category" is the first item and default view. Entry point for triaging uncategorized work. |
 | Calendar | Day/week view of scheduled occurrences. Primary scheduling surface. |
 | Goals | Goal list with progress insight per goal. Checkpoint management. |
-| Activities | Manage activity definitions: create, edit, delete. Title search, an All / Suggested / Muted filter, and a Goal / Type / Category grouping toggle. Rows carry the activity's type (hidden when it has none), category, goal, and subtask count; muting stays a one-tap bulb, edit and delete live in the row's action menu. |
+| Activities | Manage activity definitions: create, edit, delete. Title search, an All / Suggested / Muted filter, and a Goal / Type / Category / States grouping toggle (States groups activities whose "Only suggest when" requirements are the exact same set, and is offered only once a state has values). Rows carry the activity's type (hidden when it has none), category, goal, and subtask count; muting stays a one-tap bulb, edit and delete live in the row's action menu. |
 | Insights | Completion stats: headline counts, streak, 14-day chart, category breakdown. |
 | Settings | Timezone, day boundary, max Focus goals, activity type tuning, states, appearance, JSON data export, sign out. |
 

@@ -50,6 +50,20 @@ export function formatStateDuration(minutes: number): string {
   return `${minutes} min`
 }
 
+/**
+ * Names a whole requirement set the way the engine reads it: "Location: Home or Work, Tired: No" -
+ * ORed within a state, ANDed across them. States are walked in their own order so the same set always
+ * produces the same string, which is what lets it key a group. Unknown ids are skipped.
+ */
+export function describeRequirements(states: State[], valueIds: string[]): string {
+  const parts: string[] = []
+  for (const state of states) {
+    const names = state.values.filter((v) => valueIds.includes(v.id)).map((v) => v.name)
+    if (names.length > 0) parts.push(`${state.name}: ${names.join(' or ')}`)
+  }
+  return parts.join(', ')
+}
+
 /** "Location: Work", for naming a value out of context. */
 export function describeStateValue(states: State[], valueId: string): string | null {
   for (const state of states) {

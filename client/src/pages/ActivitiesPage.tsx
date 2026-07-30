@@ -18,6 +18,7 @@ import { toastError } from "@/store/toasts";
 import type { Activity } from "@/lib/types";
 import { NO_TYPE_LABEL } from "@/lib/activityTypes";
 import { useActivityTypes } from "@/lib/useActivityTypes";
+import { useStates, describeRequirements } from "@/lib/useStates";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { ActivityModal } from "@/components/activities/ActivityModal";
@@ -33,12 +34,13 @@ const FILTERS: { value: SuggestFilter; label: string }[] = [
   { value: "muted", label: "Muted" },
 ];
 
-type GroupBy = "goal" | "type" | "category" | "none";
+type GroupBy = "goal" | "type" | "category" | "states" | "none";
 
 const GROUPS: { value: GroupBy; label: string }[] = [
   { value: "goal", label: "Goal" },
   { value: "type", label: "Type" },
   { value: "category", label: "Category" },
+  { value: "states", label: "States" },
   { value: "none", label: "None" },
 ];
 
@@ -92,6 +94,18 @@ export function ActivitiesPage() {
   // Seeds the type grouping's buckets, so sections keep the user's own type order rather than
   // appearing in whatever order the activities happen to arrive in.
   const activityTypes = useActivityTypes();
+
+  // Names the requirement sets the states grouping buckets by, and decides whether that grouping is
+  // offered at all: with no values defined, nothing can require one.
+  const { states } = useStates();
+  const hasStates = states.some((s) => s.values.length > 0);
+  const groupOptions = hasStates
+    ? GROUPS
+    : GROUPS.filter((g) => g.value !== "states");
+  // A stored "states" preference outlives the last state being deleted, so fall back for this render
+  // rather than persisting over a choice the user may get back.
+  const group: GroupBy =
+    groupBy === "states" && !hasStates ? "goal" : groupBy;
 
   // Optimistic so the list stays put while toggling several activities in a row.
   const suggestionsMutation = useMutation({
@@ -229,7 +243,7 @@ export function ActivitiesPage() {
   const goalMap = useMemo(() => new Map(goals.map((g) => [g.id, g])), [goals]);
 
   const sections = useMemo<Section[]>(() => {
-    if (groupBy === "none") {
+    if (group === "none") {
       const items = [...visible].sort((a, b) => a.title.localeCompare(b.title));
       return items.length ? [{ key: "all", label: null, items }] : [];
     }
@@ -238,32 +252,49 @@ export function ActivitiesPage() {
     // Every grouping now has a real catch-all: "no type" is a bucket like the others, because it
     // is a choice the user can make rather than an absent value.
     const noneLabel =
-      groupBy === "goal" ? "No goal" : groupBy === "category" ? "No category" : NO_TYPE_LABEL;
+      group === "goal"
+        ? "No goal"
+        : group === "category"
+          ? "No category"
+          : group === "states"
+            ? "Any state"
+            : NO_TYPE_LABEL;
 
-    if (groupBy === "goal") {
+    // Seeding only applies where a canonical order exists. A requirement set is not a list the user
+    // keeps anywhere, it is whatever combinations the activities happen to name, so the states
+    // grouping discovers its buckets and sorts them by label below.
+    if (group === "goal") {
       for (const g of goals.filter((g) => g.status !== "closed"))
         buckets.set(g.id, { label: g.title, items: [] });
-    } else if (groupBy === "category") {
+    } else if (group === "category") {
       for (const c of categories) buckets.set(c.id, { label: c.name, items: [] });
-    } else {
+    } else if (group === "type") {
       for (const t of activityTypes ?? []) buckets.set(t.id, { label: t.name, items: [] });
     }
     buckets.set(NONE_BUCKET, { label: noneLabel, items: [] });
 
     for (const a of visible) {
+      // Sorted so two activities requiring the same values land in one bucket whatever order the
+      // ids came back in: the group is the set, not the list.
+      const requirements =
+        group === "states" ? [...a.requiredStateValueIds].sort() : [];
       const key =
-        groupBy === "goal"
+        group === "goal"
           ? (a.goalId ?? NONE_BUCKET)
-          : groupBy === "category"
+          : group === "category"
             ? (a.categoryId ?? NONE_BUCKET)
-            : (a.activityTypeId ?? NONE_BUCKET);
+            : group === "states"
+              ? (requirements.length > 0 ? requirements.join("|") : NONE_BUCKET)
+              : (a.activityTypeId ?? NONE_BUCKET);
       if (!buckets.has(key)) {
         const label =
-          groupBy === "goal"
+          group === "goal"
             ? (goalMap.get(key)?.title ?? noneLabel)
-            : groupBy === "type"
+            : group === "type"
               ? (a.type?.name ?? noneLabel)
-              : noneLabel;
+              : group === "states"
+                ? (describeRequirements(states, requirements) || noneLabel)
+                : noneLabel;
         buckets.set(key, { label, items: [] });
       }
       buckets.get(key)!.items.push(a);
@@ -277,9 +308,11 @@ export function ActivitiesPage() {
         items: [...b.items].sort((a, b2) => a.title.localeCompare(b2.title)),
       }));
 
+    if (group === "states") filled.sort((a, b) => a.label.localeCompare(b.label));
+
     const catchAll = filled.filter((s) => s.key === NONE_BUCKET);
     return [...filled.filter((s) => s.key !== NONE_BUCKET), ...catchAll];
-  }, [groupBy, visible, goals, categories, activityTypes, goalMap]);
+  }, [group, visible, goals, categories, activityTypes, goalMap, states]);
 
   const selectedActivities = activities.filter((a) => selected.has(a.id));
   const allVisibleSelected =
@@ -374,13 +407,13 @@ export function ActivitiesPage() {
                 <span className="hidden items-center border-r border-border px-2.5 text-xs text-muted-foreground sm:flex">
                   Group
                 </span>
-                {GROUPS.map(({ value, label }) => (
+                {groupOptions.map(({ value, label }) => (
                   <button
                     key={value}
                     onClick={() => chooseGroupBy(value)}
-                    aria-pressed={groupBy === value}
+                    aria-pressed={group === value}
                     className={`border-l border-border px-2.5 py-1.5 text-xs font-medium transition-colors first:border-l-0 sm:first:border-l ${
-                      groupBy === value
+                      group === value
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:bg-muted"
                     }`}
@@ -436,7 +469,7 @@ export function ActivitiesPage() {
           ) : (
             <div className="flex flex-col gap-4">
               {sections.map((section) => {
-                const isCollapsed = collapsed.has(`${groupBy}:${section.key}`);
+                const isCollapsed = collapsed.has(`${group}:${section.key}`);
                 const sectionSelected = section.items.every((a) =>
                   selected.has(a.id),
                 );
@@ -445,7 +478,7 @@ export function ActivitiesPage() {
                     {section.label !== null && (
                       <div className="mb-2 flex items-center gap-2 px-1">
                         <button
-                          onClick={() => toggleCollapsed(`${groupBy}:${section.key}`)}
+                          onClick={() => toggleCollapsed(`${group}:${section.key}`)}
                           aria-expanded={!isCollapsed}
                           className="flex min-w-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
                         >
@@ -455,7 +488,10 @@ export function ActivitiesPage() {
                             }`}
                             strokeWidth={2.5}
                           />
-                          <span className="truncate">{section.label}</span>
+                          {/* A requirement set can outrun the header, so keep the full text on hover. */}
+                          <span className="truncate" title={section.label}>
+                            {section.label}
+                          </span>
                           <span className="font-normal opacity-60">
                             {section.items.length}
                           </span>
@@ -498,9 +534,9 @@ export function ActivitiesPage() {
                                   exclude: !a.excludeFromRecommendations,
                                 })
                               }
-                              hideGoal={groupBy === "goal"}
-                              hideCategory={groupBy === "category"}
-                              hideType={groupBy === "type"}
+                              hideGoal={group === "goal"}
+                              hideCategory={group === "category"}
+                              hideType={group === "type"}
                             />
                           ))}
                         </ul>

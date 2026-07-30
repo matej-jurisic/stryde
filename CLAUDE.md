@@ -86,7 +86,13 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
   Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split — `Type`, the scheduling profile, `SetsStateValues` — `(StateValueId, DurationMinutes)` pairs — and flat `RequiredStateValueIds`), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (always an activity to schedule; `SuggestedStartAt` nullable), `CategoryDto`/`CategorySummaryDto`, `StateDto` (values nested), `CheckpointDto` (has `Size` enum — not numeric progress).
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
-- `Services/RecommendationService.cs` — `LoadStatesAsync` builds the per-state timelines and each
+- `Services/RecommendationService.cs` — `committedOccurrences` is the one list every day-contents
+  decision reads (suppression, type caps, free slots, state setters), so what is filtered out of it is
+  invisible to the engine: skipped occurrences, and **all-day + planned** ones, which say only
+  "sometime that day" (`IsAllDay` alone is a date commitment, `IsPlanned` alone a window - both count).
+  `ComputeStats` separately ignores all-day rows for the habitual start time and span-derived duration:
+  midnight is not a start time. See `spec.md` → Recommendations.
+  `LoadStatesAsync` builds the per-state timelines and each
   activity's requirement groups (returns two empty maps when the user has no states, the case that must
   cost nothing). `AllowedIntervals` intersects the groups over the day; `StateAllows` is the gate;
   `AllowedSlots` masks `freeSlots` per activity and every placement branch draws candidates from it.
@@ -156,7 +162,9 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   `TYPE_ICON_NAMES`, the short curated slice the type editor's picker offers (rendering still goes
   through the full map, so any stored name keeps working).
 - `lib/useStates.ts` — `['states']` query plus `formatStateDuration`, `splitStateDuration`,
-  `STATE_DURATION_UNITS`, `MAX_STATE_DURATION_MINUTES`, `describeStateValue`.
+  `STATE_DURATION_UNITS`, `MAX_STATE_DURATION_MINUTES`, `describeStateValue`, and
+  `describeRequirements` (a whole requirement set as "Location: Home or Work, Tired: No" - walks
+  `states` in their own order, so the string is stable enough to key a group by).
 - `components/activities/StateValuePicker.tsx` — chips grouped by state, the codebase's only
   multi-value picker. One row per state: name in a fixed left column, chips wrapping beside it, and a
   `trailing` render slot that puts caller-supplied controls at the end of the same row.

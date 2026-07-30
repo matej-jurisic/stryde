@@ -726,6 +726,19 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 - `CalendarPage` needs goals and categories to feed the editor's selects, but the editor opens from a menu two levels down, so both queries are `enabled: activityModalOpen` and stay off the calendar's own load path
 - `ActivityModal` now also invalidates `['events']`. It never had to before - it was only ever reachable from `/activities` - but occurrences embed their activity, so a renamed activity or a changed category left every list row and calendar block stale
 
+**All-day planned occurrences no longer steer the engine** (bug fix)
+- Dragging an all-day planned occurrence from one day to another changed what each day recommended: the activity was suppressed on whichever day held it, its type's `Max/day` was charged there, and its state effects fired at local midnight of that date. All of that from a row that says only "sometime that day"
+- The rule is now the pair, not the flag: `IsAllDay && IsPlanned` is intent with no position on the clock and is invisible to the engine. `IsAllDay` alone is a firm date-only commitment and `IsPlanned` alone is a window, so both still hold their day, charge the cap, block time and set state
+- One filter did it. Every path reads from `committedOccurrences`, so excluding the pair there covers suppression, type caps, free slots and the state timeline at once
+- Fixed alongside it: a multi-day all-day occurrence was read as a *span* by the free-slot carve-out, whose `EndAt` is an exclusive end date - a trip pencilled in for the 24th to the 26th left the 24th with no free time and every suggestion on it timeless
+- And a completed all-day occurrence was contributing local midnight to the habitual-start-time mode, so a few of them made 00:00 look like the activity's usual time and dragged placement to the day boundary. `ComputeStats` now takes only the day off an all-day completion: cadence yes, clock no. A hand-typed `DurationMinutes` still counts, being an estimate of effort rather than a reading off the calendar
+
+**Group the activity list by States**
+- The grouping toggle gained a fourth dimension: `States` buckets activities by their `requiredStateValueIds` as a *set*, so two activities land together only when their "Only suggest when" conditions are identical. Sections are labelled the way the engine reads the requirement - `describeRequirements` renders "Location: Home or Work, Tired: No", ORed within a state and ANDed across them
+- Bucket keys are the sorted id list joined, since the API returns a flat array whose order carries no meaning; the label walks `states` in the user's own order so the same set always names itself the same way
+- Unlike goal/type/category, this grouping cannot seed its buckets in a canonical order - a requirement set is not a list the user keeps anywhere - so it discovers them from the visible activities and sorts the sections by label, with the no-requirements catch-all ("Any state") pushed last like every other grouping's
+- The option is hidden until some state has values, and a stored `states` preference falls back to `Goal` for the render rather than being overwritten, so deleting the last state does not silently erase the choice the user gets back when they add one
+
 **UX hardening** (shipped ahead of the Polish phase)
 - Toast notifications (`store/toasts.ts` + `components/ui/Toasts.tsx`): every mutation without inline error display now reports failures via `toastError`
 - Delete confirmations everywhere: shared `ConfirmDialog` modal guards deletes of occurrences, activities (warns about cascade), goals, checkpoints, and categories; the edit occurrence modal gained Delete + Cancel in its footer

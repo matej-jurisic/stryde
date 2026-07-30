@@ -83,7 +83,8 @@ public class RecommendationServiceTests : IDisposable
     private async Task<Occurrence> AddOccurrenceAsync(
         Guid userId, Activity activity,
         DateTimeOffset? startAt = null, DateTimeOffset? endAt = null,
-        EventStatus status = EventStatus.pending)
+        EventStatus status = EventStatus.pending,
+        bool isAllDay = false, bool isPlanned = false)
     {
         var o = new Occurrence
         {
@@ -92,6 +93,8 @@ public class RecommendationServiceTests : IDisposable
             StartAt = startAt,
             EndAt = endAt,
             Status = status,
+            IsAllDay = isAllDay,
+            IsPlanned = isPlanned,
         };
         _ctx.Db.Occurrences.Add(o);
         await _ctx.Db.SaveChangesAsync();
@@ -1219,5 +1222,118 @@ public class RecommendationServiceTests : IDisposable
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
 
         Assert.Null(Assert.Single(recs).SuggestedStartAt);
+    }
+
+    // --- All-day occurrences ---
+    // All-day *and* planned is intent with no position on the clock, and the user drags those between
+    // days freely. The engine ignores them outright. The other two combinations are real: all-day
+    // alone is a date-only commitment, planned alone is a window.
+
+    /// <summary>An all-day planned occurrence: a date and nothing more, as the Plan action writes it.</summary>
+    private Task<Occurrence> AddIntentAsync(
+        Guid userId, Activity activity, DateTimeOffset date,
+        DateTimeOffset? endDate = null, EventStatus status = EventStatus.pending) =>
+        AddOccurrenceAsync(userId, activity, date, endDate, status, isAllDay: true, isPlanned: true);
+
+    [Fact]
+    public async Task GetAsync_planned_all_day_occurrence_does_not_suppress_its_activity()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "sometime today", GoalStatus.focus);
+        await AddIntentAsync(userId, activity, At(7, 0));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        // Planning it for "some point today" is a wish, not a commitment: it neither counts as having
+        // done the thing nor stops the panel offering it a time.
+        Assert.Equal(activity.Id, Assert.Single(recs).Activity.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_date_only_commitment_still_suppresses_its_activity()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "on the day", GoalStatus.focus);
+        await AddOccurrenceAsync(userId, activity, startAt: At(7, 0), isAllDay: true);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        // All-day without IsPlanned is a firm commitment to the date, so the day does hold it.
+        Assert.Empty(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_planned_all_day_occurrence_does_not_take_a_type_slot()
+    {
+        var userId = await CreateUserAsync();
+        var target = new DateOnly(2026, 7, 9);
+        // Deep work caps at two a day. Two of them are pencilled in as all-day intents, which must not
+        // consume the cap. Neither is goal-linked, so only the third can surface.
+        for (var i = 0; i < 2; i++)
+        {
+            var pencilled = await AddActivityAsync(userId, $"maybe deep {i}", typeId: await DeepWorkAsync(userId));
+            await AddIntentAsync(userId, pencilled, At(9, 0));
+        }
+        var real = await AddActivityAsync(userId, "one more", GoalStatus.focus, await DeepWorkAsync(userId));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, target, Now);
+
+        Assert.Equal(real.Id, Assert.Single(recs).Activity.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_planned_all_day_occurrence_does_not_block_time()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "never done", GoalStatus.active);
+
+        // A multi-day all-day intent, whose EndAt is an exclusive end *date*. Read as a span it covers
+        // the target day end to end and leaves the day with no free time at all.
+        var away = await AddActivityAsync(userId, "trip");
+        await AddIntentAsync(userId, away, At(9, 0), At(11, 0));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        var rec = recs.Single(r => r.Activity.Id == activity.Id);
+        Assert.Equal(At(9, 8), rec.SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_planned_all_day_occurrence_does_not_set_a_state()
+    {
+        var userId = await CreateUserAsync();
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
+
+        // "Go in at some point on Thursday" does not put you at work at any particular time, so there
+        // is still nothing for a commute home to be a commute from.
+        var into = await AddActivityAsync(userId, "commute in");
+        await SetsAsync(into, Value(location, "Work"));
+        await AddIntentAsync(userId, into, At(9, 0));
+
+        var back = await AddActivityAsync(userId, "commute home", GoalStatus.focus);
+        await RequiresAsync(back, Value(location, "Work"));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Empty(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_all_day_completion_feeds_cadence_but_not_the_habitual_time()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "date only habit", GoalStatus.active);
+        foreach (var day in new[] { 2, 5 })
+            await AddOccurrenceAsync(userId, activity, At(day, 0), status: EventStatus.done, isAllDay: true);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        var rec = Assert.Single(recs);
+        // Done on those days, so the cadence figures stand. But local midnight is not a start time:
+        // left in, a run of these makes 00:00 look habitual and drags placement to the day boundary.
+        Assert.Equal(2, rec.DaysSinceLast);
+        Assert.Equal(3, rec.MedianGapDays);
+        Assert.Null(rec.TypicalStartTime);
+        Assert.Equal(At(7, 12), rec.SuggestedStartAt);
     }
 }

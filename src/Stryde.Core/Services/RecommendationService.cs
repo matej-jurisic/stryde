@@ -71,11 +71,23 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             .Where(o => o.UserId == userId)
             .ToListAsync();
 
+        // All-day *and* planned: intent with no position on the clock at all. IsPlanned already says
+        // the time is flexible, and all-day says there isn't one, so the pair says only "sometime that
+        // day" - which the user rearranges between days freely, and that must not churn what the day
+        // suggests. So it is left out of the day's contents entirely: it holds no day, takes no type
+        // slot, blocks no time and sets no state.
+        // The other two combinations still count. All-day *without* IsPlanned is a firm date-only
+        // commitment, and planned-with-times is a window - both are things the day really holds.
+        // Not applied to completedHistory below: having done the thing is a fact about the activity's
+        // rhythm however it was scheduled, and dropping it would make it look overdue. Such a
+        // completion scores ~0 on the day it lands on, so it sinks rather than being suppressed.
+        bool IsIntentOnly(Occurrence o) => o.IsAllDay && o.IsPlanned;
+
         // Pending or done: both are commitments the day already holds. Skipped ones are not - skipping
         // is an explicit decision not to. Same predicate the free-slot math uses below, and for the
         // same reason: doing the thing has to count for at least as much as merely planning it.
         var committedOccurrences = allOccurrences
-            .Where(o => o.Status is EventStatus.pending or EventStatus.done)
+            .Where(o => (o.Status is EventStatus.pending or EventStatus.done) && !IsIntentOnly(o))
             .ToList();
         var historyCutoff = now.AddDays(-HistoryWindowDays);
         var completedHistory = allOccurrences
@@ -540,10 +552,16 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
 
     private static ActivityStats ComputeStats(List<Occurrence> completed, DayContext ctx)
     {
+        // An all-day completion records *which day*, not when or for how long. Its StartAt is local
+        // midnight and its EndAt, when set, is an exclusive end date - so it feeds the day-based
+        // cadence figures below and nothing else. Left in, a run of all-day completions makes 00:00
+        // look like the activity's habitual start time, which then drives placement.
+        var timed = completed.Where(o => !o.IsAllDay).ToList();
+
         var durations = completed
             .Select(o => o.DurationMinutes is > 0
                 ? (double?)o.DurationMinutes.Value
-                : o.StartAt.HasValue && o.EndAt.HasValue
+                : !o.IsAllDay && o.StartAt.HasValue && o.EndAt.HasValue
                     ? (o.EndAt.Value - o.StartAt.Value).TotalMinutes
                     : null)
             .Where(d => d is > 0)
@@ -556,7 +574,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             : null;
 
         // Most common start time rounded to nearest 15 min, in user's timezone
-        var modeMinutes = completed
+        var modeMinutes = timed
             .Select(o =>
             {
                 var local = TimeZoneInfo.ConvertTime(o.StartAt!.Value, ctx.TimeZone);
