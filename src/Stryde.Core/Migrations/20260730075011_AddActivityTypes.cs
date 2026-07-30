@@ -95,10 +95,15 @@ namespace Stryde.Core.Migrations
         {
             // SQLite has no uuid() - this is the standard randomblob construction, and it is
             // re-evaluated per row because randomblob is non-deterministic.
+            //
+            // UPPERCASE, not lower: Microsoft.Data.Sqlite binds a Guid parameter as upper-case TEXT,
+            // and SQLite compares TEXT case-sensitively, so a lower-case id is a row EF can list but
+            // never match by key. See NormalizeActivityTypeIdCase, which repairs the DBs that ran
+            // this before the fix.
             const string NewGuid = """
-                lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4'
+                upper(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4'
                     || substr(hex(randomblob(2)), 2) || '-'
-                    || substr('89ab', abs(random()) % 4 + 1, 1)
+                    || substr('89AB', abs(random()) % 4 + 1, 1)
                     || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))
                 """;
 

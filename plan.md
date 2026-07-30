@@ -714,6 +714,12 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 - The two fields became one bordered panel (`States`) split by a divider, with `Only suggest when` / `Doing it changes` as sub-labels. Both halves render the same chips off the same states, so as two free-floating fields they read as one control rendered twice; the panel is what makes them a condition and a consequence
 - `flattenStateValues` was only ever the summary list's, and went with it
 
+**Seeded activity types were unreachable by id** (bug fix)
+- Deleting or renaming a seeded type returned `404 Activity type not found.`, and assigning one to an activity 404'd on the same lookup, while the three types listed and rendered normally
+- Cause: the `AddActivityTypes` seed built its ids with SQLite's `randomblob` construction wrapped in `lower()`. Microsoft.Data.Sqlite binds a `Guid` parameter as UPPER-case TEXT and SQLite compares TEXT case-sensitively, so `WHERE "Id" = @id` never matched. The FK join failed the same way, which is why no activity could resolve a seeded type either
+- Fixed in two parts: the seed now emits upper-case (`upper(...)`, and `'89AB'` for the variant nibble), and `NormalizeActivityTypeIdCase` repairs the databases that already ran it - `upper()` over `ActivityTypes.Id` and `Activities.ActivityTypeId`, with `PRAGMA defer_foreign_keys` so the two sides can move in one transaction. `Down` is deliberately empty: the case of an id carries no meaning worth restoring
+- `MigrationTests` had asserted the seeded ids were readable, on the reasoning that a malformed id would fail to materialise. It would not: `Guid.Parse` ignores case, so only a *query* can catch this. It now looks each seeded type up by its own id
+
 **"Edit activity" from a calendar block**
 - The occurrence detail modal's overflow menu gained an `Edit activity` item (`Layers`, the Activities nav icon) that opens `ActivityModal` on the parent activity. Shown only when `activity.kind === 'activity'`: an event's activity row is a bookkeeping shell with nothing on it worth editing, so offering the item there would open an empty form
 - Reaching an occurrence's activity previously meant leaving the calendar for `/activities` and finding it by name, which is a long way round for "this suggestion keeps firing, mute it" or "wrong category"

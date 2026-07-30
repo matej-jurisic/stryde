@@ -228,6 +228,14 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 ## Gotchas
 
 - **SQLite migrations only.** No Postgres migration set exists.
+- ⚠️ **Guids are UPPER-case TEXT in SQLite.** Microsoft.Data.Sqlite binds a `Guid` parameter as
+  upper-case text and SQLite compares text case-sensitively, so raw SQL in a migration that mints an
+  id must produce upper-case (`hex()` already does; don't `lower()` it). A lower-case id lists fine -
+  `Guid.Parse` ignores case - but matches nothing by key, so update, delete and FK lookups all 404.
+  `MigrationTests` guards this by querying seeded rows by id, not just listing them.
+- **`dotnet ef database update` does not touch the app's database.** `StrydeDbContextFactory` points
+  design-time tooling at `stryde-design.db`; `src/Stryde.Api/stryde.db` is migrated by the API on
+  startup (`Database:MigrateOnStartup`), so restart the API to apply a new migration to dev data.
 - **`Jwt:Secret` ≥32 bytes** (`JWT_SECRET` in `.env`); empty in `appsettings.json` by design.
 - **`COOKIE_SECURE`** must be `false` for plain-HTTP local dev; `true` in production.
 - **Dev port:** `dotnet run` uses `launchSettings.json` (port 5200). Published DLL: set `ASPNETCORE_URLS`.

@@ -73,6 +73,8 @@ public class MigrationTests : IDisposable
             // The seed SQL builds ids by hand, so a malformed one would only show up as EF failing
             // to read the row back - which is exactly what materialising the list above proves.
             Assert.All(types, t => Assert.NotEqual(Guid.Empty, t.Id));
+            // Reading a row back is not enough: Guid.Parse ignores case, but a query does not.
+            // See Migrate_seeds_activity_types_that_can_be_found_by_id.
             Assert.All(types, t => Assert.Equal(
                 Guid.Parse("11111111-1111-1111-1111-111111111111"), t.UserId));
 
@@ -80,6 +82,35 @@ public class MigrationTests : IDisposable
             Assert.Equal(new TimeOnly(9, 0), deepWork.WindowStart);
             Assert.Equal(90, deepWork.MinBlockMinutes);
             Assert.Equal(2.5, deepWork.CadencePriorDays);
+        }
+    }
+
+    /// <summary>
+    /// Microsoft.Data.Sqlite binds a <see cref="Guid"/> parameter as UPPER-case TEXT and SQLite
+    /// compares TEXT case-sensitively, so a seed that mints ids in lower-case hex produces rows that
+    /// list fine - <see cref="Guid.Parse(string)"/> ignores case - but match nothing by key: every
+    /// update, delete and FK lookup on them 404s. Listing the rows cannot catch that; only a query
+    /// can.
+    /// </summary>
+    [Fact]
+    public void Migrate_seeds_activity_types_that_can_be_found_by_id()
+    {
+        using (var db = NewContext())
+        {
+            db.GetService<IMigrator>().Migrate(BeforeActivityTypes);
+            db.Database.ExecuteSqlRaw("""
+                INSERT INTO "Users" ("Id", "Username", "PasswordHash", "Timezone", "CreatedAt")
+                VALUES ('44444444-4444-4444-4444-444444444444', 'existing', 'x', 'UTC',
+                        '2026-07-01 00:00:00.0000000+00:00');
+                """);
+        }
+
+        using (var db = NewContext())
+        {
+            db.Database.Migrate();
+
+            foreach (var id in db.ActivityTypes.AsNoTracking().Select(t => t.Id).ToList())
+                Assert.NotNull(db.ActivityTypes.AsNoTracking().FirstOrDefault(t => t.Id == id));
         }
     }
 
