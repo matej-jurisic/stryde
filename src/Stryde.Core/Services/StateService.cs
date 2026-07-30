@@ -16,9 +16,6 @@ namespace Stryde.Core.Services;
 /// </summary>
 public class StateService(StrydeDbContext db)
 {
-    /// <summary>Thirty days. Past this a "temporary" value is just the state's normal value.</summary>
-    public const int MaxDurationMinutes = 43200;
-
     public async Task<List<StateDto>> ListAsync(Guid userId)
     {
         var states = await db.States
@@ -80,7 +77,7 @@ public class StateService(StrydeDbContext db)
         // "what is this before anything sets it", and the engine would have to ignore it.
         var isDefault = req.IsDefault || state.Values.Count == 0;
 
-        var err = ValidateValue(req.Name, isDefault, req.DurationMinutes);
+        var err = Validators.ValidateTitle(req.Name, "Name");
         if (err is not null) return Result<StateDto>.Fail(err);
 
         if (isDefault)
@@ -91,7 +88,6 @@ public class StateService(StrydeDbContext db)
             StateId = state.Id,
             Name = req.Name.Trim(),
             IsDefault = isDefault,
-            DurationMinutes = req.DurationMinutes,
         };
 
         // Explicit Add forces the Added state; the pre-set Guid key would otherwise make change
@@ -119,14 +115,17 @@ public class StateService(StrydeDbContext db)
         if (!req.IsDefault && value.IsDefault)
             return Fail("A state needs a default value. Make another value the default instead.");
 
-        var err = ValidateValue(req.Name, req.IsDefault, req.DurationMinutes);
+        var err = Validators.ValidateTitle(req.Name, "Name");
         if (err is not null) return Result<StateDto>.Fail(err);
 
+        // Moving the default onto a value that some activity sets *with* an expiry is allowed: that
+        // expiry just goes inert (decaying to the default is a no-op, which StateTimeline folds away)
+        // and comes back to life if the default moves off again. Refusing here, or quietly clearing
+        // durations across other activities, would both be worse than tolerating a dormant number.
         if (req.IsDefault)
             foreach (var v in state.Values) v.IsDefault = v.Id == id;
 
         value.Name = req.Name.Trim();
-        value.DurationMinutes = req.DurationMinutes;
 
         await db.SaveChangesAsync();
         return Result<StateDto>.Success(StateDto.FromEntity(state));
@@ -164,23 +163,6 @@ public class StateService(StrydeDbContext db)
 
     private Task<State?> LoadAsync(Guid id, Guid userId) =>
         db.States.Include(s => s.Values).FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId);
-
-    private static Error? ValidateValue(string? name, bool isDefault, int? durationMinutes)
-    {
-        var err = Validators.ValidateTitle(name, "Name");
-        if (err is not null) return err;
-
-        if (durationMinutes is { } d && (d < 1 || d > MaxDurationMinutes))
-            return new Error(ErrorType.Validation,
-                $"Duration must be between 1 and {MaxDurationMinutes} minutes.");
-
-        // A duration means "then go back to the default", so the default having one is a no-op that
-        // reads like a setting.
-        if (isDefault && durationMinutes is not null)
-            return new Error(ErrorType.Validation, "The default value cannot expire.");
-
-        return null;
-    }
 
     private static string Plural(int n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
 

@@ -16,7 +16,7 @@ public class TestContext : IDisposable
     public OccurrenceService OccurrenceService { get; }
     public CheckpointService CheckpointService { get; }
     public UserSettingsService UserSettingsService { get; }
-    public ActivityProfileService ActivityProfileService { get; }
+    public ActivityTypeService ActivityTypeService { get; }
     public RecommendationService RecommendationService { get; }
     public InsightsService InsightsService { get; }
     public StateService StateService { get; }
@@ -42,14 +42,14 @@ public class TestContext : IDisposable
 
         var tokens = new TokenService(jwtOpts);
         var hasher = new PasswordHasher();
-        AuthService = new AuthService(Db, tokens, hasher);
+        ActivityTypeService = new ActivityTypeService(Db);
+        AuthService = new AuthService(Db, tokens, hasher, ActivityTypeService);
         UserSettingsService = new UserSettingsService(Db);
         GoalService = new GoalService(Db, UserSettingsService);
         ActivityService = new ActivityService(Db);
         OccurrenceService = new OccurrenceService(Db, UserSettingsService);
         CheckpointService = new CheckpointService(Db);
-        ActivityProfileService = new ActivityProfileService(Db);
-        RecommendationService = new RecommendationService(Db, UserSettingsService, ActivityProfileService);
+        RecommendationService = new RecommendationService(Db, UserSettingsService, ActivityTypeService);
         InsightsService = new InsightsService(Db, UserSettingsService);
         StateService = new StateService(Db);
     }

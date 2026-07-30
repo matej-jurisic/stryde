@@ -7,7 +7,8 @@ using Stryde.Core.Entities;
 
 namespace Stryde.Core.Services;
 
-public class AuthService(StrydeDbContext db, TokenService tokens, PasswordHasher hasher)
+public class AuthService(
+    StrydeDbContext db, TokenService tokens, PasswordHasher hasher, ActivityTypeService activityTypes)
 {
     public async Task<Result<AuthResult>> RegisterAsync(string username, string password, string timezone)
     {
@@ -28,6 +29,11 @@ public class AuthService(StrydeDbContext db, TokenService tokens, PasswordHasher
         };
         db.Users.Add(user);
         await db.SaveChangesAsync();
+
+        // Types cannot fall back to a built-in table the way UserSettings does - the rows *are* the
+        // list - so a user with none would face an empty Activity types screen and no way to
+        // understand what a type is for.
+        await activityTypes.SeedDefaultsAsync(user.Id);
 
         return await IssueAsync(user);
     }

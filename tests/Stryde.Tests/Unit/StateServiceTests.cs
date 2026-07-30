@@ -1,4 +1,4 @@
-using Stryde.Core.Common;
+﻿using Stryde.Core.Common;
 using Stryde.Core.Dtos;
 using Stryde.Core.Entities;
 using Stryde.Core.Services;
@@ -67,35 +67,6 @@ public class StateServiceTests : IDisposable
             state.Id, userId, new CreateStateValueRequest("Work", IsDefault: true));
 
         Assert.Equal("Work", Assert.Single(result.Value!.Values, v => v.IsDefault).Name);
-    }
-
-    [Fact]
-    public async Task CreateValueAsync_rejects_a_duration_on_the_default()
-    {
-        var userId = await CreateUserAsync();
-        var state = await CreateStateAsync(userId, "Tired");
-
-        // The default is what an expiring value falls back to, so its own expiry has nowhere to go.
-        var result = await _ctx.StateService.CreateValueAsync(
-            state.Id, userId, new CreateStateValueRequest("No", DurationMinutes: 60));
-
-        Assert.False(result.IsSuccess);
-        Assert.Equal(ErrorType.Validation, result.Error!.Type);
-    }
-
-    [Fact]
-    public async Task CreateValueAsync_rejects_a_duration_past_the_ceiling()
-    {
-        var userId = await CreateUserAsync();
-        var state = await CreateStateAsync(userId, "Tired");
-        await _ctx.StateService.CreateValueAsync(state.Id, userId, new CreateStateValueRequest("No"));
-
-        var result = await _ctx.StateService.CreateValueAsync(
-            state.Id, userId,
-            new CreateStateValueRequest("Yes", DurationMinutes: StateService.MaxDurationMinutes + 1));
-
-        Assert.False(result.IsSuccess);
-        Assert.Equal(ErrorType.Validation, result.Error!.Type);
     }
 
     [Fact]

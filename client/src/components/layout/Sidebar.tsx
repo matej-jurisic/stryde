@@ -23,8 +23,9 @@ function NavItem({
   count?: number
   isActive?: boolean
 }) {
+  // Not `end`: a sub-route (an activity, a goal, the type and state tabs) keeps its nav item lit.
   return (
-    <NavLink to={to} className="block" end>
+    <NavLink to={to} className="block">
       {({ isActive: routerActive }) => {
         const active = isActive ?? routerActive
         return (

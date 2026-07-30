@@ -16,11 +16,13 @@ import {
 import { activitiesApi, goalsApi, categoriesApi } from "@/lib/api";
 import { toastError } from "@/store/toasts";
 import type { Activity } from "@/lib/types";
-import { ACTIVITY_TYPES, activityTypeMeta } from "@/lib/activityTypes";
+import { NO_TYPE_LABEL } from "@/lib/activityTypes";
+import { useActivityTypes } from "@/lib/useActivityTypes";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { ActivityModal } from "@/components/activities/ActivityModal";
 import { ActivityListRow } from "@/components/activities/ActivityListRow";
+import { ActivitiesTabs } from "@/components/activities/ActivitiesTabs";
 import { BulkAssignModal } from "@/components/activities/BulkAssignModal";
 
 type SuggestFilter = "all" | "suggested" | "muted";
@@ -86,6 +88,10 @@ export function ActivitiesPage() {
     queryKey: ["categories"],
     queryFn: () => categoriesApi.list(),
   });
+
+  // Seeds the type grouping's buckets, so sections keep the user's own type order rather than
+  // appearing in whatever order the activities happen to arrive in.
+  const activityTypes = useActivityTypes();
 
   // Optimistic so the list stays put while toggling several activities in a row.
   const suggestionsMutation = useMutation({
@@ -212,7 +218,7 @@ export function ActivitiesPage() {
         a.title,
         a.category?.name,
         a.goal?.title,
-        activityTypeMeta(a.type).label,
+        a.type?.name,
       ].some((field) => field?.toLowerCase().includes(query));
     });
   }, [activities, filter, query]);
@@ -229,8 +235,10 @@ export function ActivitiesPage() {
     }
 
     const buckets = new Map<string, { label: string; items: Activity[] }>();
+    // Every grouping now has a real catch-all: "no type" is a bucket like the others, because it
+    // is a choice the user can make rather than an absent value.
     const noneLabel =
-      groupBy === "goal" ? "No goal" : groupBy === "category" ? "No category" : "";
+      groupBy === "goal" ? "No goal" : groupBy === "category" ? "No category" : NO_TYPE_LABEL;
 
     if (groupBy === "goal") {
       for (const g of goals.filter((g) => g.status !== "closed"))
@@ -238,9 +246,9 @@ export function ActivitiesPage() {
     } else if (groupBy === "category") {
       for (const c of categories) buckets.set(c.id, { label: c.name, items: [] });
     } else {
-      for (const t of ACTIVITY_TYPES) buckets.set(t.value, { label: t.label, items: [] });
+      for (const t of activityTypes ?? []) buckets.set(t.id, { label: t.name, items: [] });
     }
-    if (noneLabel) buckets.set(NONE_BUCKET, { label: noneLabel, items: [] });
+    buckets.set(NONE_BUCKET, { label: noneLabel, items: [] });
 
     for (const a of visible) {
       const key =
@@ -248,13 +256,13 @@ export function ActivitiesPage() {
           ? (a.goalId ?? NONE_BUCKET)
           : groupBy === "category"
             ? (a.categoryId ?? NONE_BUCKET)
-            : a.type;
+            : (a.activityTypeId ?? NONE_BUCKET);
       if (!buckets.has(key)) {
         const label =
           groupBy === "goal"
             ? (goalMap.get(key)?.title ?? noneLabel)
             : groupBy === "type"
-              ? activityTypeMeta(a.type).label
+              ? (a.type?.name ?? noneLabel)
               : noneLabel;
         buckets.set(key, { label, items: [] });
       }
@@ -271,7 +279,7 @@ export function ActivitiesPage() {
 
     const catchAll = filled.filter((s) => s.key === NONE_BUCKET);
     return [...filled.filter((s) => s.key !== NONE_BUCKET), ...catchAll];
-  }, [groupBy, visible, goals, categories, goalMap]);
+  }, [groupBy, visible, goals, categories, activityTypes, goalMap]);
 
   const selectedActivities = activities.filter((a) => selected.has(a.id));
   const allVisibleSelected =
@@ -312,6 +320,8 @@ export function ActivitiesPage() {
           )
         }
       />
+
+      <ActivitiesTabs />
 
       {/* Toolbar sits outside the scroll area so search and filters stay reachable. */}
       {!isLoading && activities.length > 0 && (
@@ -395,15 +405,9 @@ export function ActivitiesPage() {
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
                 <Layers className="h-6 w-6" strokeWidth={1.5} />
               </div>
-              <div>
-                <p className="text-sm font-medium text-foreground">
-                  No activities yet
-                </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Activities are the types of things you do. Occurrences are the
-                  individual scheduled instances.
-                </p>
-              </div>
+              <p className="text-sm font-medium text-foreground">
+                No activities yet
+              </p>
               <button
                 onClick={openCreate}
                 className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors"

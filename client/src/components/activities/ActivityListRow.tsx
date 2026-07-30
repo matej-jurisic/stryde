@@ -1,9 +1,10 @@
 import { Check, Lightbulb, LightbulbOff, Pencil, Trash2 } from 'lucide-react'
 import type { Activity } from '@/lib/types'
-import { activityTypeMeta } from '@/lib/activityTypes'
+import { NO_TYPE_LABEL } from '@/lib/activityTypes'
 import { Badge } from '@/components/ui/Badge'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
+import { ActivityTypeIcon } from '@/components/activities/ActivityTypeIcon'
 
 const GOAL_TONE: Record<string, 'focus' | 'active' | 'bench' | 'neutral'> = {
   focus: 'focus',
@@ -42,11 +43,10 @@ export function ActivityListRow({
   hideGoal,
 }: ActivityListRowProps) {
   const muted = activity.excludeFromRecommendations
-  const type = activityTypeMeta(activity.type)
-  const TypeIcon = type.icon
+  const type = activity.type
 
-  // General is the unclassified default - naming it on every row is noise.
-  const showType = !hideType && activity.type !== 'general'
+  // No type is the unconstrained default - naming it on every row is noise.
+  const showType = !hideType && type !== null
   const showCategory = !hideCategory && activity.category
   const showGoal = !hideGoal && activity.goal
   const hasMeta = showType || showCategory || showGoal || activity.subtasks.length > 0
@@ -77,12 +77,12 @@ export function ActivityListRow({
         </button>
       ) : (
         <span
-          title={type.label}
+          title={type?.name ?? NO_TYPE_LABEL}
           className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground ${
             muted ? 'opacity-50' : ''
           }`}
         >
-          <TypeIcon className="h-4 w-4" strokeWidth={2} />
+          <ActivityTypeIcon icon={type?.icon} />
         </span>
       )}
 
@@ -98,7 +98,7 @@ export function ActivityListRow({
         {hasMeta && (
           <span className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
             {showType && (
-              <span className="text-xs text-muted-foreground">{type.label}</span>
+              <span className="text-xs text-muted-foreground">{type!.name}</span>
             )}
             {showCategory && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">

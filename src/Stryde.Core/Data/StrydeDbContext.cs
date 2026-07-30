@@ -16,7 +16,7 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
     public DbSet<Checkpoint> Checkpoints => Set<Checkpoint>();
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
     public DbSet<Category> Categories => Set<Category>();
-    public DbSet<ActivityTypeSetting> ActivityTypeSettings => Set<ActivityTypeSetting>();
+    public DbSet<ActivityType> ActivityTypes => Set<ActivityType>();
     public DbSet<ActivitySubtask> ActivitySubtasks => Set<ActivitySubtask>();
     public DbSet<OccurrenceSubtask> OccurrenceSubtasks => Set<OccurrenceSubtask>();
     public DbSet<State> States => Set<State>();
@@ -52,8 +52,10 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .HasConversion<string>();
 
         modelBuilder.Entity<Activity>()
-            .Property(a => a.Type)
-            .HasConversion<string>();
+            .HasOne(a => a.Type)
+            .WithMany()
+            .HasForeignKey(a => a.ActivityTypeId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<Activity>()
             .HasOne(a => a.Category)
@@ -101,26 +103,16 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
                 v => TimeOnly.ParseExact(v, "HH:mm:ss"));
 
 
-        // One row per (user, type), and only for types the user has actually edited.
-        modelBuilder.Entity<ActivityTypeSetting>()
-            .HasKey(s => new { s.UserId, s.Type });
-
-        modelBuilder.Entity<ActivityTypeSetting>()
-            .Property(s => s.Type)
-            .HasConversion<string>();
-
-        // Declared over the non-nullable TimeOnly so EF keeps handling the nulls itself: a null
-        // column means "no override", and must not reach ParseExact.
         var timeOnlyToString = new ValueConverter<TimeOnly, string>(
             v => v.ToString("HH:mm:ss"),
             v => TimeOnly.ParseExact(v, "HH:mm:ss"));
 
-        modelBuilder.Entity<ActivityTypeSetting>()
-            .Property(s => s.WindowStart)
+        modelBuilder.Entity<ActivityType>()
+            .Property(t => t.WindowStart)
             .HasConversion(timeOnlyToString);
 
-        modelBuilder.Entity<ActivityTypeSetting>()
-            .Property(s => s.WindowEnd)
+        modelBuilder.Entity<ActivityType>()
+            .Property(t => t.WindowEnd)
             .HasConversion(timeOnlyToString);
 
         modelBuilder.Entity<Checkpoint>()

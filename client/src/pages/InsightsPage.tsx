@@ -142,7 +142,7 @@ function ActivityList({ activities }: { activities: InsightsActivity[] }) {
     return (
       <div className="rounded-lg border border-border px-4 py-8 text-center">
         <p className="text-sm text-muted-foreground">
-          No timed activities in this period. Log a start and end time on an occurrence to see it here.
+          No timed activities in this period.
         </p>
       </div>
     )

@@ -535,7 +535,6 @@ export function PlanPreviewPage() {
                         <p className="text-sm font-semibold text-foreground">
                           {overdueEvents.length} overdue item{overdueEvents.length === 1 ? '' : 's'}
                         </p>
-                        <p className="text-xs text-muted-foreground">Close the loop: push what you did not get to onto tomorrow.</p>
                       </div>
                       <button
                         onClick={() => sweepMutation.mutate()}

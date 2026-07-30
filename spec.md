@@ -59,7 +59,7 @@ The scheduling primitive is split into two layers:
 | Goal | Optional — links to one goal |
 | Category | Optional |
 | Kind | `activity` (default) or `event`. Internal split, not user-facing. |
-| Type | Scheduling profile — see **Activity Types** below. `general` by default. Set from the activity modal. |
+| Type | Optional — one user-created scheduling preset. See **Activity Types** below. No type by default, which is the unconstrained profile. Set from the activity modal. |
 | Exclude from suggestions | Boolean — when set, the activity never appears in recommendations or as a calendar suggestion. For things logged automatically from outside the app, or anything the user does not want proposed. Toggled per row on the Activities page (which also filters by All / Suggested / Muted) or from the activity's edit modal. |
 
 ### Activity Types
@@ -69,14 +69,25 @@ only user-supplied input to suggestion behaviour beyond the mute switch, and exi
 the engine something to work with before an activity has any completed history — until then every
 signal it uses (cadence, habitual time, typical duration) is empty.
 
-A type is a preset: a bundle of engine settings, four of which the user can retune per type
-(see **Editing a type** below). The table gives the built-in defaults.
+**A type is a row the user owns**, not a fixed list the app ships. Every field below is editable, and
+a type can be created, renamed, given an icon or deleted like a category. An activity has at most one
+type, or none.
 
-| Type | UI label | Window | Min block | Cadence prior | Max/day | Cooldown |
-|---|---|---|---|---|---|---|
-| `general` | General | 08:00-21:00 | - | 7d | - | - |
-| `training` | Training | 15:00-21:00 | 45 min | 2.5d | 2 | 0.5 |
-| `deepWork` | Deep work | 09:00-17:00 | 90 min | 3d | 2 | - |
+**No type is the unconstrained profile**, not a missing value: placed 08:00-21:00, no block floor, no
+cap, no cooldown, a 7-day cadence prior. That is why there is no built-in row standing for "general" -
+the row would have nothing to say.
+
+New users are seeded with three types, which are ordinary rows with nothing privileged about them.
+The table is what they start from, not a canonical list:
+
+| Seeded name | Window | Min block | Cadence prior | Max/day | Cooldown |
+|---|---|---|---|---|---|
+| General | 08:00-21:00 | - | 7d | - | - |
+| Training | 15:00-21:00 | 45 min | 2.5d | 2 | 0.5 |
+| Deep work | 09:00-17:00 | 90 min | 2.5d | 2 | - |
+
+Deleting a type set-nulls its activities: they survive with no type, exactly as they do when their
+category is deleted.
 
 - **Window** — where a suggestion with no habitual time of its own is placed. The start is a preference: when the window
   has no room the suggestion falls back to an opening *earlier* than the window rather than going
@@ -88,8 +99,8 @@ A type is a preset: a bundle of engine settings, four of which the user can retu
   window is a preference either way: an activity's **state requirements** are a hard mask applied on
   top of it (see **States**).
 - **Min block** — contiguous free time the activity needs regardless of its median duration. This is
-  the only setting that can make an activity ineligible: without it a `deepWork` or `training`
-  activity with no history is sized at the 30-minute default and would be offered a 30-minute crack.
+  the only setting that can make an activity ineligible: without it a deep work or training activity
+  with no history is sized at the 30-minute default and would be offered a 30-minute crack.
 - **Cadence prior** — the assumed gap between completions until history supplies a real median. It
   drives ranking for an activity with one completion (no derivable gap) and for one with none at all.
 - **Max/day** — ceiling on suggestions of that type for the target day, counted against what is
@@ -104,33 +115,40 @@ A type is a preset: a bundle of engine settings, four of which the user can retu
   no completions, whose due-ness comes from its creation date and says nothing about rest.
 
 Note the scope difference between the last two. **Max/day is per type** - one shared counter, so the
-first `training` activity suggested spends the allowance for all of them. **Cooldown is per
-activity.** That is why `training` caps at 2 rather than 1: spacing is the cooldown's job, and a cap
+first training activity suggested spends the allowance for all of them. **Cooldown is per activity.**
+That is why the seeded Training type caps at 2 rather than 1: spacing is the cooldown's job, and a cap
 of 1 would stop a run and a lift ever being suggested on the same day even when both are due.
 
-The list is deliberately short, and it holds **nothing but scheduling numbers**. A type earns its
-place by having values the engine acts on differently, not by naming a category of activity:
-`training` and `deepWork` both carry a block floor and a cap that change what gets suggested, while
-`general` is the unconstrained default everything else falls into. Grouping and labelling are what
-categories and goals are for; conditions are what **States** are for. A type never refers to another
-type.
+A type holds **nothing but scheduling numbers**. It earns its place by having values the engine acts
+on differently, not by naming a category of activity. Grouping and labelling are what categories and
+goals are for; conditions are what **States** are for. A type never refers to another type.
 
 #### Editing a type
 
-The **Window**, **Min block** and **Max/day** columns are editable per type on the Settings page,
-under Activity types. **Cadence prior** and **Cooldown** are not: both are measured against an
-activity's own completion history rather than the clock, so a number typed into a form has no
-predictable effect. Both are described in the UI, not exposed.
+All of it is editable, on the Types tab of the Activities page: name, icon, window, min block and
+max/day directly, and cadence prior and cooldown through a dropdown of worded options rather than a
+number box. Both of those are fractions of an activity's own completion history rather than clock
+values, so a freely typed number has no predictable effect - but leaving them hidden would have made
+a user-made type permanently weaker than a built-in one, which is the asymmetry types-as-rows exists
+to remove.
 
-Overrides are stored sparsely - a row exists only for a type the user has edited, and only the
-fields that actually differ from the default are written. Retuning a built-in default therefore
-still reaches every knob nobody has touched. Resetting a type deletes its row. Editing a type
-changes suggestions everywhere at once: the values are resolved per request, and the hint copy shown
-under the type picker is generated from the resolved profile rather than written by hand.
+| Cadence prior | | Cooldown | |
+|---|---|---|---|
+| Daily | 1d | As soon as it's due | 0 |
+| Every few days | 2.5d | Once you're halfway to due | 0.5 |
+| Weekly | 7d | Only when fully due | 1.0 |
+| Every couple of weeks | 14d | | |
 
-Validation: the window must start before it ends (placement walks candidate starts forward, so a
-window wrapping past midnight would match nothing), Min block is 0-480 minutes, and Max/day is 0-24
-(0 = unlimited on both).
+Nothing may be seeded at a value these options cannot express: a number the editor cannot round-trip
+would make a type unreachable by hand. That is why the seeded Deep work carries a 2.5d cadence rather
+than the 3d it had while the list was hardcoded.
+
+Editing a type changes suggestions everywhere at once - the engine reads the rows per request, and
+the hint copy under the type picker is generated from the row rather than written by hand.
+
+Validation: name required, the window must start before it ends (placement walks candidate starts
+forward, so a window wrapping past midnight would match nothing), Min block is 0-480 minutes, Max/day
+is 0-24 (0 = unlimited on both), cadence is above 0, and cooldown is 0-1.
 
 Deliberately out of this slice: per-type energy spacing, and any notion of an activity that needs
 another person (a coffee or a dinner is not unilaterally schedulable, so no slot the engine picks is
@@ -145,17 +163,18 @@ the two failures this is built to fix: a commute offered at 19:00 on a day nobod
 commute at 09:00 on a day work started at 08:00.
 
 A **State** is a user-defined dimension of context with an ordered list of possible **values**, one of
-which is the default. Managed on the Settings page, under States.
+which is the default. Managed on the States tab of the Activities page.
 
 | Field | Notes |
 |---|---|
 | Name | Required. `Location`, `Tired`. |
-| Values | Ordered, in creation order. Each has a name, a default flag, and an optional duration. |
+| Values | Ordered, in creation order. Each has a name and a default flag. How long a value holds is not set here but on the activities that cause it. |
 
 Each activity then declares two things, both optional, both set from the activity modal:
 
-- **Changes** — the state values doing it puts the world into. At most one value per state, which the
-  composite key enforces structurally rather than by a service check.
+- **Changes** — the state values doing it puts the world into, each with an optional **duration**.
+  At most one value per state, which the composite key enforces structurally rather than by a service
+  check.
 - **Only suggest when** — the values a state must hold. Values listed for one state are **ORed** (the
   state is one *of* them); the groups for different states are **ANDED**.
 
@@ -165,9 +184,10 @@ The whole commute case is then data rather than code:
 State "Location", values: Home (default), Work
 Activity "Commute in"    changes Location -> Work,  only when Location is Home
 Activity "Commute home"  changes Location -> Home,  only when Location is Work
-Activity "Run"           type training,             only when Location is Home
-State "Tired", values: No (default), Yes (expires after 1 day)
-Activity "Leg day"       changes Tired -> Yes
+Activity "Run"           type Training,             only when Location is Home
+State "Tired", values: No (default), Yes
+Activity "Leg day"       changes Tired -> Yes for 10 hours
+Activity "Hike"          changes Tired -> Yes for 2 days
 Activity "Run"           also only when Tired is No
 ```
 
@@ -193,19 +213,29 @@ move a commute and the state moves with it.
 
 #### Durations
 
-A value may declare how long it holds before falling back to the default. This is what lets a state
-change back **on its own**, with nothing scheduled to undo it: a workout leaves you tired for a day,
-and no phantom "recovered" activity is needed to flip it back. A value with no duration holds until
-something else changes it, which is what `Location` wants - you get home because you scheduled a
-commute home, not because a timer ran out.
+A change may declare how long the value it sets holds before falling back to the default. This is what
+lets a state change back **on its own**, with nothing scheduled to undo it: a workout leaves you tired
+for a day, and no phantom "recovered" activity is needed to flip it back. A change with no duration
+holds until something else changes it, which is what `Location` wants - you get home because you
+scheduled a commute home, not because a timer ran out.
 
-- Expiry always returns the state to its **default**. A value with a duration is by definition a
-  temporary departure from it, so a value that ought to decay to some *third* value is a sign the
-  state is modelled wrong.
-- **The default cannot carry a duration** - it would have nowhere to fall back to. Rejected on write,
-  and taking the default flag clears any duration the value had.
-- **A later setter cancels a pending expiry** and replaces it with its own, so a second session that
-  afternoon extends the tiredness rather than being cut short by the first one's decay.
+**The duration belongs to the cause, not to the value.** "Tired" has no lifetime of its own: a run
+leaves you tired for ten hours and a hike for two days, so the number sits on the activity's change
+and two activities can hold one value for different lengths of time. It is entered on the activity
+modal, in minutes, hours or days.
+
+- Expiry always returns the state to its **default**. A duration is by definition a temporary
+  departure from the default, so a value that ought to decay to some *third* value is a sign the state
+  is modelled wrong.
+- **A change to the default value cannot carry a duration** - it would decay to itself. Rejected on
+  write. Should the default later move onto a value some activity sets *with* a duration, that
+  duration simply goes inert (and comes back if the default moves off again): refusing the change, or
+  quietly rewriting other activities, would both be worse than a dormant number.
+- **A later setter that changes the value replaces the pending expiry** with its own, since the
+  departure the old one was counting down is over.
+- **A later setter that re-sets the value already in force takes whichever expiry is further out.**
+  A second session that afternoon extends the tiredness rather than being cut short by the first one's
+  decay - and an easy run the evening after a hike does not cut two days of soreness to ten hours.
 - Durations cross the day boundary freely, which day-scoped gating could not express at all. 1-43200
   minutes (30 days); past that a "temporary" value is just the state's normal value.
 
@@ -458,7 +488,7 @@ Only these views are in scope for v1:
 | Categories | Occurrence lists per category; "No category" is the first item and default view. Entry point for triaging uncategorized work. |
 | Calendar | Day/week view of scheduled occurrences. Primary scheduling surface. |
 | Goals | Goal list with progress insight per goal. Checkpoint management. |
-| Activities | Manage activity definitions: create, edit, delete. Title search, an All / Suggested / Muted filter, and a Goal / Type / Category grouping toggle. Rows carry the activity's type (hidden when `general`), category, goal, and subtask count; muting stays a one-tap bulb, edit and delete live in the row's action menu. |
+| Activities | Manage activity definitions: create, edit, delete. Title search, an All / Suggested / Muted filter, and a Goal / Type / Category grouping toggle. Rows carry the activity's type (hidden when it has none), category, goal, and subtask count; muting stays a one-tap bulb, edit and delete live in the row's action menu. |
 | Insights | Completion stats: headline counts, streak, 14-day chart, category breakdown. |
 | Settings | Timezone, day boundary, max Focus goals, activity type tuning, states, appearance, JSON data export, sign out. |
 
@@ -493,7 +523,7 @@ Read-only stats over **done occurrences**, computed server-side (`GET /api/insig
 | Timezone | Set automatically on registration from browser locale. Editable on the Settings page. |
 | Calendar suggestions | How many suggestion ghosts the calendar draws per day (1-12, default 6). |
 | Activity types | Per-type window, minimum block, and max/day. See Activity Types. Each type shows its resolved values, is flagged when customised, and can be reset to the built-in default. |
-| States | Create states and their values, star the default, and give a value an optional expiry in minutes. See States. |
+| States | Create states and their values, and star the default. Expiries live on the activities that cause the change, not here. See States. |
 | Theme | Light / dark / system. Client-side preference (localStorage), defaults to system. |
 
 ---

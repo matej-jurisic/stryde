@@ -1,18 +1,11 @@
-using Stryde.Core.Enums;
+using Stryde.Core.Entities;
 
 namespace Stryde.Core.Common;
 
 /// <summary>
-/// What an <see cref="ActivityType"/> means to the recommendation engine.
+/// What an <see cref="ActivityType"/> means to the recommendation engine, flattened off the row so
+/// the engine never holds an entity.
 /// </summary>
-/// <para>
-/// The values below are the built-in defaults. <c>WindowStart</c>, <c>WindowEnd</c>,
-/// <c>MinBlockMinutes</c> and <c>MaxPerDay</c> are user-editable per type
-/// (<see cref="Entities.ActivityTypeSetting"/>, resolved by <see cref="Services.ActivityProfileService"/>);
-/// <c>CadencePriorDays</c> and <c>MinDueFraction</c> are not. Those two are measured against an
-/// activity's own history rather than the clock, so a number typed into a form has no predictable
-/// effect - they stay engine-internal until there is a way to express them in user language.
-/// </para>
 /// <param name="WindowStart">
 /// Earliest local time a suggestion of this type may be placed at. An activity with a habitual start
 /// time ignores the window entirely: observed behaviour beats a declared preference. A window is a
@@ -58,33 +51,21 @@ public static class ActivityProfiles
     /// </summary>
     public const double MaxColdStartScore = 3.0;
 
-    private static readonly Dictionary<ActivityType, ActivityProfile> Map = new()
-    {
-        // Unclassified, and the type most activities keep. Widest window and no constraints of any
-        // kind: it fits wherever there is room. The window floor matches the engine's historical
-        // 08:00 default.
-        [ActivityType.general] = new(new(8, 0), new(21, 0), 0, DefaultCadenceDays, 0),
-
-        // A training split repeats every few days, which the 7-day general prior does not describe.
-        // The 45 minute floor keeps it out of the cracks a no-history activity would otherwise be
-        // sized into at the 30-minute default, and the window clears a working day, since the
-        // 09:00-17:00 deepWork window is unusable for it. The cooldown is what produces rest days
-        // and alternation; the per-day cap is 2 rather than 1 so a run and a lift can still share a
-        // day once each is past its own cooldown.
-        [ActivityType.training] = new(new(15, 0), new(21, 0), 45, 2.5, 2, 0.5),
-
-        // The highest block floor: a 30-minute crack is not deep work, and without this it would be
-        // offered one, since a no-history activity is sized at the 30-minute default.
-        [ActivityType.deepWork] = new(new(9, 0), new(17, 0), 90, 3.0, 2),
-    };
-
-    /// <summary>Every type, in declaration order. The canonical order the UI lists them in.</summary>
-    public static readonly IReadOnlyList<ActivityType> AllTypes = Enum.GetValues<ActivityType>();
+    /// <summary>
+    /// What an activity with no type gets. Widest window and no constraints of any kind: it fits
+    /// wherever there is room. "No type" is the unconstrained default, which is why there is no
+    /// built-in row standing for it. The window floor matches the engine's historical 08:00 default.
+    /// </summary>
+    public static readonly ActivityProfile Unconstrained =
+        new(new(8, 0), new(21, 0), 0, DefaultCadenceDays, 0);
 
     /// <summary>
-    /// The built-in profile, before any user override. Call this only where the defaults themselves
-    /// are the subject; the engine reads a *resolved* profile from
-    /// <see cref="Services.ActivityProfileService.ResolveAsync"/> instead.
+    /// The profile a type row describes. A null row - no type, or an id pointing at nothing - is
+    /// <see cref="Unconstrained"/>.
     /// </summary>
-    public static ActivityProfile For(ActivityType type) => Map[type];
+    public static ActivityProfile Of(ActivityType? type) =>
+        type is null
+            ? Unconstrained
+            : new(type.WindowStart, type.WindowEnd, type.MinBlockMinutes,
+                type.CadencePriorDays, type.MaxPerDay, type.MinDueFraction);
 }

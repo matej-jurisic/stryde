@@ -10,13 +10,17 @@ public class Activity
     public Guid? CategoryId { get; set; }
     public Guid? GoalId { get; set; }
     public ActivityKind Kind { get; set; } = ActivityKind.activity;
-    public ActivityType Type { get; set; } = ActivityType.general;
+
+    /// <summary>Null is "no type", which is the unconstrained scheduling profile.</summary>
+    public Guid? ActivityTypeId { get; set; }
+
     public bool ExcludeFromRecommendations { get; set; } = false;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public User User { get; set; } = null!;
     public Category? Category { get; set; }
     public Goal? Goal { get; set; }
+    public ActivityType? Type { get; set; }
     public List<ActivitySubtask> Subtasks { get; set; } = [];
 
     /// <summary>What doing this activity changes about the world. At most one value per state.</summary>

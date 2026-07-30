@@ -13,6 +13,8 @@ import { CategoriesPage } from '@/pages/CategoriesPage'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { ActivitiesPage } from '@/pages/ActivitiesPage'
+import { ActivityTypesPage } from '@/pages/ActivityTypesPage'
+import { StatesPage } from '@/pages/StatesPage'
 import { GoalDetailPage } from '@/pages/GoalDetailPage'
 import { ActivityDetailPage } from '@/pages/ActivityDetailPage'
 import { InsightsPage } from '@/pages/InsightsPage'
@@ -55,8 +57,11 @@ function AppRoutes() {
         <Route path="/goals"         element={<GoalsPreviewPage />} />
         <Route path="/goals-old"     element={<GoalsPage />} />
         <Route path="/goals/:id"     element={<GoalDetailPage />} />
-        <Route path="/activities"    element={<ActivitiesPage />} />
-        <Route path="/activities/:id" element={<ActivityDetailPage />} />
+        {/* Static segments outrank the :id route, so a type or state tab never reads as an id. */}
+        <Route path="/activities"        element={<ActivitiesPage />} />
+        <Route path="/activities/types"  element={<ActivityTypesPage />} />
+        <Route path="/activities/states" element={<StatesPage />} />
+        <Route path="/activities/:id"    element={<ActivityDetailPage />} />
         <Route path="/insights"   element={<InsightsPage />} />
         <Route path="/settings"   element={<SettingsPage />} />
         <Route path="/"       element={<Navigate to="/plan" replace />} />

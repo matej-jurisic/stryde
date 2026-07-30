@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Menu, Plus, LayoutGrid, CalendarCheck, Sparkles } from 'lucide-react'
 import { useQuery, useQueries, useQueryClient, keepPreviousData } from '@tanstack/react-query'
-import { occurrencesApi, settingsApi, insightsApi, recommendationsApi } from '@/lib/api'
+import { occurrencesApi, settingsApi, insightsApi, recommendationsApi, goalsApi, categoriesApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import type { Activity, Occurrence, InsightsFreeRange } from '@/lib/types'
 import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
 import { EventModal } from '@/components/events/EventModal'
 import { EventDetailModal } from '@/components/events/EventDetailModal'
+import { ActivityModal } from '@/components/activities/ActivityModal'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 
 const DEFAULT_HOUR_PX = 64
@@ -1193,6 +1194,8 @@ export function CalendarPage() {
   const [scheduleMode, setScheduleMode] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailEvent, setDetailEvent] = useState<Occurrence | null>(null)
+  const [activityModalOpen, setActivityModalOpen] = useState(false)
+  const [editingActivity, setEditingActivity] = useState<Activity | undefined>()
   const [duplicateFromOccurrence, setDuplicateFromOccurrence] = useState<Occurrence | undefined>()
   const [scrollTop, setScrollTop] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1266,6 +1269,20 @@ export function CalendarPage() {
     queryKey: ['settings'],
     queryFn: settingsApi.get,
     staleTime: 5 * 60 * 1000,
+  })
+
+  // Only the activity editor needs these, and it opens from a menu deep in the detail modal, so
+  // they stay off the calendar's own load path.
+  const { data: goals = [] } = useQuery({
+    queryKey: ['goals'],
+    queryFn: () => goalsApi.list(),
+    enabled: activityModalOpen,
+  })
+
+  const { data: categories = [] } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => categoriesApi.list(),
+    enabled: activityModalOpen,
   })
 
   // Effective "today" respecting the day boundary
@@ -1646,6 +1663,13 @@ export function CalendarPage() {
   function openDetail(o: Occurrence) {
     setDetailEvent(o)
     setDetailOpen(true)
+  }
+
+  function openEditActivity(a: Activity) {
+    setDetailOpen(false)
+    setDetailEvent(null)
+    setEditingActivity(a)
+    setActivityModalOpen(true)
   }
 
   function openEdit(o: Occurrence) {
@@ -3124,6 +3148,16 @@ export function CalendarPage() {
         onEdit={(o) => { setDetailOpen(false); openEdit(o) }}
         onSchedule={(o) => { setDetailOpen(false); openSchedule(o) }}
         onDuplicate={openDuplicate}
+        onEditActivity={openEditActivity}
+      />
+
+      <ActivityModal
+        key={editingActivity?.id ?? 'none'}
+        open={activityModalOpen}
+        onClose={() => setActivityModalOpen(false)}
+        activity={editingActivity}
+        goals={goals}
+        categories={categories}
       />
 
       <EventModal

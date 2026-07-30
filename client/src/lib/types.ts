@@ -17,8 +17,32 @@ export type CheckpointStatus = 'pending' | 'reached'
 export type CheckpointSize = 'tiny' | 'small' | 'normal' | 'big' | 'huge'
 export type ActivityKind = 'activity' | 'event'
 
-/** Scheduling profile - drives when and how often the engine suggests the activity. */
-export type ActivityType = 'general' | 'training' | 'deepWork'
+/**
+ * A user-authored scheduling preset: when the engine may place an activity of this type, and how
+ * often it should come round. An activity with no type is unconstrained.
+ */
+export interface ActivityType {
+  id: string
+  userId: string
+  name: string
+  /** Lucide component name, resolved through the client's icon map. */
+  icon: string | null
+  windowStart: string // "HH:mm"
+  windowEnd: string // "HH:mm"
+  minBlockMinutes: number
+  /** 0 = unlimited. */
+  maxPerDay: number
+  cadencePriorDays: number
+  /** 0 = no cooldown. Fraction of the activity's own rhythm. */
+  minDueFraction: number
+  createdAt: string
+}
+
+export interface ActivityTypeSummary {
+  id: string
+  name: string
+  icon: string | null
+}
 
 export interface GoalSummary {
   id: string
@@ -95,16 +119,29 @@ export interface Activity {
   categoryId: string | null
   goalId: string | null
   kind: ActivityKind
-  type: ActivityType
+  /** Null means no type, which is the unconstrained scheduling profile. */
+  activityTypeId: string | null
   excludeFromRecommendations: boolean
   createdAt: string
   category: CategorySummary | null
   goal: GoalSummary | null
+  type: ActivityTypeSummary | null
   subtasks: ActivitySubtask[]
-  /** State values this activity puts the world into. At most one per state. */
-  setsStateValueIds: string[]
+  /** State values this activity puts the world into, and for how long. At most one per state. */
+  setsStateValues: ActivityStateEffect[]
   /** Only suggested while every state named here holds one of its listed values. */
   requiredStateValueIds: string[]
+}
+
+/** One state change an activity causes. */
+export interface ActivityStateEffect {
+  stateValueId: string
+  /**
+   * Minutes the value holds before falling back to the state's default, or null for "until something
+   * else changes it". Lives here rather than on the value because it describes the cause: the same
+   * "Tired: Yes" lasts ten hours after a run and two days after a hike.
+   */
+  durationMinutes: number | null
 }
 
 export interface Occurrence {
@@ -202,25 +239,6 @@ export interface UserSettings {
 }
 
 /**
- * One activity type's resolved scheduling profile: built-in defaults with the user's overrides
- * applied. The first four fields are editable; `cadencePriorDays` and `minDueFraction` are
- * read-only, carried so hint copy can describe the engine without hardcoding numbers.
- */
-export interface ActivityProfile {
-  type: ActivityType
-  windowStart: string // "HH:mm"
-  windowEnd: string // "HH:mm"
-  minBlockMinutes: number
-  /** 0 = unlimited. */
-  maxPerDay: number
-  cadencePriorDays: number
-  /** 0 = no cooldown. Fraction of the activity's own rhythm. */
-  minDueFraction: number
-  /** True when any field differs from the built-in default. */
-  isCustomised: boolean
-}
-
-/**
  * A user-defined dimension of context the engine gates suggestions on: Location, Tired. Its value at
  * any moment is derived from the schedule rather than stored, so moving an occurrence moves the state
  * with it.
@@ -240,7 +258,5 @@ export interface StateValue {
   name: string
   /** In force before anything sets the state, and what an expiring value falls back to. */
   isDefault: boolean
-  /** How long the value holds once set, or null for "until something else changes it". */
-  durationMinutes: number | null
   createdAt: string
 }

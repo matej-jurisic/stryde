@@ -1,4 +1,4 @@
-using Stryde.Core.Dtos;
+﻿using Stryde.Core.Dtos;
 using Stryde.Core.Entities;
 using Stryde.Core.Enums;
 
@@ -27,7 +27,7 @@ public class RecommendationServiceTests : IDisposable
 
     private async Task<Activity> AddActivityAsync(
         Guid userId, string title, GoalStatus? goalStatus = null,
-        ActivityType type = ActivityType.general, DateTimeOffset? createdAt = null)
+        Guid? typeId = null, DateTimeOffset? createdAt = null)
     {
         Goal? goal = null;
         if (goalStatus.HasValue)
@@ -36,7 +36,7 @@ public class RecommendationServiceTests : IDisposable
             _ctx.Db.Goals.Add(goal);
             await _ctx.Db.SaveChangesAsync();
         }
-        var activity = new Activity { UserId = userId, Title = title, GoalId = goal?.Id, Type = type };
+        var activity = new Activity { UserId = userId, Title = title, GoalId = goal?.Id, ActivityTypeId = typeId };
         // Cold-start scoring measures from creation, and the default is the real wall clock, which
         // is in the future relative to the fixed test clock.
         if (createdAt.HasValue) activity.CreatedAt = createdAt.Value;
@@ -44,6 +44,41 @@ public class RecommendationServiceTests : IDisposable
         await _ctx.Db.SaveChangesAsync();
         return activity;
     }
+
+    // Cached per (user, name): activities sharing a type must share the row, or a per-day cap would
+    // apply to each of them separately and every cap test would pass for the wrong reason.
+    private readonly Dictionary<(Guid UserId, string Name), Guid> _typeIds = [];
+
+    private async Task<Guid> TypeAsync(
+        Guid userId, string name, TimeOnly windowStart, TimeOnly windowEnd,
+        int minBlockMinutes = 0, int maxPerDay = 0,
+        double cadencePriorDays = 7.0, double minDueFraction = 0)
+    {
+        if (_typeIds.TryGetValue((userId, name), out var existing)) return existing;
+
+        var type = new ActivityType
+        {
+            UserId = userId,
+            Name = name,
+            WindowStart = windowStart,
+            WindowEnd = windowEnd,
+            MinBlockMinutes = minBlockMinutes,
+            MaxPerDay = maxPerDay,
+            CadencePriorDays = cadencePriorDays,
+            MinDueFraction = minDueFraction,
+        };
+        _ctx.Db.ActivityTypes.Add(type);
+        await _ctx.Db.SaveChangesAsync();
+        _typeIds[(userId, name)] = type.Id;
+        return type.Id;
+    }
+
+    // The two seeded defaults these tests lean on, matching ActivityTypeService.DefaultsFor.
+    private Task<Guid> TrainingAsync(Guid userId) =>
+        TypeAsync(userId, "Training", new(15, 0), new(21, 0), 45, 2, 2.5, 0.5);
+
+    private Task<Guid> DeepWorkAsync(Guid userId) =>
+        TypeAsync(userId, "Deep work", new(9, 0), new(17, 0), 90, 2, 2.5);
 
     private async Task<Occurrence> AddOccurrenceAsync(
         Guid userId, Activity activity,
@@ -606,7 +641,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_deep_work_is_not_offered_a_gap_below_its_block_floor()
     {
         var userId = await CreateUserAsync();
-        await AddActivityAsync(userId, "deep work", GoalStatus.focus, ActivityType.deepWork);
+        await AddActivityAsync(userId, "deep work", GoalStatus.focus, await DeepWorkAsync(userId));
         var normal = await AddActivityAsync(userId, "anything", GoalStatus.focus);
 
         // Only an hour left in the day - enough for an untyped activity, not for a 90 minute block
@@ -621,7 +656,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_activity_is_placed_inside_its_type_window()
     {
         var userId = await CreateUserAsync();
-        await AddActivityAsync(userId, "leg day", GoalStatus.focus, ActivityType.training);
+        await AddActivityAsync(userId, "leg day", GoalStatus.focus, await TrainingAsync(userId));
 
         // Future day, entirely free: without a type this would land at the 08:00 default
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
@@ -634,7 +669,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_habitual_time_beats_the_type_window()
     {
         var userId = await CreateUserAsync();
-        var a = await AddActivityAsync(userId, "morning run", GoalStatus.focus, ActivityType.training);
+        var a = await AddActivityAsync(userId, "morning run", GoalStatus.focus, await TrainingAsync(userId));
         await CompleteAsync(userId, a, At(2, 7), At(2, 8));
         await CompleteAsync(userId, a, At(4, 7), At(4, 8));
 
@@ -650,8 +685,8 @@ public class RecommendationServiceTests : IDisposable
     {
         var userId = await CreateUserAsync();
         // Same goal status, same age, no history: only the cadence prior separates them
-        var general = await AddActivityAsync(userId, "anything", GoalStatus.focus, ActivityType.general, At(1, 0));
-        var training = await AddActivityAsync(userId, "push day", GoalStatus.focus, ActivityType.training, At(1, 0));
+        var general = await AddActivityAsync(userId, "anything", GoalStatus.focus, null, At(1, 0));
+        var training = await AddActivityAsync(userId, "push day", GoalStatus.focus, await TrainingAsync(userId), At(1, 0));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -665,8 +700,8 @@ public class RecommendationServiceTests : IDisposable
     {
         var userId = await CreateUserAsync();
         // Created 300 days ago and never done: uncapped, 300/7 would bury a genuinely overdue activity
-        await AddActivityAsync(userId, "ancient", GoalStatus.focus, ActivityType.general, At(1, 0).AddDays(-300));
-        var real = await AddActivityAsync(userId, "real rhythm", GoalStatus.focus, ActivityType.general);
+        await AddActivityAsync(userId, "ancient", GoalStatus.focus, null, At(1, 0).AddDays(-300));
+        var real = await AddActivityAsync(userId, "real rhythm", GoalStatus.focus);
         await CompleteAsync(userId, real, At(1, 9), At(1, 10));
         await CompleteAsync(userId, real, At(2, 9), At(2, 10));
 
@@ -682,7 +717,7 @@ public class RecommendationServiceTests : IDisposable
     {
         var userId = await CreateUserAsync();
         for (var i = 0; i < 3; i++)
-            await AddActivityAsync(userId, $"session {i}", GoalStatus.focus, ActivityType.training);
+            await AddActivityAsync(userId, $"session {i}", GoalStatus.focus, await TrainingAsync(userId));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
@@ -699,11 +734,11 @@ public class RecommendationServiceTests : IDisposable
         var userId = await CreateUserAsync();
         // Push: last done 3 days ago on a 3 day rhythm, so due. Pull: done yesterday on a 4 day
         // rhythm, so a quarter of the way through it.
-        var push = await AddActivityAsync(userId, "push", GoalStatus.focus, ActivityType.training);
+        var push = await AddActivityAsync(userId, "push", GoalStatus.focus, await TrainingAsync(userId));
         await CompleteAsync(userId, push, At(1, 17), At(1, 18));
         await CompleteAsync(userId, push, At(4, 17), At(4, 18));
 
-        var pull = await AddActivityAsync(userId, "pull", GoalStatus.focus, ActivityType.training);
+        var pull = await AddActivityAsync(userId, "pull", GoalStatus.focus, await TrainingAsync(userId));
         await CompleteAsync(userId, pull, At(2, 17), At(2, 18));
         await CompleteAsync(userId, pull, At(6, 17), At(6, 18));
 
@@ -720,7 +755,7 @@ public class RecommendationServiceTests : IDisposable
         var userId = await CreateUserAsync();
         // Due-ness for a never-completed activity comes from its creation date, which says nothing
         // about rest - a brand new training activity must still be offered.
-        var fresh = await AddActivityAsync(userId, "push", GoalStatus.focus, ActivityType.training, At(7, 0));
+        var fresh = await AddActivityAsync(userId, "push", GoalStatus.focus, await TrainingAsync(userId), At(7, 0));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -746,7 +781,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_training_is_not_offered_a_gap_below_its_block_floor()
     {
         var userId = await CreateUserAsync();
-        await AddActivityAsync(userId, "push", GoalStatus.focus, ActivityType.training);
+        await AddActivityAsync(userId, "push", GoalStatus.focus, await TrainingAsync(userId));
         var normal = await AddActivityAsync(userId, "anything", GoalStatus.focus);
 
         // Half an hour left in the day: enough for an untyped activity, not for a 45 minute session
@@ -762,7 +797,7 @@ public class RecommendationServiceTests : IDisposable
     {
         var userId = await CreateUserAsync();
         for (var i = 0; i < 3; i++)
-            await AddActivityAsync(userId, $"deep {i}", GoalStatus.focus, ActivityType.deepWork);
+            await AddActivityAsync(userId, $"deep {i}", GoalStatus.focus, await DeepWorkAsync(userId));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
@@ -776,10 +811,10 @@ public class RecommendationServiceTests : IDisposable
         var target = new DateOnly(2026, 7, 9);
         for (var i = 0; i < 2; i++)
         {
-            var scheduled = await AddActivityAsync(userId, $"scheduled deep {i}", GoalStatus.focus, ActivityType.deepWork);
+            var scheduled = await AddActivityAsync(userId, $"scheduled deep {i}", GoalStatus.focus, await DeepWorkAsync(userId));
             await AddOccurrenceAsync(userId, scheduled, At(9, 9 + i * 2), At(9, 10 + i * 2));
         }
-        await AddActivityAsync(userId, "one more", GoalStatus.focus, ActivityType.deepWork);
+        await AddActivityAsync(userId, "one more", GoalStatus.focus, await DeepWorkAsync(userId));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, target, Now);
 
@@ -793,10 +828,10 @@ public class RecommendationServiceTests : IDisposable
         var userId = await CreateUserAsync();
         for (var i = 0; i < 2; i++)
         {
-            var finished = await AddActivityAsync(userId, $"finished deep {i}", GoalStatus.focus, ActivityType.deepWork);
+            var finished = await AddActivityAsync(userId, $"finished deep {i}", GoalStatus.focus, await DeepWorkAsync(userId));
             await CompleteAsync(userId, finished, At(7, 8 + i * 2), At(7, 9 + i * 2));
         }
-        await AddActivityAsync(userId, "one more", GoalStatus.focus, ActivityType.deepWork);
+        await AddActivityAsync(userId, "one more", GoalStatus.focus, await DeepWorkAsync(userId));
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
 
@@ -805,31 +840,29 @@ public class RecommendationServiceTests : IDisposable
         Assert.Empty(recs);
     }
 
-    // --- User overrides of a type's profile ---
+    // --- Types the user authored ---
+    // Nothing distinguishes these from the seeded three: the engine reads whatever the row says.
 
     [Fact]
-    public async Task GetAsync_placement_follows_an_overridden_window()
+    public async Task GetAsync_placement_follows_a_narrow_custom_window()
     {
         var userId = await CreateUserAsync();
-        await AddActivityAsync(userId, "leg day", GoalStatus.focus, ActivityType.training);
-        // training defaults to 15:00-21:00
-        await _ctx.ActivityProfileService.UpdateAsync(
-            userId, ActivityType.training, new UpdateActivityProfileRequest("10:00", "12:00", 0, 0));
+        var errands = await TypeAsync(userId, "Errands", new(10, 0), new(12, 0));
+        await AddActivityAsync(userId, "post office", GoalStatus.focus, errands);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
+        // With no type this would land at the 08:00 unconstrained default
         Assert.Equal(At(9, 10), Assert.Single(recs).SuggestedStartAt);
     }
 
     [Fact]
-    public async Task GetAsync_type_cap_follows_an_overridden_max_per_day()
+    public async Task GetAsync_type_cap_follows_a_custom_max_per_day()
     {
         var userId = await CreateUserAsync();
+        var once = await TypeAsync(userId, "Once daily", new(9, 0), new(17, 0), maxPerDay: 1);
         for (var i = 0; i < 3; i++)
-            await AddActivityAsync(userId, $"deep {i}", GoalStatus.focus, ActivityType.deepWork);
-        // deepWork defaults to a cap of 2
-        await _ctx.ActivityProfileService.UpdateAsync(
-            userId, ActivityType.deepWork, new UpdateActivityProfileRequest("09:00", "17:00", 90, 1));
+            await AddActivityAsync(userId, $"task {i}", GoalStatus.focus, once);
 
         var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
 
@@ -837,13 +870,26 @@ public class RecommendationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_slot_fit_follows_an_overridden_block_floor()
+    public async Task GetAsync_slot_fit_follows_a_custom_block_floor()
     {
         var userId = await CreateUserAsync();
-        await AddActivityAsync(userId, "deep work", GoalStatus.focus, ActivityType.deepWork);
-        // Dropped from 90 to 30, so the last hour of the day now fits it
-        await _ctx.ActivityProfileService.UpdateAsync(
-            userId, ActivityType.deepWork, new UpdateActivityProfileRequest("09:00", "17:00", 30, 2));
+        // A 30 minute floor rather than deep work's 90, so the last hour of the day still fits it
+        var shallow = await TypeAsync(userId, "Shallow work", new(9, 0), new(17, 0), minBlockMinutes: 30);
+        await AddActivityAsync(userId, "inbox", GoalStatus.focus, shallow);
+
+        var lateNow = new DateTimeOffset(2026, 7, 7, 23, 0, 0, TimeSpan.Zero);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
+
+        Assert.Single(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_activity_with_no_type_is_unconstrained()
+    {
+        var userId = await CreateUserAsync();
+        // No block floor, no cap and the widest window: a typeless activity takes the last gap of the
+        // day, which every seeded type's block floor would have ruled out.
+        await AddActivityAsync(userId, "anything", GoalStatus.focus);
 
         var lateNow = new DateTimeOffset(2026, 7, 7, 23, 0, 0, TimeSpan.Zero);
         var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
@@ -853,22 +899,16 @@ public class RecommendationServiceTests : IDisposable
 
     // --- States ---
 
-    /// <summary>
-    /// A state whose values are given in order. The first is the default, so it cannot carry a
-    /// duration - a duration is a departure from the default and the default has nowhere to fall back
-    /// to.
-    /// </summary>
-    private async Task<State> AddStateAsync(
-        Guid userId, string name, params (string Name, int? DurationMinutes)[] values)
+    /// <summary>A state whose values are given in order. The first one is the default.</summary>
+    private async Task<State> AddStateAsync(Guid userId, string name, params string[] values)
     {
         var state = new State { UserId = userId, Name = name };
         for (var i = 0; i < values.Length; i++)
             state.Values.Add(new StateValue
             {
                 StateId = state.Id,
-                Name = values[i].Name,
+                Name = values[i],
                 IsDefault = i == 0,
-                DurationMinutes = values[i].DurationMinutes,
                 CreatedAt = Now.AddSeconds(i),
             });
         _ctx.Db.States.Add(state);
@@ -878,14 +918,18 @@ public class RecommendationServiceTests : IDisposable
 
     private static StateValue Value(State state, string name) => state.Values.First(v => v.Name == name);
 
-    /// <summary>Doing this activity puts the state into that value, from the occurrence's end.</summary>
-    private async Task SetsAsync(Activity activity, StateValue value)
+    /// <summary>
+    /// Doing this activity puts the state into that value, from the occurrence's end, holding it for
+    /// <paramref name="durationMinutes"/> or until something else changes it.
+    /// </summary>
+    private async Task SetsAsync(Activity activity, StateValue value, int? durationMinutes = null)
     {
         _ctx.Db.ActivityStateEffects.Add(new ActivityStateEffect
         {
             ActivityId = activity.Id,
             StateId = value.StateId,
             StateValueId = value.Id,
+            DurationMinutes = durationMinutes,
         });
         await _ctx.Db.SaveChangesAsync();
     }
@@ -906,7 +950,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_activity_is_not_suggested_when_its_requirement_never_holds()
     {
         var userId = await CreateUserAsync();
-        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
 
         // On a focus goal and overdue by its own reckoning, but nobody went in that day, so there is
         // nothing for a commute home to be a commute from.
@@ -922,7 +966,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_requirement_opens_from_the_setting_occurrences_end()
     {
         var userId = await CreateUserAsync();
-        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
 
         // You are at work once the inbound leg *finishes*, so nothing may be placed before 08:30.
         var into = await AddActivityAsync(userId, "commute in");
@@ -941,7 +985,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_requirement_overrides_a_habitual_time_outside_it()
     {
         var userId = await CreateUserAsync();
-        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
 
         var into = await AddActivityAsync(userId, "commute in");
         await SetsAsync(into, Value(location, "Work"));
@@ -963,11 +1007,11 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_activity_is_suppressed_while_a_timed_value_is_in_force()
     {
         var userId = await CreateUserAsync();
-        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 1440));
+        var tired = await AddStateAsync(userId, "Tired", "No", "Yes");
 
         // Trained 09:00-10:00, so tired until 10:00 tomorrow. Nothing has to be scheduled to undo it.
         var legs = await AddActivityAsync(userId, "leg day");
-        await SetsAsync(legs, Value(tired, "Yes"));
+        await SetsAsync(legs, Value(tired, "Yes"), 1440);
         await CompleteAsync(userId, legs, At(7, 9), At(7, 10));
 
         var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
@@ -982,10 +1026,10 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_activity_returns_once_a_timed_value_has_expired()
     {
         var userId = await CreateUserAsync();
-        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 120));
+        var tired = await AddStateAsync(userId, "Tired", "No", "Yes");
 
         var legs = await AddActivityAsync(userId, "leg day");
-        await SetsAsync(legs, Value(tired, "Yes"));
+        await SetsAsync(legs, Value(tired, "Yes"), 120);
         await CompleteAsync(userId, legs, At(7, 9), At(7, 10));
 
         var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
@@ -1002,13 +1046,61 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_a_timed_value_carries_across_the_day_boundary()
     {
         var userId = await CreateUserAsync();
-        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 2880));
+        var tired = await AddStateAsync(userId, "Tired", "No", "Yes");
 
         // Two days of soreness from a Tuesday afternoon session, which day-scoped gating could not
         // express at all.
         var legs = await AddActivityAsync(userId, "max squats");
-        await SetsAsync(legs, Value(tired, "Yes"));
+        await SetsAsync(legs, Value(tired, "Yes"), 2880);
         await CompleteAsync(userId, legs, At(7, 12), At(7, 13));
+
+        var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
+        await RequiresAsync(run, Value(tired, "No"));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 8), Now);
+
+        Assert.Empty(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_the_expiry_comes_from_the_activity_that_set_the_value()
+    {
+        var userId = await CreateUserAsync();
+        var tired = await AddStateAsync(userId, "Tired", "No", "Yes");
+
+        // One value, two causes: a walk wears off in two hours and a hike takes two days. This is the
+        // whole reason the duration sits on the effect rather than on the value.
+        var walk = await AddActivityAsync(userId, "walk");
+        await SetsAsync(walk, Value(tired, "Yes"), 120);
+        var hike = await AddActivityAsync(userId, "hike");
+        await SetsAsync(hike, Value(tired, "Yes"), 2880);
+
+        await CompleteAsync(userId, walk, At(7, 9), At(7, 10));
+
+        var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
+        await RequiresAsync(run, Value(tired, "No"));
+
+        // The walk's two hours from 10:00, not the hike's two days.
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, At(7, 12, 30));
+
+        Assert.Equal(At(7, 12, 30), Assert.Single(recs).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_a_later_setter_does_not_shorten_a_longer_expiry()
+    {
+        var userId = await CreateUserAsync();
+        var tired = await AddStateAsync(userId, "Tired", "No", "Yes");
+
+        var hike = await AddActivityAsync(userId, "hike");
+        await SetsAsync(hike, Value(tired, "Yes"), 2880);
+        var walk = await AddActivityAsync(userId, "walk");
+        await SetsAsync(walk, Value(tired, "Yes"), 120);
+
+        // Two days of soreness from the hike, then an easy walk while still sore. Re-setting the value
+        // already in force takes the further expiry, so the walk cannot declare you recovered by 13:00.
+        await CompleteAsync(userId, hike, At(7, 8), At(7, 9));
+        await CompleteAsync(userId, walk, At(7, 11), At(7, 12));
 
         var run = await AddActivityAsync(userId, "easy run", GoalStatus.focus);
         await RequiresAsync(run, Value(tired, "No"));
@@ -1022,10 +1114,10 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_a_later_setter_extends_a_pending_expiry()
     {
         var userId = await CreateUserAsync();
-        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 120));
+        var tired = await AddStateAsync(userId, "Tired", "No", "Yes");
 
         var legs = await AddActivityAsync(userId, "leg day");
-        await SetsAsync(legs, Value(tired, "Yes"));
+        await SetsAsync(legs, Value(tired, "Yes"), 120);
         // First session would have worn off at 11:00; the second one pushes it out to 12:30.
         await CompleteAsync(userId, legs, At(7, 8), At(7, 9));
         await CompleteAsync(userId, legs, At(7, 10), At(7, 10, 30));
@@ -1042,7 +1134,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_a_skipped_setter_leaves_the_state_alone()
     {
         var userId = await CreateUserAsync();
-        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
 
         // Skipping is an explicit decision not to, the same reason a skipped block frees its time.
         var into = await AddActivityAsync(userId, "commute in");
@@ -1061,8 +1153,8 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_requirements_on_two_states_must_both_hold()
     {
         var userId = await CreateUserAsync();
-        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
-        var tired = await AddStateAsync(userId, "Tired", ("No", null), ("Yes", 120));
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
+        var tired = await AddStateAsync(userId, "Tired", "No", "Yes");
 
         var into = await AddActivityAsync(userId, "commute in");
         await SetsAsync(into, Value(location, "Work"));
@@ -1082,7 +1174,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_a_requirement_listing_two_values_holds_for_either()
     {
         var userId = await CreateUserAsync();
-        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null), ("OnTrip", null));
+        var location = await AddStateAsync(userId, "Location", "Home", "Work", "OnTrip");
 
         var flight = await AddActivityAsync(userId, "fly out");
         await SetsAsync(flight, Value(location, "OnTrip"));
@@ -1102,7 +1194,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_an_activity_without_requirements_ignores_states_entirely()
     {
         var userId = await CreateUserAsync();
-        var location = await AddStateAsync(userId, "Location", ("Home", null), ("Work", null));
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
 
         var into = await AddActivityAsync(userId, "commute in");
         await SetsAsync(into, Value(location, "Work"));
@@ -1119,7 +1211,7 @@ public class RecommendationServiceTests : IDisposable
     public async Task GetAsync_suggestion_is_never_placed_past_its_window_end()
     {
         var userId = await CreateUserAsync();
-        await AddActivityAsync(userId, "leg day", GoalStatus.focus, ActivityType.training);
+        await AddActivityAsync(userId, "leg day", GoalStatus.focus, await TrainingAsync(userId));
 
         // 21:30, past the 21:00 end of the training window. There is room left in the day and the
         // fallback used to take it, which is how a workout ghost landed at 22:45.

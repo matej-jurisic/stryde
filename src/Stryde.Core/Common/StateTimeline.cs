@@ -7,7 +7,8 @@ namespace Stryde.Core.Common;
 /// </param>
 /// <param name="DurationMinutes">
 /// How long the value holds before decaying back to the state's default, or null for indefinitely.
-/// Measured from <paramref name="At"/>.
+/// Measured from <paramref name="At"/>. Comes from the setting activity's effect, so two activities
+/// putting the state into the same value can hold it for different lengths of time.
 /// </param>
 public readonly record struct StateSetter(DateTimeOffset At, Guid ValueId, int? DurationMinutes);
 
@@ -31,10 +32,15 @@ public sealed class StateTimeline
     private StateTimeline(List<(DateTimeOffset Start, Guid? ValueId)> segments) => _segments = segments;
 
     /// <summary>
-    /// Folds setters into segments. A setter overrides whatever was in force and cancels any pending
-    /// expiry, replacing it with its own: an expiry only fires if it is reached before the next
-    /// setter, so a second workout that afternoon extends the tiredness rather than being shadowed by
-    /// the first one's decay.
+    /// Folds setters into segments. A setter overrides whatever was in force, and an expiry only
+    /// fires if it is reached before the next setter.
+    /// <para>
+    /// What happens to a pending expiry depends on whether the setter *changes* the value. Setting a
+    /// different value replaces the expiry outright, since the departure it was counting down is
+    /// over. Re-setting the value already in force takes whichever expiry is further out, so a hike
+    /// leaving you tired for two days is not cut to ten hours by an easy run that evening - the
+    /// reason durations moved onto the effect in the first place.
+    /// </para>
     /// </summary>
     public static StateTimeline Build(Guid? defaultValueId, IEnumerable<StateSetter> setters)
     {
@@ -61,8 +67,19 @@ public sealed class StateTimeline
                 pendingExpiry = null;
             }
 
+            var heldSameValue = segments[^1].ValueId == setter.ValueId;
+            var carried = pendingExpiry;
+
             Append(setter.At, setter.ValueId);
-            pendingExpiry = setter.DurationMinutes is { } d ? setter.At.AddMinutes(d) : null;
+
+            var own = setter.DurationMinutes is { } d ? setter.At.AddMinutes(d) : (DateTimeOffset?)null;
+
+            // Furthest expiry wins when the value is unchanged, and null means "indefinitely", so it
+            // takes the comparison rather than losing it the way a plain Max over nullables would.
+            pendingExpiry = !heldSameValue ? own
+                : carried is null || own is null ? null
+                : carried > own ? carried
+                : own;
         }
 
         if (pendingExpiry is { } last) Append(last, defaultValueId);

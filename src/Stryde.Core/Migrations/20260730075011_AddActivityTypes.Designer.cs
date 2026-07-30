@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Stryde.Core.Data;
 
@@ -10,9 +11,11 @@ using Stryde.Core.Data;
 namespace Stryde.Core.Migrations
 {
     [DbContext(typeof(StrydeDbContext))]
-    partial class StrydeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260730075011_AddActivityTypes")]
+    partial class AddActivityTypes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
@@ -69,9 +72,6 @@ namespace Stryde.Core.Migrations
 
                     b.Property<Guid>("StateId")
                         .HasColumnType("TEXT");
-
-                    b.Property<int?>("DurationMinutes")
-                        .HasColumnType("INTEGER");
 
                     b.Property<Guid>("StateValueId")
                         .HasColumnType("TEXT");
@@ -412,6 +412,9 @@ namespace Stryde.Core.Migrations
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("DurationMinutes")
+                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsDefault")
                         .HasColumnType("INTEGER");

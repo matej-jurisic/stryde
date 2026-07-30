@@ -1,28 +1,11 @@
-import { Circle, Dumbbell, Brain, type LucideIcon } from 'lucide-react'
-import type { ActivityProfile, ActivityType } from './types'
+import type { ActivityType } from './types'
 
-export interface ActivityTypeMeta {
-  value: ActivityType
-  label: string
-  icon: LucideIcon
-  /**
-   * What the type is *for*. Deliberately carries no numbers: the numbers are per user now, so
-   * anything quantitative is generated from the resolved profile by `describeProfile`.
-   */
-  blurb: string
-}
-
-export const ACTIVITY_TYPES: ActivityTypeMeta[] = [
-  { value: 'general',  label: 'General',   icon: Circle,   blurb: 'No special handling: fits wherever there is room.' },
-  { value: 'training', label: 'Training',  icon: Dumbbell, blurb: 'Workouts and sessions.' },
-  { value: 'deepWork', label: 'Deep work', icon: Brain,    blurb: 'Uninterrupted focus work.' },
-]
-
-const byValue = new Map(ACTIVITY_TYPES.map((t) => [t.value, t]))
-
-export function activityTypeMeta(type: ActivityType): ActivityTypeMeta {
-  return byValue.get(type) ?? ACTIVITY_TYPES[0]
-}
+/**
+ * What "no type" means, in the same words the picker uses for a real one. Null is the unconstrained
+ * profile, not a missing value, so it gets a label rather than an empty slot.
+ */
+export const NO_TYPE_LABEL = 'No type'
+export const NO_TYPE_HINT = 'No scheduling constraints.'
 
 /** Normalises a "H:m" window bound to 24h "HH:mm". */
 export function formatWindowTime(hhmm: string): string {
@@ -35,32 +18,54 @@ function formatDays(days: number): string {
 }
 
 /**
- * Plain-language description of what a type does to the engine, generated from the user's own
- * resolved profile. Two sentences: where it gets placed, and how often it comes back around.
+ * The cadence values the editor can express, and the only ones anything should be seeded at: a
+ * number the dropdown cannot reproduce would make a type unreachable by hand, which is the whole
+ * thing user-owned types exist to avoid.
  */
-export function describeProfile(p: ActivityProfile): { placement: string; rhythm: string } {
-  const parts = [`Placed ${formatWindowTime(p.windowStart)} to ${formatWindowTime(p.windowEnd)}`]
-  if (p.minBlockMinutes > 0) parts.push(`needs ${p.minBlockMinutes} free minutes`)
-  if (p.maxPerDay > 0) parts.push(`max ${p.maxPerDay} a day`)
+export const CADENCE_OPTIONS = [
+  { value: 1, label: 'Daily' },
+  { value: 2.5, label: 'Every few days' },
+  { value: 7, label: 'Weekly' },
+  { value: 14, label: 'Every couple of weeks' },
+]
+
+export const COOLDOWN_OPTIONS = [
+  { value: 0, label: "As soon as it's due" },
+  { value: 0.5, label: "Once you're halfway to due" },
+  { value: 1, label: 'Only when fully due' },
+]
+
+/** Just the scheduling numbers, so an unsaved edit can be described the same way a saved row is. */
+export type ProfileFields = Pick<
+  ActivityType,
+  'windowStart' | 'windowEnd' | 'minBlockMinutes' | 'maxPerDay' | 'cadencePriorDays' | 'minDueFraction'
+>
+
+/**
+ * Plain-language description of what a type does to the engine, generated from the row rather than
+ * hardcoded: every number here is the user's own.
+ */
+export function describeProfile(t: ProfileFields): { placement: string; rhythm: string } {
+  const parts = [`Placed ${formatWindowTime(t.windowStart)} to ${formatWindowTime(t.windowEnd)}`]
+  if (t.minBlockMinutes > 0) parts.push(`needs ${t.minBlockMinutes} free minutes`)
+  if (t.maxPerDay > 0) parts.push(`max ${t.maxPerDay} a day`)
 
   const cadence =
-    p.cadencePriorDays === 1
-      ? 'Daily rhythm assumed until your own history says otherwise'
-      : `About every ${formatDays(p.cadencePriorDays)} days until your own history says otherwise`
+    t.cadencePriorDays === 1 ? 'Daily' : `About every ${formatDays(t.cadencePriorDays)} days`
 
   const cooldown =
-    p.minDueFraction > 0
-      ? p.minDueFraction === 0.5
-        ? ', and not suggested again until you are halfway to due'
-        : `, and not suggested again until you are ${Math.round(p.minDueFraction * 100)}% of the way to due`
+    t.minDueFraction > 0
+      ? t.minDueFraction === 0.5
+        ? ', once halfway to due'
+        : `, once ${Math.round(t.minDueFraction * 100)}% to due`
       : ''
 
   return { placement: `${parts.join(', ')}.`, rhythm: `${cadence}${cooldown}.` }
 }
 
 /** One-line form, for the type picker. */
-export function profileHint(meta: ActivityTypeMeta, profile: ActivityProfile | undefined): string {
-  if (!profile) return meta.blurb
-  const { placement, rhythm } = describeProfile(profile)
-  return `${meta.blurb} ${placement} ${rhythm}`
+export function profileHint(type: ActivityType | undefined): string {
+  if (!type) return NO_TYPE_HINT
+  const { placement, rhythm } = describeProfile(type)
+  return `${placement} ${rhythm}`
 }

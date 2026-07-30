@@ -89,9 +89,6 @@ export function SkipRescheduleModal({ open, onClose, occurrence, onDone }: SkipR
         </>
       }
     >
-      <p className="text-sm text-muted-foreground">
-        Reschedule a copy to another day, or skip without rescheduling.
-      </p>
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-medium text-muted-foreground">Reschedule to</label>
         <input

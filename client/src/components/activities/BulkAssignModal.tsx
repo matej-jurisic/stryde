@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { activitiesApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
-import type { Activity, ActivityType, Category, Goal } from '@/lib/types'
-import { ACTIVITY_TYPES } from '@/lib/activityTypes'
+import type { Activity, Category, Goal } from '@/lib/types'
+import { NO_TYPE_LABEL } from '@/lib/activityTypes'
+import { useActivityTypes } from '@/lib/useActivityTypes'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
@@ -30,6 +31,7 @@ export function BulkAssignModal({
   onApplied,
 }: BulkAssignModalProps) {
   const qc = useQueryClient()
+  const types = useActivityTypes()
   const [type, setType] = useState(KEEP)
   const [goalId, setGoalId] = useState(KEEP)
   const [categoryId, setCategoryId] = useState(KEEP)
@@ -44,7 +46,8 @@ export function BulkAssignModal({
         activities.map((a) =>
           activitiesApi.update(a.id, {
             title: a.title,
-            type: type === KEEP ? a.type : (type as ActivityType),
+            activityTypeId:
+              type === KEEP ? a.activityTypeId : type === CLEAR ? null : type,
             goalId: goalId === KEEP ? a.goalId : goalId === CLEAR ? null : goalId,
             categoryId:
               categoryId === KEEP ? a.categoryId : categoryId === CLEAR ? null : categoryId,
@@ -80,10 +83,6 @@ export function BulkAssignModal({
         </>
       }
     >
-      <p className="text-sm text-muted-foreground">
-        Fields left on "Keep current" are not touched.
-      </p>
-
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-foreground">Type</label>
         <Select
@@ -91,7 +90,8 @@ export function BulkAssignModal({
           onChange={setType}
           options={[
             { value: KEEP, label: 'Keep current' },
-            ...ACTIVITY_TYPES.map((t) => ({ value: t.value, label: t.label })),
+            { value: CLEAR, label: NO_TYPE_LABEL },
+            ...(types ?? []).map((t) => ({ value: t.id, label: t.name })),
           ]}
         />
       </div>

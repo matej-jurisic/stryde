@@ -26,6 +26,11 @@ public sealed record GoalSummaryDto(Guid Id, string Title, string Status, string
     public static GoalSummaryDto FromEntity(Goal g) => new(g.Id, g.Title, g.Status.ToString(), g.Kind.ToString());
 }
 
+public sealed record ActivityTypeSummaryDto(Guid Id, string Name, string? Icon)
+{
+    public static ActivityTypeSummaryDto FromEntity(Entities.ActivityType t) => new(t.Id, t.Name, t.Icon);
+}
+
 // Activities
 public sealed record ActivityDto(
     Guid Id,
@@ -34,33 +39,43 @@ public sealed record ActivityDto(
     Guid? CategoryId,
     Guid? GoalId,
     string Kind,
-    string Type,
+    Guid? ActivityTypeId,
     bool ExcludeFromRecommendations,
     DateTimeOffset CreatedAt,
     CategorySummaryDto? Category,
     GoalSummaryDto? Goal,
+    ActivityTypeSummaryDto? Type,
     List<ActivitySubtaskDto> Subtasks,
-    List<Guid> SetsStateValueIds,
+    List<ActivityStateEffectDto> SetsStateValues,
     List<Guid> RequiredStateValueIds)
 {
     public static ActivityDto FromEntity(Activity a) => new(
-        a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.Kind.ToString(), a.Type.ToString(), a.ExcludeFromRecommendations, a.CreatedAt,
+        a.Id, a.UserId, a.Title, a.CategoryId, a.GoalId, a.Kind.ToString(), a.ActivityTypeId, a.ExcludeFromRecommendations, a.CreatedAt,
         a.Category is not null ? CategorySummaryDto.FromEntity(a.Category) : null,
         a.Goal is not null ? GoalSummaryDto.FromEntity(a.Goal) : null,
+        a.Type is not null ? ActivityTypeSummaryDto.FromEntity(a.Type) : null,
         a.Subtasks.OrderBy(s => s.CreatedAt).Select(ActivitySubtaskDto.FromEntity).ToList(),
-        a.StateEffects.Select(e => e.StateValueId).ToList(),
+        a.StateEffects.Select(ActivityStateEffectDto.FromEntity).ToList(),
         a.StateRequirements.Select(r => r.StateValueId).ToList());
 }
 
-// Bare value ids rather than nested value objects: the client already holds the whole state list from
-// `GET /api/states` and resolves names from it, and a flat list is what both write paths send back.
+// One state change this activity causes. The same record serves both directions: an effect is only a
+// value plus how long it holds, so a separate request shape would just repeat itself. Values are
+// referenced by id rather than nested, because the client already holds the whole state list from
+// `GET /api/states` and resolves names from it.
+public sealed record ActivityStateEffectDto(Guid StateValueId, int? DurationMinutes)
+{
+    public static ActivityStateEffectDto FromEntity(ActivityStateEffect e) =>
+        new(e.StateValueId, e.DurationMinutes);
+}
+
 public sealed record CreateActivityRequest(
-    string Title, Guid? CategoryId, Guid? GoalId, ActivityType Type = ActivityType.general,
-    List<Guid>? SetsStateValueIds = null, List<Guid>? RequiredStateValueIds = null);
+    string Title, Guid? CategoryId, Guid? GoalId, Guid? ActivityTypeId = null,
+    List<ActivityStateEffectDto>? SetsStateValues = null, List<Guid>? RequiredStateValueIds = null);
 public sealed record UpdateActivityRequest(
     string Title, Guid? CategoryId, Guid? GoalId, bool ExcludeFromRecommendations = false,
-    ActivityType Type = ActivityType.general,
-    List<Guid>? SetsStateValueIds = null, List<Guid>? RequiredStateValueIds = null);
+    Guid? ActivityTypeId = null,
+    List<ActivityStateEffectDto>? SetsStateValues = null, List<Guid>? RequiredStateValueIds = null);
 public sealed record SetActivityRecommendationsRequest(bool ExcludeFromRecommendations);
 
 // Activity subtasks (template)
@@ -235,16 +250,16 @@ public sealed record StateDto(
 }
 
 public sealed record StateValueDto(
-    Guid Id, Guid StateId, string Name, bool IsDefault, int? DurationMinutes, DateTimeOffset CreatedAt)
+    Guid Id, Guid StateId, string Name, bool IsDefault, DateTimeOffset CreatedAt)
 {
     public static StateValueDto FromEntity(StateValue v) =>
-        new(v.Id, v.StateId, v.Name, v.IsDefault, v.DurationMinutes, v.CreatedAt);
+        new(v.Id, v.StateId, v.Name, v.IsDefault, v.CreatedAt);
 }
 
 public sealed record CreateStateRequest(string Name);
 public sealed record UpdateStateRequest(string Name);
-public sealed record CreateStateValueRequest(string Name, bool IsDefault = false, int? DurationMinutes = null);
-public sealed record UpdateStateValueRequest(string Name, bool IsDefault = false, int? DurationMinutes = null);
+public sealed record CreateStateValueRequest(string Name, bool IsDefault = false);
+public sealed record UpdateStateValueRequest(string Name, bool IsDefault = false);
 
 // Recommendations — always an activity to schedule; timing fields null when no history exists.
 // DaysSinceLast/MedianGapDays/PatternCount are the raw "why" signals; the client composes the
@@ -315,7 +330,7 @@ public sealed record ExportDto(
     DateTimeOffset ExportedAt,
     UserDto User,
     UserSettingsDto Settings,
-    List<ActivityProfileDto> ActivityProfiles,
+    List<ActivityTypeDto> ActivityTypes,
     List<CategoryDto> Categories,
     List<GoalDto> Goals,
     List<ActivityDto> Activities,
@@ -332,37 +347,42 @@ public sealed record UserSettingsDto(
 public sealed record UpdateUserSettingsRequest(
     int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions);
 
-// Activity type profiles
+// Activity types
 /// <summary>
-/// One type's *resolved* profile: built-in defaults with the user's overrides applied.
-/// <para>
-/// The first four fields are editable. <paramref name="CadencePriorDays"/> and
-/// <paramref name="MinDueFraction"/> are read-only, carried so the client can describe what the type
-/// actually does without hardcoding values that would drift out of date.
-/// <paramref name="IsCustomised"/> says whether any field differs from the built-in default, which is
-/// what a Reset control keys off.
-/// </para>
+/// A user-owned scheduling preset. Every field is editable: there is no resolved-versus-declared
+/// distinction any more, because the row is the only thing the engine reads.
 /// </summary>
-public sealed record ActivityProfileDto(
-    string Type,
+public sealed record ActivityTypeDto(
+    Guid Id,
+    Guid UserId,
+    string Name,
+    string? Icon,
     string WindowStart,
     string WindowEnd,
     int MinBlockMinutes,
     int MaxPerDay,
     double CadencePriorDays,
     double MinDueFraction,
-    bool IsCustomised)
+    DateTimeOffset CreatedAt)
 {
-    public static ActivityProfileDto From(ActivityType type, ActivityProfile p, bool isCustomised) => new(
-        type.ToString(),
-        p.WindowStart.ToString("HH:mm"),
-        p.WindowEnd.ToString("HH:mm"),
-        p.MinBlockMinutes,
-        p.MaxPerDay,
-        p.CadencePriorDays,
-        p.MinDueFraction,
-        isCustomised);
+    public static ActivityTypeDto FromEntity(Entities.ActivityType t) => new(
+        t.Id,
+        t.UserId,
+        t.Name,
+        t.Icon,
+        t.WindowStart.ToString("HH:mm"),
+        t.WindowEnd.ToString("HH:mm"),
+        t.MinBlockMinutes,
+        t.MaxPerDay,
+        t.CadencePriorDays,
+        t.MinDueFraction,
+        t.CreatedAt);
 }
 
-public sealed record UpdateActivityProfileRequest(
-    string WindowStart, string WindowEnd, int MinBlockMinutes, int MaxPerDay);
+public sealed record CreateActivityTypeRequest(
+    string Name, string? Icon, string WindowStart, string WindowEnd,
+    int MinBlockMinutes, int MaxPerDay, double CadencePriorDays, double MinDueFraction);
+
+public sealed record UpdateActivityTypeRequest(
+    string Name, string? Icon, string WindowStart, string WindowEnd,
+    int MinBlockMinutes, int MaxPerDay, double CadencePriorDays, double MinDueFraction);

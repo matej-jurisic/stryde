@@ -506,6 +506,26 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 
 ---
 
+## Explainer Copy Removal (July 2026) ✅
+
+**Goal:** Stop the UI explaining the user's own domain back to them. Single-user app: the concepts were designed by the person reading the screen, so paragraphs defining states, types, activities, and occurrences were noise on every visit.
+
+**Removed**
+- States page: the "what is a state" empty-state paragraph and the footer note about the starred default and expiry
+- Activity types page: the "what is a type" empty-state paragraph, the "an activity with no type is unconstrained" footer, the generated `rhythm` line under the editor (it restated the two dropdowns directly above it), and the habitual-start-time note
+- Activity modal: helper paragraphs under "Only suggest when" and "Changes"
+- Activities page: the "activities vs occurrences" empty-state paragraph
+- Bulk assign modal ("Keep current" note) and skip/reschedule modal (restated its own two buttons)
+
+**Tightened**
+- Type editor labels are labels again: "Assumed cadence" / "Suggest again", not sentences
+- `describeProfile`'s rhythm string and `NO_TYPE_HINT` shortened; they stay because they show the type's actual numbers, which are not otherwise on screen
+- Insights empty state trimmed to "No timed activities in this period."
+
+`design.md` gained a **Copy** section codifying the rule.
+
+---
+
 ## Phase 12 — Progress Insights & Polish
 
 **Goal:** The app is complete, coherent, and usable on both mobile and desktop.
@@ -655,6 +675,50 @@ A daily rotating quote is shown at the top of the Plan page (`client/src/lib/quo
 - Kept the requirement on the **activity** and one type per activity, rejecting multi-type. A "Workout" type and an "At home" condition are different kinds of thing wearing one word; combining several types would have needed a combination rule for every scalar on the profile (window intersection, block floor max, cap min) plus a notion of "several" in the type tile, grouping and settings editor. Deferred and not needed: a type-level default predicate ANDed with the activity's own, which is sugar that would re-couple the two concepts
 - Two migrations: `AddStates` for the four tables, and a hand-written `ResetRemovedActivityTypes` repeating the `RemoveUnusedActivityTypes` statements, needed again because `work` and `commute` were both added *after* that migration ran
 - Deleting a value an activity still uses is a **409**; deleting a whole state cascades, in the same spirit as deleting a category - the activity survives and stops being gated
+
+**Activity types become user-created rows**
+- Same objection as States, one level up: if a type is a behavioural preset, the preset list should be the user's. Hardcoding three was less wrong than hardcoding five but the same kind of wrong - two of the three types added over the project's life were added because an existing type's *values* did not fit a real activity, which is the argument for authoring types rather than adding enum values
+- **Net deletion.** The whole sparse-override system existed only to reconcile "your values" against "my values"; when the type *is* a row you own there is nothing to reconcile. `ActivityTypeSetting`, `ActivityProfileService`, the defaults table, `IsCustomised`, the Reset button and `useActivityProfiles` are all gone. `ActivityProfiles.cs` keeps `ActivityProfile`, two engine constants and `Unconstrained`
+- **Null replaces `general`.** "No type" *is* the unconstrained default, so `Activity.Type` became a nullable FK with set-null, matching Category and Goal. `ActivitiesPage` gains a real "No type" bucket, `BulkAssignModal` a `CLEAR` sentinel it never needed while type was non-null
+- **Cadence prior and cooldown are now editable**, as worded dropdowns rather than raw doubles. Leaving them hidden would have left a user-made type permanently weaker than the built-in Training, whose 2.5d cadence and 0.5 cooldown were the only reason it behaved differently - exactly the asymmetry this change is about. Consequence: nothing may be seeded at a value the dropdown cannot express, so Deep work seeds at 2.5d rather than the 3d it had while hardcoded. `ActivityTypeServiceTests` asserts that invariant rather than trusting it
+- Seeding moved into `AuthService.RegisterAsync`: types cannot fall back to a built-in table the way `UserSettings` does, because the rows *are* the list. The migration seeds the same three for already-registered users, with the values inlined as SQL literals - a migration that calls live application code breaks the moment that code changes, which is how this file's subject matter has behaved twice now
+- `/api/settings/activity-types` moved to `/api/activity-types` with no shim: single user, no external clients
+- **First migration test in the repo.** `MigrateOnStartup` is true in docker-compose, so the deploy applies migrations unattended, and every other test builds its schema with `EnsureCreated()` - nothing exercised the migration path at all. `MigrationTests` runs the real chain against a temp file DB, stopping one migration short to insert a pre-types user and prove the seed reaches it
+- One type per activity still, and still no type-level state predicate: both were settled with States and neither argument changed
+
+**Types and states move out of Settings**
+- Both were sections on the Settings page, which put user-authored vocabulary next to timezone and theme. A type or a state is a thing you make, like a category or a goal - Settings is for preferences about the app, not for the nouns the app is about
+- They became two tabs on the Activities page (`/activities/types`, `/activities/states`) rather than new nav entries: the mobile tab bar is capped at 5 slots, and both screens only make sense next to the activities they shape. Static segments outrank `/activities/:id`, so the tabs never read as an activity id
+- Underline tab strip (`ActivitiesTabs`), deliberately not the pill/segmented style the same page already uses for filter and grouping controls - one page should not have two things that look like the same control meaning different kinds of thing
+- Re-laid out for the width a page has that a `max-w-lg` settings card did not: the type form's four knobs go 4-across, the two worded dropdowns sit side by side with the label taking the wrap slack so the selects still align, and both screens gained a real empty state explaining what the thing is
+- Sidebar nav items dropped `end`, so drilling into an activity, a goal or a tab keeps the parent item lit instead of leaving nothing selected
+- `inputCls` moved to `components/ui/input.ts`; `SettingSection` re-exports it and keeps only the layout primitives
+- The state editor's add-value controls stopped being three loose boxes under the value list. The add row is now the list's last row, sharing its card and columns (leading `+` where the default star sits, borderless name input where the value name sits), the expiry is a bordered mini-field carrying its own `min` suffix instead of an unlabelled box whose only explanation was a `title` tooltip, and Add is a real primary button rather than ghost text. A hint line under the card says what an expiry does, and says something different when the state has no values yet (the first one becomes the default). The row only exists once asked for: normally the card ends in a single muted `+ Add value` line, and a state with no values is the one case that opens straight into the input. The list is read far more often than written, so the empty fields are not the resting state
+- Delete converged on one treatment across both editors: the icon-only destructive button `EventDetailModal` already used, `mr-auto` to the left edge where the footer also carries Cancel and Save. The type form's was the codebase's only `Button` holding an icon *and* a label (`Button` sets no gap between children, so the two read as one glyph); the state form's was an outline `Button` reading "Delete state", which the outline variant renders in the **primary** tint, making the one destructive action on the screen look like its safest. Both rules are now in `design.md` → Buttons
+- The type form's icon picker offers a curated 23-icon slice (`TYPE_ICON_NAMES`) on a fixed 8/12-column grid instead of the category picker's full ~58 behind a scrollbar: a type is a scheduling preset you own a handful of, so the choice should be scannable in two rows, and a nested scroll area inside an accordion inside a scrolling page was the worst of the three. Rendering still resolves through the full `ICON_MAP`, and a stored icon outside the slice is appended to the grid so it stays visible
+
+**State expiry moves from the value to the activity that causes it**
+- `StateValue.DurationMinutes` became `ActivityStateEffect.DurationMinutes`. The duration was never a property of the value: "Tired" has no lifetime of its own, but a run leaves you tired for ten hours and a hike for two days, and one number per value could express only one of those
+- The engine needed one line changed. `StateSetter` already carried a per-setter duration; `LoadStatesAsync` was just filling it from the value. The work was all in the write path, the editors and the invariants
+- **Rejected: keeping a value-level default with a per-effect override.** Two nullable levels where null means different things at each ("indefinitely" vs "inherit"), and a states page showing `Tired: 24h` while the activity that sets it says 10h. If the same number starts getting retyped across many activities, the fallback is additive and needs no migration
+- **New fold rule in `StateTimeline`, forced by the change.** While all setters of a value shared one duration, "a later setter replaces the pending expiry" always meant *extend*. Per-effect durations let it *shorten*: a hike sets Tired for 48h, an easy run five hours later would clear it at hour 15. So a setter that **changes** the value replaces the expiry, and one that **re-sets the value already in force** takes whichever expiry is further out. Null is "indefinitely" and wins that comparison
+- The "default cannot expire" invariant moved off `StateService` onto the activity write, as `Validators.ValidateStateDuration`. If the default *later* moves onto a value some activity sets with a duration, that duration goes inert rather than being refused or silently rewritten across other activities - decaying to the default when you *are* the default is a no-op the timeline already folds away, so a dormant number is the cheapest of the three outcomes
+- `SetsStateValueIds: Guid[]` became `SetsStateValues: (StateValueId, DurationMinutes)[]`, one record serving both directions. `BulkAssignModal` still omits the field entirely, so the omit-means-untouched contract carried it through unchanged
+- The states editor lost its expiry mini-field; the activity modal's "Changes" field gained a `for [n] [unit]` row per pick, with minutes/hours/days rather than a raw minutes box (`design.md` → Duration fields). A pick on the state's own default value gets no row at all
+- Migration copies each value's duration onto every effect pointing at it, which reproduces the old timeline exactly. `Down` keeps the longest per value and says so
+
+**The activity modal's state fields, relaid out**
+- The two fields printed every state name four times over: once per state in "Only suggest when", again in "Changes", and a third time in the summary list under the chips that restated `Physical: Tired  for [--] hours`. With two states that is eight label lines and two identical chip grids, each one a name on its own line above a short row of chips, so the field was simultaneously tall and mostly empty on the right
+- The duration moved into the row that makes the pick. `StateValuePicker` gained a `trailing` slot rendered at the end of a state's chip row, and `StateEffectPicker` puts `for [n] [unit]` there, which deleted the summary list outright. A pick on the state's default value shows `defaults don't expire` in the same spot rather than the old full-width sentence
+- One row per state: name in a fixed `w-20` column, chips wrapping beside it. Halves the height and gives the rows a shared left edge to line up on
+- The two fields became one bordered panel (`States`) split by a divider, with `Only suggest when` / `Doing it changes` as sub-labels. Both halves render the same chips off the same states, so as two free-floating fields they read as one control rendered twice; the panel is what makes them a condition and a consequence
+- `flattenStateValues` was only ever the summary list's, and went with it
+
+**"Edit activity" from a calendar block**
+- The occurrence detail modal's overflow menu gained an `Edit activity` item (`Layers`, the Activities nav icon) that opens `ActivityModal` on the parent activity. Shown only when `activity.kind === 'activity'`: an event's activity row is a bookkeeping shell with nothing on it worth editing, so offering the item there would open an empty form
+- Reaching an occurrence's activity previously meant leaving the calendar for `/activities` and finding it by name, which is a long way round for "this suggestion keeps firing, mute it" or "wrong category"
+- `CalendarPage` needs goals and categories to feed the editor's selects, but the editor opens from a menu two levels down, so both queries are `enabled: activityModalOpen` and stay off the calendar's own load path
+- `ActivityModal` now also invalidates `['events']`. It never had to before - it was only ever reachable from `/activities` - but occurrences embed their activity, so a renamed activity or a changed category left every list row and calendar block stale
 
 **UX hardening** (shipped ahead of the Polish phase)
 - Toast notifications (`store/toasts.ts` + `components/ui/Toasts.tsx`): every mutation without inline error display now reports failures via `toastError`

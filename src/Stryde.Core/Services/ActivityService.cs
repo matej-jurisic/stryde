@@ -14,6 +14,7 @@ public class ActivityService(StrydeDbContext db)
         var a = await db.Activities
             .Include(a => a.Category)
             .Include(a => a.Goal)
+            .Include(a => a.Type)
             .Include(a => a.Subtasks)
             .Include(a => a.StateEffects)
             .Include(a => a.StateRequirements)
@@ -28,6 +29,7 @@ public class ActivityService(StrydeDbContext db)
         var query = db.Activities
             .Include(a => a.Category)
             .Include(a => a.Goal)
+            .Include(a => a.Type)
             .Include(a => a.Subtasks)
             .Include(a => a.StateEffects)
             .Include(a => a.StateRequirements)
@@ -45,7 +47,15 @@ public class ActivityService(StrydeDbContext db)
         var err = Validators.ValidateTitle(req.Title, "Title");
         if (err is not null) return Result<ActivityDto>.Fail(err);
 
-        var a = new Activity { UserId = userId, Title = req.Title.Trim(), Type = req.Type };
+        var a = new Activity { UserId = userId, Title = req.Title.Trim() };
+
+        if (req.ActivityTypeId.HasValue)
+        {
+            var type = await db.ActivityTypes.FirstOrDefaultAsync(t => t.Id == req.ActivityTypeId.Value && t.UserId == userId);
+            if (type is null) return Result<ActivityDto>.Fail(new Error(ErrorType.NotFound, "Activity type not found."));
+            a.ActivityTypeId = type.Id;
+            a.Type = type;
+        }
 
         if (req.CategoryId.HasValue)
         {
@@ -63,7 +73,7 @@ public class ActivityService(StrydeDbContext db)
             a.Goal = goal;
         }
 
-        var stateErr = await ApplyStatesAsync(a, userId, req.SetsStateValueIds, req.RequiredStateValueIds);
+        var stateErr = await ApplyStatesAsync(a, userId, req.SetsStateValues, req.RequiredStateValueIds);
         if (stateErr is not null) return Result<ActivityDto>.Fail(stateErr);
 
         db.Activities.Add(a);
@@ -79,6 +89,7 @@ public class ActivityService(StrydeDbContext db)
         var a = await db.Activities
             .Include(a => a.Category)
             .Include(a => a.Goal)
+            .Include(a => a.Type)
             .Include(a => a.StateEffects)
             .Include(a => a.StateRequirements)
             .FirstOrDefaultAsync(a => a.Id == id && a.UserId == userId);
@@ -86,7 +97,19 @@ public class ActivityService(StrydeDbContext db)
 
         a.Title = req.Title.Trim();
         a.ExcludeFromRecommendations = req.ExcludeFromRecommendations;
-        a.Type = req.Type;
+
+        if (req.ActivityTypeId.HasValue)
+        {
+            var type = await db.ActivityTypes.FirstOrDefaultAsync(t => t.Id == req.ActivityTypeId.Value && t.UserId == userId);
+            if (type is null) return Result<ActivityDto>.Fail(new Error(ErrorType.NotFound, "Activity type not found."));
+            a.ActivityTypeId = type.Id;
+            a.Type = type;
+        }
+        else
+        {
+            a.ActivityTypeId = null;
+            a.Type = null;
+        }
 
         if (req.CategoryId.HasValue)
         {
@@ -114,7 +137,7 @@ public class ActivityService(StrydeDbContext db)
             a.Goal = null;
         }
 
-        var stateErr = await ApplyStatesAsync(a, userId, req.SetsStateValueIds, req.RequiredStateValueIds);
+        var stateErr = await ApplyStatesAsync(a, userId, req.SetsStateValues, req.RequiredStateValueIds);
         if (stateErr is not null) return Result<ActivityDto>.Fail(stateErr);
 
         await db.SaveChangesAsync();
@@ -132,43 +155,59 @@ public class ActivityService(StrydeDbContext db)
     /// </para>
     /// </summary>
     private async Task<Error?> ApplyStatesAsync(
-        Activity a, Guid userId, List<Guid>? setsValueIds, List<Guid>? requiredValueIds)
+        Activity a, Guid userId, List<ActivityStateEffectDto>? sets, List<Guid>? requiredValueIds)
     {
-        if (setsValueIds is null && requiredValueIds is null) return null;
+        if (sets is null && requiredValueIds is null) return null;
 
-        var wanted = (setsValueIds ?? []).Concat(requiredValueIds ?? []).Distinct().ToList();
+        var wanted = (sets ?? []).Select(s => s.StateValueId)
+            .Concat(requiredValueIds ?? [])
+            .Distinct()
+            .ToList();
 
         // Joined through State so one user cannot reference another's value by guessing an id.
         var values = await db.StateValues
             .AsNoTracking()
             .Where(v => wanted.Contains(v.Id) && v.State.UserId == userId)
-            .Select(v => new { v.Id, v.StateId })
+            .Select(v => new { v.Id, v.StateId, v.IsDefault })
             .ToListAsync();
 
         if (values.Count != wanted.Count)
             return new Error(ErrorType.NotFound, "State value not found.");
 
-        var stateByValue = values.ToDictionary(v => v.Id, v => v.StateId);
+        var valueById = values.ToDictionary(v => v.Id);
 
-        if (setsValueIds is not null)
+        if (sets is not null)
         {
-            var ids = setsValueIds.Distinct().ToList();
+            // Last write per value wins, so a client sending the same value twice with two durations
+            // gets one of them rather than a collision.
+            var effects = sets
+                .GroupBy(s => s.StateValueId)
+                .Select(g => g.Last())
+                .ToList();
 
             // Checked before the dictionary is built, not after: two values of one state collide on
             // its key, and the composite key forbidding it at the database is a poor way to say "an
             // activity cannot put Location into two values at once".
-            if (ids.Select(id => stateByValue[id]).Distinct().Count() != ids.Count)
+            if (effects.Select(e => valueById[e.StateValueId].StateId).Distinct().Count() != effects.Count)
                 return new Error(ErrorType.Validation, "An activity can only set one value per state.");
 
-            var desired = ids.ToDictionary(id => stateByValue[id], id => id);
+            foreach (var effect in effects)
+            {
+                var err = Validators.ValidateStateDuration(
+                    effect.DurationMinutes, valueById[effect.StateValueId].IsDefault);
+                if (err is not null) return err;
+            }
+
+            var desired = effects.ToDictionary(e => valueById[e.StateValueId].StateId);
 
             foreach (var existing in a.StateEffects.ToList())
             {
-                if (desired.TryGetValue(existing.StateId, out var valueId))
+                if (desired.TryGetValue(existing.StateId, out var effect))
                 {
-                    // Same state, different value: the value id is not part of the key, so this is an
-                    // in-place update and no row churns.
-                    existing.StateValueId = valueId;
+                    // Same state, different value or duration: neither is part of the key, so this is
+                    // an in-place update and no row churns.
+                    existing.StateValueId = effect.StateValueId;
+                    existing.DurationMinutes = effect.DurationMinutes;
                     desired.Remove(existing.StateId);
                 }
                 else
@@ -178,12 +217,13 @@ public class ActivityService(StrydeDbContext db)
                 }
             }
 
-            foreach (var (stateId, valueId) in desired)
+            foreach (var (stateId, effect) in desired)
                 a.StateEffects.Add(new ActivityStateEffect
                 {
                     ActivityId = a.Id,
                     StateId = stateId,
-                    StateValueId = valueId,
+                    StateValueId = effect.StateValueId,
+                    DurationMinutes = effect.DurationMinutes,
                 });
         }
 
@@ -220,6 +260,7 @@ public class ActivityService(StrydeDbContext db)
         var a = await db.Activities
             .Include(a => a.Category)
             .Include(a => a.Goal)
+            .Include(a => a.Type)
             .Include(a => a.Subtasks)
             .Include(a => a.StateEffects)
             .Include(a => a.StateRequirements)

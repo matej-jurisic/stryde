@@ -8,7 +8,7 @@ import {
   Music, Film, Gamepad2, Headphones, Camera,
   Star, Flag, Globe, Trophy, Shield,
   Leaf, Zap, Sun, Mountain, Snowflake, Flower2,
-  Clock, Bell, Wrench, Flame, Smile, Sparkles, Timer,
+  Clock, Bell, Wrench, Flame, Smile, Sparkles, Timer, Circle,
   type LucideProps,
 } from 'lucide-react'
 import type { FC } from 'react'
@@ -35,7 +35,7 @@ export const ICON_MAP: Record<string, IconComponent> = {
   // Nature & environment
   Leaf, Zap, Sun, Mountain, Snowflake, Flower2,
   // Misc
-  Clock, Bell, Wrench, Flame, Smile, Sparkles,
+  Clock, Bell, Wrench, Flame, Smile, Sparkles, Circle,
 }
 
 export const ICON_NAMES = Object.keys(ICON_MAP)

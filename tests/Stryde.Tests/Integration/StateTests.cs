@@ -1,5 +1,6 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
+using Stryde.Core.Common;
 using Stryde.Core.Dtos;
 
 namespace Stryde.Tests.Integration;
@@ -33,11 +34,10 @@ public class StateTests : IDisposable
         return await res.ReadAsync<StateDto>();
     }
 
-    private async Task<StateDto> AddValueAsync(
-        Guid stateId, string name, bool isDefault = false, int? durationMinutes = null)
+    private async Task<StateDto> AddValueAsync(Guid stateId, string name, bool isDefault = false)
     {
         var res = await _client.PostAsJsonAsync(
-            $"/api/states/{stateId}/values", new { name, isDefault, durationMinutes });
+            $"/api/states/{stateId}/values", new { name, isDefault });
         res.EnsureSuccessStatusCode();
         return await res.ReadAsync<StateDto>();
     }
@@ -64,18 +64,6 @@ public class StateTests : IDisposable
         Assert.Equal("Location", only.Name);
         Assert.Equal(["Home", "Work"], only.Values.Select(v => v.Name));
         Assert.Equal("Home", Assert.Single(only.Values, v => v.IsDefault).Name);
-    }
-
-    [Fact]
-    public async Task Add_value_rejects_a_duration_on_the_default()
-    {
-        await AuthenticateAsync();
-        var state = await CreateStateAsync("Tired");
-
-        var res = await _client.PostAsJsonAsync(
-            $"/api/states/{state.Id}/values", new { name = "No", durationMinutes = 60 });
-
-        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
     }
 
     [Fact]
@@ -112,22 +100,24 @@ public class StateTests : IDisposable
         var created = await (await _client.PostAsJsonAsync("/api/activities", new
         {
             title = "commute in",
-            setsStateValueIds = new[] { work.Id },
+            setsStateValues = new[] { new { stateValueId = work.Id, durationMinutes = (int?)480 } },
             requiredStateValueIds = new[] { home.Id },
         })).ReadAsync<ActivityDto>();
 
-        Assert.Equal([work.Id], created.SetsStateValueIds);
+        Assert.Equal(work.Id, Assert.Single(created.SetsStateValues).StateValueId);
+        Assert.Equal(480, created.SetsStateValues[0].DurationMinutes);
         Assert.Equal([home.Id], created.RequiredStateValueIds);
 
         // The PUT is a full replace, so the same fields have to survive a round trip through it.
         var updated = await (await _client.PutAsJsonAsync($"/api/activities/{created.Id}", new
         {
             title = "commute in",
-            setsStateValueIds = new[] { home.Id },
+            setsStateValues = new[] { new { stateValueId = work.Id, durationMinutes = (int?)null } },
             requiredStateValueIds = new[] { work.Id },
         })).ReadAsync<ActivityDto>();
 
-        Assert.Equal([home.Id], updated.SetsStateValueIds);
+        Assert.Equal(work.Id, Assert.Single(updated.SetsStateValues).StateValueId);
+        Assert.Null(updated.SetsStateValues[0].DurationMinutes);
         Assert.Equal([work.Id], updated.RequiredStateValueIds);
     }
 
@@ -142,7 +132,46 @@ public class StateTests : IDisposable
         var res = await _client.PostAsJsonAsync("/api/activities", new
         {
             title = "teleport",
-            setsStateValueIds = withWork.Values.Select(v => v.Id).ToArray(),
+            setsStateValues = withWork.Values.Select(v => new { stateValueId = v.Id }).ToArray(),
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Activity_rejects_an_expiry_on_a_change_to_the_default_value()
+    {
+        await AuthenticateAsync();
+        var state = await CreateStateAsync("Tired");
+        var withNo = await AddValueAsync(state.Id, "No");
+
+        // The default is what an expiry falls back to, so an expiring change *to* it decays to itself.
+        var res = await _client.PostAsJsonAsync("/api/activities", new
+        {
+            title = "recover",
+            setsStateValues = new[] { new { stateValueId = withNo.Values[0].Id, durationMinutes = 60 } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Activity_rejects_an_expiry_past_the_ceiling()
+    {
+        await AuthenticateAsync();
+        var state = await CreateStateAsync("Tired");
+        await AddValueAsync(state.Id, "No");
+        var withYes = await AddValueAsync(state.Id, "Yes");
+        var yes = withYes.Values.Single(v => v.Name == "Yes");
+
+        var res = await _client.PostAsJsonAsync("/api/activities", new
+        {
+            title = "hike",
+            setsStateValues = new[] { new
+            {
+                stateValueId = yes.Id,
+                durationMinutes = Validators.MaxStateDurationMinutes + 1,
+            } },
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);

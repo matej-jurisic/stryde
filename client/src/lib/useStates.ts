@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { statesApi } from './api'
-import type { State, StateValue } from './types'
+import type { State } from './types'
 
 /**
- * The user's states with their values. Shares the `['states']` cache with the Settings editor, so a
+ * The user's states with their values. Shares the `['states']` cache with the States tab, so a
  * value renamed there shows up in the activity modal without a refetch.
  */
 export function useStates() {
@@ -15,7 +15,29 @@ export function useStates() {
   return { states: data ?? [], isLoading }
 }
 
-/** Formats a duration in minutes the way the settings hint and the activity modal both want it. */
+/** Thirty days, matching Validators.MaxStateDurationMinutes. */
+export const MAX_STATE_DURATION_MINUTES = 43200
+
+/**
+ * The units a state effect's duration can be entered in. Minutes are what the API stores; the unit
+ * exists because the values people actually want are "10 hours" and "2 days", and typing 2880 into a
+ * minutes box is a small arithmetic exam.
+ */
+export const STATE_DURATION_UNITS = [
+  { label: 'minutes', minutes: 1 },
+  { label: 'hours', minutes: 60 },
+  { label: 'days', minutes: 1440 },
+] as const
+
+/** Splits stored minutes into the largest unit that divides them evenly, for editing. */
+export function splitStateDuration(minutes: number): { amount: number; unitMinutes: number } {
+  for (const unit of [...STATE_DURATION_UNITS].reverse()) {
+    if (minutes % unit.minutes === 0) return { amount: minutes / unit.minutes, unitMinutes: unit.minutes }
+  }
+  return { amount: minutes, unitMinutes: 1 }
+}
+
+/** Formats a duration in minutes the way the activity modal and its hints want it. */
 export function formatStateDuration(minutes: number): string {
   if (minutes % 1440 === 0) {
     const days = minutes / 1440
@@ -35,9 +57,4 @@ export function describeStateValue(states: State[], valueId: string): string | n
     if (value) return `${state.name}: ${value.name}`
   }
   return null
-}
-
-/** Every value across every state, flattened, each still knowing which state it came from. */
-export function flattenStateValues(states: State[]): { state: State; value: StateValue }[] {
-  return states.flatMap((state) => state.values.map((value) => ({ state, value })))
 }

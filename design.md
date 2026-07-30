@@ -97,6 +97,13 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - 14px text, `gap-3`, `px-3 py-2`, `rounded-[var(--radius-md)]`.
 - Active: `bg-accent`, icon `text-primary`, label `text-foreground font-semibold`.
 - Inactive: icon + label both `text-muted-foreground`. Hover: `bg-accent`.
+- A sidebar item stays active on its sub-routes (an activity, a goal, the Types and States tabs), so drilling in never leaves the sidebar looking like nowhere is selected.
+
+### Page tabs
+
+- One screen split into sections gets an **underline** tab strip directly under the `PageHeader`: full-width `border-b border-border` bar, items `gap-4`, 12px medium text, active item `border-b-2 border-primary text-foreground` pulled onto the bar with `-mb-px`, inactive `text-muted-foreground` with no border.
+- Reserved for *navigation between sub-pages* (Activities / Types / States). Filters and grouping stay pills and segmented controls in the toolbar below, so the two never read as the same control.
+- The strip is a shared component (`ActivitiesTabs`) rendered by each of its routes, not a wrapper: each tab owns its own header action.
 
 ### Buttons
 
@@ -105,6 +112,23 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - Ghost: transparent bg, `hover:bg-accent`.
 - Height: `h-9` (md), `h-8` (sm). Font: regular weight (not semibold or bold).
 - Border radius: 6-8px.
+- **Delete is an icon-only square button**, never a labelled one: `Trash2` in `text-destructive` on a transparent ground, hover `bg-destructive/10`, sized to the row it sits in (`h-9 w-9` beside md buttons, `h-8 w-8` beside sm). It carries the name in `aria-label`, swaps the icon for an inline spinner while the delete is in flight, and always opens a `ConfirmDialog` rather than acting. Where the same footer holds Cancel and Save it gets `mr-auto`, so the full width separates it from the button the user actually meant to press. Used by `EventDetailModal`, the type editor and the state editor.
+- The `Button` component sets no gap between its children, so **never give a `Button` an icon and a label together** - they render flush and read as one glyph. Icon plus label is a hand-rolled `flex ... gap-1.5` button (see the empty-state "New state" / "New type" buttons).
+
+### Duration fields
+
+- A span of time the user *chooses the scale of* is a number input plus a unit select (`minutes / hours / days`), both on the shared `inputCls` treatment, reading as a sentence off the end of the control it qualifies: `Physical  [Fresh] [Tired]  for [10] [hours]`. Never a bare minutes box - the values people want are "10 hours" and "2 days", and a raw `2880` is a small arithmetic exam. Used by the "Changes" field in `ActivityModal`.
+- **The duration attaches to the pick, it does not summarise it.** A list underneath that restates `Physical: Tired  for [10] [hours]` prints the state name and value a second time for no new information; hang the input off the row that made the choice instead.
+- **Changing the unit reinterprets the number, it does not convert it.** Typing 2 and switching hours to days means 2 days, not 0.08 of one.
+- Blank means "no limit", and that only gets a helper line while the field is actually blank.
+- A fixed-scale span (a time-of-day window, a minimum block) stays a plain field; the unit select is for the ones that legitimately range from minutes to weeks.
+
+### State pickers (activity modal)
+
+- The two state fields are **one panel**, not two loose fields: `divide-y divide-border rounded-lg border border-border bg-muted/40`, a `text-xs font-medium` sub-label per half ("Only suggest when" / "Doing it changes"). Both halves draw the same chips from the same states, so as bare labelled rows they read as one control accidentally rendered twice - the divider and the sub-labels are the only thing that says which half is the condition and which is the consequence.
+- **One row per state, name in a fixed left column** (`h-8 w-20`, `text-xs text-muted-foreground`, truncating with a `title`), chips wrapping in the rest of the width. A name on its own line above its chips doubles the height of the field and leaves the right half of every row empty.
+- Chips are the activity-type chip: `h-8 rounded-lg border px-2.5 text-xs font-medium`, selected `border-primary bg-primary/10 text-foreground`.
+- Explain a *missing* control where it would have been, in three words, not in a paragraph below: picking a state's default value shows `defaults don't expire` where the duration would sit.
 
 ### Checkboxes (events)
 
@@ -202,3 +226,14 @@ Mobile: single column, agenda first, recommendations collapsed behind a toggle.
 - Sidebar: `w-60` (240px). Middle column: fixed `w-80` (320px).
 - List row hover: `hover:bg-accent` (light gray tint), `rounded-[var(--radius-md)]`.
 - Section group labels: `text-xs font-medium text-muted-foreground uppercase tracking-wide`.
+
+---
+
+## Copy
+
+Single-user app: the user designed the domain, so the UI never explains it back to them.
+
+- **No concept explainers.** Empty states are a title and a CTA, never a paragraph defining what a state, type, activity, or occurrence is.
+- **No restating the controls.** A helper line under a field is only worth its space if it says something the field itself does not.
+- **Generated data summaries are fine** (`describeProfile`/`profileHint`: the type's actual numbers), because they show values that are not otherwise on screen. Keep them to one terse line.
+- **Field labels are labels, not sentences.** "Assumed cadence", not "Before I've learned from your history, assume this happens".

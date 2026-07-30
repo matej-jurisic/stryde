@@ -5,7 +5,18 @@
       "PowerShell(npm *)",
       "PowerShell(Get-Process *)",
       "Bash(dotnet *)",
-      "Bash(npm *)"
+      "Bash(npm *)",
+      "Bash(PATH=* dotnet *)",
+      "PowerShell(Select-String *)",
+      "PowerShell(ForEach-Object *)",
+      "PowerShell(Where-Object *)",
+      "PowerShell(Select-Object *)",
+      "PowerShell(Sort-Object *)",
+      "PowerShell(Measure-Object *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Out-File *)"
     ]
   }
 }

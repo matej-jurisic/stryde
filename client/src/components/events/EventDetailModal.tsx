@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, X, Pencil, Trash2, Clock, CalendarPlus, Copy, MoreHorizontal, Pin, PinOff } from 'lucide-react'
+import { Check, X, Pencil, Trash2, Clock, CalendarPlus, Copy, MoreHorizontal, Pin, PinOff, Layers } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -10,7 +10,7 @@ import { CategoryIcon } from '@/components/categories/categoryIcons'
 import { SkipRescheduleModal } from '@/components/events/SkipRescheduleModal'
 import { occurrencesApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
-import type { Occurrence, OccurrenceSubtask, EventStatus } from '@/lib/types'
+import type { Activity, Occurrence, OccurrenceSubtask, EventStatus } from '@/lib/types'
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -83,9 +83,11 @@ interface EventDetailModalProps {
   onEdit: (o: Occurrence) => void
   onSchedule?: (o: Occurrence) => void
   onDuplicate?: (o: Occurrence) => void
+  /** Edits the parent activity rather than this occurrence. Only offered for the activity kind. */
+  onEditActivity?: (a: Activity) => void
 }
 
-export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onSchedule, onDuplicate }: EventDetailModalProps) {
+export function EventDetailModal({ open, onClose, event: occurrence, onEdit, onSchedule, onDuplicate, onEditActivity }: EventDetailModalProps) {
   const qc = useQueryClient()
   const [moreOpen, setMoreOpen] = useState(false)
   const [skipOpen, setSkipOpen] = useState(false)
@@ -248,6 +250,15 @@ const statusMutation = useMutation({
                 <Pencil className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
                 Edit
               </button>
+              {onEditActivity && occurrence.activity.kind === 'activity' && (
+                <button
+                  onClick={() => { setMoreOpen(false); onClose(); onEditActivity(occurrence.activity) }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                >
+                  <Layers className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                  Edit activity
+                </button>
+              )}
               {onDuplicate && (
                 <button
                   onClick={() => { setMoreOpen(false); onDuplicate(occurrence) }}

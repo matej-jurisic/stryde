@@ -1,5 +1,5 @@
+import type { ReactNode } from 'react'
 import type { State } from '@/lib/types'
-import { formatStateDuration } from '@/lib/useStates'
 
 interface StateValuePickerProps {
   states: State[]
@@ -12,20 +12,25 @@ interface StateValuePickerProps {
    * several, which is what a requirement means.
    */
   singlePerState?: boolean
-  /** Shown when the value carries an expiry, so the effect of picking it is visible up front. */
-  showDurations?: boolean
+  /**
+   * Rendered inline after a state's chips, sharing their wrapping row. The effect picker hangs
+   * `for [10] [hours]` here so the duration reads as the end of the same sentence instead of
+   * restating the pick in a list underneath.
+   */
+  trailing?: (state: State) => ReactNode
 }
 
 /**
- * Chips grouped by state. Built on the same shape as the activity type chip row rather than a
- * multi-select, because the whole set has to be visible at a glance to be checkable.
+ * Chips grouped by state, one row per state: the name sits in a fixed left column so the chip
+ * groups line up down the field, and the row reads `Physical  [Fresh] [Tired]`. Built on chips
+ * rather than a multi-select because the whole set has to be visible at a glance to be checkable.
  */
 export function StateValuePicker({
   states,
   value,
   onChange,
   singlePerState = false,
-  showDurations = false,
+  trailing,
 }: StateValuePickerProps) {
   const selected = new Set(value)
 
@@ -41,11 +46,16 @@ export function StateValuePicker({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1.5">
       {states.filter((s) => s.values.length > 0).map((state) => (
-        <div key={state.id} className="flex flex-col gap-1">
-          <span className="text-xs text-muted-foreground">{state.name}</span>
-          <div className="flex flex-wrap gap-1.5">
+        <div key={state.id} className="flex gap-2">
+          <span
+            className="flex h-8 w-20 shrink-0 items-center truncate text-xs text-muted-foreground"
+            title={state.name}
+          >
+            {state.name}
+          </span>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             {state.values.map((v) => {
               const isSelected = selected.has(v.id)
               return (
@@ -61,14 +71,10 @@ export function StateValuePicker({
                   }`}
                 >
                   {v.name}
-                  {showDurations && v.durationMinutes !== null && (
-                    <span className="text-[10px] font-normal opacity-70">
-                      {formatStateDuration(v.durationMinutes)}
-                    </span>
-                  )}
                 </button>
               )
             })}
+            {trailing?.(state)}
           </div>
         </div>
       ))}

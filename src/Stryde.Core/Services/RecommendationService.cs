@@ -7,7 +7,7 @@ using Stryde.Core.Enums;
 
 namespace Stryde.Core.Services;
 
-public class RecommendationService(StrydeDbContext db, UserSettingsService settings, ActivityProfileService profiles)
+public class RecommendationService(StrydeDbContext db, UserSettingsService settings, ActivityTypeService activityTypes)
 {
     /// <summary>Completed history older than this feeds neither timing hints nor cadence.</summary>
     private const int HistoryWindowDays = 90;
@@ -57,9 +57,12 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
     {
         var now = nowUtc ?? DateTimeOffset.UtcNow;
         var ctx = await settings.GetDayContextAsync(userId);
-        // Resolved once for the whole request: built-in profiles with this user's overrides applied.
-        // Every type-driven decision below reads from here rather than the static defaults.
-        var profileByType = await profiles.ResolveAsync(userId);
+        // Read once for the whole request. Every type-driven decision below goes through Profile,
+        // which answers for a typeless activity too - that is the case with no row to read.
+        var profileById = await activityTypes.ResolveAsync(userId);
+        ActivityProfile Profile(Guid? typeId) =>
+            typeId is { } id && profileById.TryGetValue(id, out var p) ? p : ActivityProfiles.Unconstrained;
+
         var currentDay = DayMath.Today(ctx, now);
         var today = date ?? currentDay;
 
@@ -90,13 +93,16 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         var todayTypeByActivity = await db.Activities
             .AsNoTracking()
             .Where(a => a.UserId == userId && todayActivityIds.Contains(a.Id))
-            .Select(a => new { a.Id, a.Type })
-            .ToDictionaryAsync(x => x.Id, x => x.Type);
+            .Select(a => new { a.Id, a.ActivityTypeId })
+            .ToDictionaryAsync(x => x.Id, x => x.ActivityTypeId);
 
         // Per-day type caps count what is already on the day, not just what has been suggested:
         // once two deep work blocks are scheduled, a third suggestion is noise however it got there.
+        // Typeless activities are absent: the unconstrained profile has no cap, so there is nothing
+        // for them to count against. A Dictionary also refuses a null key outright.
         var typeCounts = todayTypeByActivity.Values
-            .GroupBy(t => t)
+            .Where(t => t.HasValue)
+            .GroupBy(t => t!.Value)
             .ToDictionary(g => g.Key, g => g.Count());
 
         // Occurrences holding a real span on the target day, in start order. The free-slot carve-out
@@ -182,11 +188,11 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
 
         // An activity needs a gap big enough for whichever is larger: what it usually takes, or the
         // floor its type declares. Zero on both sides means "no evidence, no floor" - let it through.
-        bool FitsASlot(Guid activityId, ActivityType type)
+        bool FitsASlot(Guid activityId, Guid? typeId)
         {
             if (freeSlots is null) return true;
             statsByActivity.TryGetValue(activityId, out var s);
-            var needed = Math.Max(s?.DurationMinutes ?? 0, profileByType[type].MinBlockMinutes);
+            var needed = Math.Max(s?.DurationMinutes ?? 0, Profile(typeId).MinBlockMinutes);
             var slots = AllowedSlots(activityId);
             if (needed == 0) return slots.Count > 0;
             return slots.Any(slot => (slot.End - slot.Start).TotalMinutes >= needed);
@@ -223,11 +229,11 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         // it caps how many ghosts one gap can absorb, rather than stacking them on one slot.
         // Every candidate comes from AllowedSlots, so a state requirement is a hard mask: the rules
         // below choose *within* what the requirement permits and can never step outside it.
-        DateTimeOffset? PlaceActivity(Guid activityId, ActivityType type)
+        DateTimeOffset? PlaceActivity(Guid activityId, Guid? typeId)
         {
             if (freeSlots is null) return null;
             statsByActivity.TryGetValue(activityId, out var s);
-            var profile = profileByType[type];
+            var profile = Profile(typeId);
             // No history means no median duration - assume the same span the calendar draws rather
             // than 0, which would "fit" any gap however small.
             var needed = Math.Max(s?.DurationMinutes ?? DefaultSuggestionMinutes, profile.MinBlockMinutes);
@@ -280,7 +286,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         double DueFraction(Activity activity)
         {
             statsByActivity.TryGetValue(activity.Id, out var s);
-            var profile = profileByType[activity.Type];
+            var profile = Profile(activity.ActivityTypeId);
             if (s is not null)
             {
                 var daysSince = today.DayNumber - s.LastDoneDay.DayNumber;
@@ -314,7 +320,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         // makes the other half of a split surface instead.
         bool PastCooldown(Activity activity)
         {
-            var min = profileByType[activity.Type].MinDueFraction;
+            var min = Profile(activity.ActivityTypeId).MinDueFraction;
             // No completions means the figure would come from the creation date, which says nothing
             // about rest. A brand new activity is never in cooldown.
             if (min <= 0 || !statsByActivity.ContainsKey(activity.Id)) return true;
@@ -326,6 +332,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             .AsNoTracking()
             .Include(a => a.Goal)
             .Include(a => a.Category)
+            .Include(a => a.Type)
             .Where(a => a.UserId == userId && !a.ExcludeFromRecommendations && a.Goal != null &&
                 (a.Goal.Status == GoalStatus.focus || a.Goal.Status == GoalStatus.active))
             .ToListAsync();
@@ -336,7 +343,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         void AddActivity(int tier, Activity activity)
         {
             if (seenActivityIds.Add(activity.Id) && !todayActivityIds.Contains(activity.Id)
-                && StateAllows(activity.Id) && FitsASlot(activity.Id, activity.Type) && PastCooldown(activity))
+                && StateAllows(activity.Id) && FitsASlot(activity.Id, activity.ActivityTypeId) && PastCooldown(activity))
                 goalTierActivities.Add((tier, activity));
         }
 
@@ -373,12 +380,13 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
                 .AsNoTracking()
                 .Include(a => a.Category)
                 .Include(a => a.Goal)
+                .Include(a => a.Type)
                 .Where(a => ids.Contains(a.Id) && !a.ExcludeFromRecommendations)
                 .ToListAsync();
 
             habitRecs = patternedActivityIds
                 .Select(p => activities.FirstOrDefault(a => a.Id == p.ActivityId))
-                .Where(a => a is not null && StateAllows(a.Id) && FitsASlot(a.Id, a.Type) && PastCooldown(a))
+                .Where(a => a is not null && StateAllows(a.Id) && FitsASlot(a.Id, a.ActivityTypeId) && PastCooldown(a))
                 .Select(a => a!)
                 .ToList();
         }
@@ -392,16 +400,19 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
                 s is null ? null : today.DayNumber - s.LastDoneDay.DayNumber,
                 s?.MedianGapDays,
                 patternCount == 0 ? null : patternCount,
-                PlaceActivity(activity.Id, activity.Type));
+                PlaceActivity(activity.Id, activity.ActivityTypeId));
         }
 
         // A type's MaxPerDay is a ceiling on the whole day, seeded with what is already scheduled.
-        bool TakeTypeSlot(ActivityType type)
+        bool TakeTypeSlot(Guid? typeId)
         {
-            var max = profileByType[type].MaxPerDay;
-            typeCounts.TryGetValue(type, out var used);
+            // No type is the unconstrained profile, which declares no cap to take a slot from.
+            if (typeId is not { } id) return true;
+
+            var max = Profile(id).MaxPerDay;
+            typeCounts.TryGetValue(id, out var used);
             if (max > 0 && used >= max) return false;
-            typeCounts[type] = used + 1;
+            typeCounts[id] = used + 1;
             return true;
         }
 
@@ -417,11 +428,11 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
             .ToList();
 
         foreach (var (tier, activity) in ranked)
-            if (TakeTypeSlot(activity.Type))
+            if (TakeTypeSlot(activity.ActivityTypeId))
                 result.Add(MakeActivityRec(tier, activity));
 
         foreach (var a in habitRecs)
-            if (TakeTypeSlot(a.Type))
+            if (TakeTypeSlot(a.ActivityTypeId))
                 result.Add(MakeActivityRec(3, a));
 
         return result;
@@ -451,7 +462,7 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
         var effects = await db.ActivityStateEffects
             .AsNoTracking()
             .Where(e => e.Activity.UserId == userId)
-            .Select(e => new { e.ActivityId, e.StateId, e.StateValueId })
+            .Select(e => new { e.ActivityId, e.StateId, e.StateValueId, e.DurationMinutes })
             .ToListAsync();
 
         var requirements = await db.ActivityStateRequirements
@@ -479,7 +490,9 @@ public class RecommendationService(StrydeDbContext db, UserSettingsService setti
                 if (!valueById.TryGetValue(effect.StateValueId, out var value)) continue;
                 if (!settersByState.TryGetValue(effect.StateId, out var list))
                     settersByState[effect.StateId] = list = [];
-                list.Add(new StateSetter(at, value.Id, value.DurationMinutes));
+                // The duration comes off the effect, not the value: the same "Tired: Yes" lasts ten
+                // hours after a run and two days after a hike.
+                list.Add(new StateSetter(at, value.Id, effect.DurationMinutes));
             }
 
         var timelines = states.ToDictionary(

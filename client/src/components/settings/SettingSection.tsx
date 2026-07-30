@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 
+export { inputCls } from '@/components/ui/input'
+
 /** Layout primitives shared by the Settings page and its per-section editors. */
 
 export function SettingSection({ label, children }: { label: string; children: ReactNode }) {
@@ -45,6 +47,3 @@ export function SectionFooter({ status, error, onSave, isPending, label = 'Save 
     </div>
   )
 }
-
-export const inputCls =
-  'h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring'
