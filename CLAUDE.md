@@ -126,9 +126,15 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   **restarts from the top**. A candidate leaves `pending` only when it is actually placed: finding no
   room is not a verdict, since a later leg can put the state back (hence `HasTypeSlot` split off
   `TakeTypeSlot`, so a failed attempt does not spend the cap). Leftovers surface timeless or are
-  dropped. `RevocationFloor` is the other half: a suggestion that takes a state out of a value an
-  already-placed one requires may not start before that one ends - without it a habitless trip home
-  lands right after the trip in and closes the working day. The closing sweep is the backstop for what
+  dropped. `RevocationFloor` is the other half: a suggestion that takes a state out of a value
+  something else still needs may not start before that thing ends - without it a habitless trip home
+  lands right after the trip in and closes the working day. It reads two sources. `placedByActivity`
+  is the chained half, suggestions placed above this one. `committedClaims` is the day's own
+  occurrences, and applies in **both** modes: a committed occurrence's requirements are otherwise
+  inert, since they are read only to decide whether that activity may be *suggested* and never again
+  once it is on the calendar - which let a 07:00 commute be proposed on a work-from-home day. It is
+  built off `dayBlocks`, so what blocks time is exactly what holds states.
+  The closing sweep is the backstop for what
   the floor cannot see. `UnlockedBy` names only setters into a value the activity *accepts*, so a
   revoker is never reported as the reason something surfaced.
   See `spec.md` → Recommendations → Suggestion mode.

@@ -1661,4 +1661,68 @@ public class RecommendationServiceTests : IDisposable
         Assert.Equal(At(9, 8, 30), rec.SuggestedStartAt);
         Assert.Null(rec.UnlockedBy);
     }
+
+    /// <summary>
+    /// A day already committed to being at home: 08:00 to 16:00 of it only makes sense while
+    /// Location is Home. The commute in has a firm 07:00 habit and would take that hour unasked.
+    /// </summary>
+    private async Task<(State Location, Activity Into, Activity Back)> WorkFromHomeDayAsync(Guid userId)
+    {
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
+
+        var wfh = await AddActivityAsync(userId, "work from home");
+        await RequiresAsync(wfh, Value(location, "Home"));
+        await AddOccurrenceAsync(userId, wfh, startAt: At(9, 8), endAt: At(9, 16));
+
+        var into = await AddActivityAsync(userId, "work commute", GoalStatus.focus);
+        await SetsAsync(into, Value(location, "Work"));
+        await RequiresAsync(into, Value(location, "Home"));
+        foreach (var day in new[] { 2, 6 })
+            await CompleteAsync(userId, into, At(day, 7), At(day, 7, 30));
+
+        var back = await AddActivityAsync(userId, "work home commute", GoalStatus.focus);
+        await SetsAsync(back, Value(location, "Home"));
+        await RequiresAsync(back, Value(location, "Work"));
+
+        // Each of those days ended with the trip back, so Location is Home again by the target day.
+        // Without them the last commute in holds Work indefinitely and the day under test starts at
+        // work, which is a different scenario entirely.
+        foreach (var day in new[] { 2, 6 })
+            await CompleteAsync(userId, back, At(day, 17), At(day, 17, 30));
+
+        return (location, into, back);
+    }
+
+    [Fact]
+    public async Task GetAsync_state_change_waits_for_a_committed_occurrence_that_needs_the_value()
+    {
+        var userId = await CreateUserAsync();
+        var (_, into, _) = await WorkFromHomeDayAsync(userId);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        // 07:00 is free and is the habit, but going in takes Location out of Home under a block that
+        // is already on the day requiring it. The only room left is past 16:00, too far from the
+        // habit to claim, so the commute surfaces without a time rather than at an hour that
+        // contradicts the day.
+        var rec = recs.Single(r => r.Activity.Id == into.Id);
+        Assert.Null(rec.SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_chained_mode_does_not_unlock_a_day_off_a_revoked_commitment()
+    {
+        var userId = await CreateUserAsync();
+        var (_, into, back) = await WorkFromHomeDayAsync(userId);
+
+        var recs = await _ctx.RecommendationService.GetAsync(
+            userId, new DateOnly(2026, 7, 9), Now, chain: true);
+
+        // The commute in is floored the same way here, so it never folds Location: Work into the day -
+        // and the trip home, which exists only to end a day at work, has nothing to stand on. Without
+        // the floor it was placed at 07:00 and handed the evening to a commute home on a day nobody
+        // left the house.
+        Assert.Null(recs.Single(r => r.Activity.Id == into.Id).SuggestedStartAt);
+        Assert.DoesNotContain(recs, r => r.Activity.Id == back.Id);
+    }
 }

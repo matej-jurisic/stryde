@@ -287,22 +287,43 @@ public class RecommendationService(
         // state change from landing on top of something placed because of the value it changes.
         var placedByActivity = new Dictionary<Guid, (DateTimeOffset Start, DateTimeOffset End)>();
 
+        // The same protection for what the day already holds. A committed occurrence's requirements
+        // are otherwise inert: they decide whether the activity may be *suggested* and nothing reads
+        // them again once it is on the calendar, so a suggestion was free to take a state out of a
+        // value a real block still needs - a commute to work proposed at 07:00 on a day whose 08:00
+        // to 16:00 is a work-from-home block requiring Location: Home. These are facts rather than
+        // proposals, so unlike placed suggestions they hold in both modes.
+        // Same source as the free-slot carve-out, so anything that blocks time protects its states
+        // and anything that doesn't (skipped, floating, a due pin) does neither.
+        var committedClaims = dayBlocks
+            .Where(o => requirementsByActivity.ContainsKey(o.ActivityId))
+            .Select(o => (o.ActivityId, End: o.EndAt!.Value))
+            .ToList();
+
         // Would doing this activity take a state out of a value that one needs?
         bool Revokes(Guid activityId, Guid otherId) =>
             stateCtx.EffectsByActivity.TryGetValue(activityId, out var effects)
             && requirementsByActivity.TryGetValue(otherId, out var groups)
             && effects.Any(e => groups.Any(g => g.StateId == e.StateId && !g.Allowed.Contains(e.StateValueId)));
 
-        // Earliest a state-changing suggestion may start without pulling the rug from under one already
-        // placed: you do not head home while the day's work block is still running. Only *placed* spans
-        // count - a candidate still pending has claimed no time to be protected, and floor-ing against
-        // every pending one would push a commute past the whole day it makes possible.
+        // Earliest a state-changing suggestion may start without pulling the rug from under something
+        // that still needs the value: you do not head home while the day's work block is still
+        // running. Committed occurrences always count; among suggestions only *placed* ones do - a
+        // candidate still pending has claimed no time to be protected, and floor-ing against every
+        // pending one would push a commute past the whole day it makes possible.
         DateTimeOffset? RevocationFloor(Guid activityId)
         {
             DateTimeOffset? floor = null;
-            foreach (var (otherId, span) in placedByActivity)
-                if (otherId != activityId && Revokes(activityId, otherId) && (floor is null || span.End > floor))
-                    floor = span.End;
+
+            void Consider(Guid otherId, DateTimeOffset end)
+            {
+                if (otherId != activityId && Revokes(activityId, otherId) && (floor is null || end > floor))
+                    floor = end;
+            }
+
+            foreach (var (otherId, span) in placedByActivity) Consider(otherId, span.End);
+            foreach (var (otherId, end) in committedClaims) Consider(otherId, end);
+
             return floor;
         }
 
@@ -598,9 +619,14 @@ public class RecommendationService(
             // to being dropped - and so which activities are admitted does not depend on placement.
             var admitted = candidates.Where(c => TakeTypeSlot(c.activity.ActivityTypeId)).ToList();
 
+            // The floor still applies with nothing being chained: `committedClaims` holds what is
+            // already on the day, and a suggestion may not revoke a value one of those needs however
+            // the mode reads the rest of the day. `placedByActivity` stays empty on this path, so
+            // suggestions do not constrain each other here.
             var slotByRank = new Dictionary<int, DateTimeOffset?>();
             foreach (var c in ByPlacement(admitted))
-                slotByRank[c.rank] = PlaceActivity(c.activity.Id, c.activity.ActivityTypeId)?.Start;
+                slotByRank[c.rank] = PlaceActivity(
+                    c.activity.Id, c.activity.ActivityTypeId, RevocationFloor(c.activity.Id))?.Start;
 
             return admitted
                 .Select(c => MakeActivityRec(c.tier, c.activity, slotByRank[c.rank]))

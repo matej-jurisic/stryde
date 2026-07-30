@@ -544,6 +544,13 @@ activity that has genuinely been started at 08:00 for months off its own hour.
 
 - **State requirements mask the day before any other rule runs.** Every candidate is drawn from the
   free slots intersected with the permitted stretches.
+- **A suggestion may not revoke a value the day already needs.** An occurrence on the calendar
+  requires its states for the whole of its span, so a suggestion whose effect would take one of them
+  out of a value it needs cannot start before that occurrence ends. Otherwise a commute to work,
+  habitually a 07:00 thing, is proposed for 07:00 on a day whose 08:00 to 16:00 is a work-from-home
+  block that only makes sense at home. A committed occurrence's requirements are a claim on the day,
+  not just a condition on whether it may be suggested. Same set of occurrences that blocks time, so
+  a skipped, floating or all-day-planned one holds no states either.
 - **At most two suggestions may cover the same instant.** Two ghosts side by side read as "pick one";
   more than that is unreadable.
 - **Habit-anchored activities** (those with a habitual start time) take it when it still fits,
@@ -585,12 +592,13 @@ every slot still comes from the permitted stretches.
 Two rules keep a chained day coherent, because placement is greedy and a state change is not
 symmetric with the things that depend on it:
 
-- **A state change waits for what still needs the value.** A suggestion whose effect would take a
-  state out of a value that an *already-placed* suggestion requires cannot start before that
+- **A state change waits for what still needs the value.** The placement rule above, extended from
+  the day's committed occurrences to the suggestions placed above this one: a suggestion whose effect
+  would take a state out of a value an *already-placed* suggestion requires cannot start before that
   suggestion ends. Without it, a trip home with no habitual hour takes the first opening its own
   requirement allows - the moment the trip in ends - and closes the working day it is meant to end,
-  which then fits nowhere and vanishes from the list. Only placed suggestions count: waiting for
-  every *pending* one would push the commute past the whole day it makes possible.
+  which then fits nowhere and vanishes from the list. Only *placed* suggestions count: waiting for
+  every pending one would push the commute past the whole day it makes possible.
 - **A candidate leaves the queue only when it is actually placed.** Finding no room is not a verdict,
   because a later leg can put the state back: the activities that need to be at home get their slot
   once the trip home reopens the evening. The scan repeats until a full pass places nothing, and
