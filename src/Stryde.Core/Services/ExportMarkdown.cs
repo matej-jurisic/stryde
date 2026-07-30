@@ -155,8 +155,8 @@ internal sealed class ExportMarkdown(
         Heading2("Activity types");
         if (types.Count == 0)
         {
-            Line("None defined. Every activity is unconstrained: the app may suggest it anywhere between");
-            Line($"{Unconstrained.WindowStart:HH:mm} and {Unconstrained.WindowEnd:HH:mm}, as often as it likes.");
+            Line("None defined. Every activity is unconstrained: the app may suggest it anywhere the day");
+            Line("has room, as often as it likes.");
             Line();
             return;
         }
@@ -186,8 +186,8 @@ internal sealed class ExportMarkdown(
 
         var untyped = namedActivities.Where(a => a.ActivityTypeId is null).ToList();
         Heading3("No type");
-        Bullet($"No constraints at all: placed anywhere between {Unconstrained.WindowStart:HH:mm} and " +
-               $"{Unconstrained.WindowEnd:HH:mm}, assumed {Cadence(ActivityProfiles.DefaultCadenceDays)}.");
+        Bullet("No constraints at all: no time window, no free-block minimum, no daily cap and no " +
+               $"cooldown. Placed wherever the day has room, assumed {Cadence(ActivityProfiles.DefaultCadenceDays)}.");
         Bullet(untyped.Count > 0
             ? $"{Plural(untyped.Count, "activity")}: {string.Join(", ", untyped.Select(a => a.Title))}"
             : "No activity is without a type.");
@@ -430,8 +430,6 @@ internal sealed class ExportMarkdown(
     }
 
     // ── phrasing ───────────────────────────────────────────────────────────────
-
-    private static ActivityProfile Unconstrained => ActivityProfiles.Unconstrained;
 
     private static string Cadence(double priorDays) =>
         priorDays == 1 ? "daily" : $"about every {(priorDays % 1 == 0 ? priorDays.ToString("0", Inv) : priorDays.ToString("0.#", Inv))} days";

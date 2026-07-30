@@ -1224,6 +1224,33 @@ public class RecommendationServiceTests : IDisposable
         Assert.Null(Assert.Single(recs).SuggestedStartAt);
     }
 
+    [Fact]
+    public async Task GetAsync_typeless_activity_has_no_window_end_to_be_placed_past()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "read", GoalStatus.focus);
+
+        // Same late hour that leaves a typed activity with no slot. "No type" promises no scheduling
+        // constraints, so a free evening is a free evening: the only bound left is the end of the day.
+        var lateNow = new DateTimeOffset(2026, 7, 7, 21, 30, 0, TimeSpan.Zero);
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, lateNow);
+
+        Assert.Equal(At(7, 21, 30), Assert.Single(recs).SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_typeless_activity_is_still_held_to_the_civil_hour_floor()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "read", GoalStatus.focus);
+
+        // Having no window does not mean a ghost at 04:00. The 08:00 floor is a global engine rule
+        // every activity gets, not something a type was supplying.
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        Assert.Equal(At(9, 8), Assert.Single(recs).SuggestedStartAt);
+    }
+
     // --- All-day occurrences ---
     // All-day *and* planned is intent with no position on the clock, and the user drags those between
     // days freely. The engine ignores them outright. The other two combinations are real: all-day

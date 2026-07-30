@@ -22,8 +22,8 @@ public class ActivityType
     /// <summary>Lucide component name, resolved through the client's icon map. Null renders a fallback.</summary>
     public string? Icon { get; set; }
 
-    public TimeOnly WindowStart { get; set; } = ActivityProfiles.Unconstrained.WindowStart;
-    public TimeOnly WindowEnd { get; set; } = ActivityProfiles.Unconstrained.WindowEnd;
+    public TimeOnly WindowStart { get; set; } = ActivityProfiles.DefaultWindowStart;
+    public TimeOnly WindowEnd { get; set; } = ActivityProfiles.DefaultWindowEnd;
     public int MinBlockMinutes { get; set; }
     public int MaxPerDay { get; set; }
     public double CadencePriorDays { get; set; } = ActivityProfiles.DefaultCadenceDays;

@@ -5,7 +5,7 @@ import type { ActivityType } from './types'
  * profile, not a missing value, so it gets a label rather than an empty slot.
  */
 export const NO_TYPE_LABEL = 'No type'
-export const NO_TYPE_HINT = 'No scheduling constraints.'
+export const NO_TYPE_HINT = 'No scheduling constraints. Placed wherever the day has room.'
 
 /** Normalises a "H:m" window bound to 24h "HH:mm". */
 export function formatWindowTime(hhmm: string): string {

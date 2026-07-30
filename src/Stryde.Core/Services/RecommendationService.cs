@@ -278,8 +278,16 @@ public class RecommendationService(
                 // landed at 22:45 on a day booked solid until 20:00. Nothing before it means no
                 // slot, and the recommendation surfaces without a time rather than at an hour
                 // nobody would take.
-                var windowStart = InstantForMinutes(profile.WindowStart.Hour * 60 + profile.WindowStart.Minute);
-                var windowEnd = InstantForMinutes(profile.WindowEnd.Hour * 60 + profile.WindowEnd.Minute);
+                // A profile with no window (the typeless default) declares neither bound, so it takes
+                // the whole rest of the day: floor at the civil-hour fallback every activity gets,
+                // ceiling at end of day. Both branches then collapse to the same search, which is
+                // right - with no window there is no "outside the window" to fall back to.
+                var windowStart = profile.WindowStart is { } ws
+                    ? InstantForMinutes(ws.Hour * 60 + ws.Minute)
+                    : earliestFallback;
+                var windowEnd = profile.WindowEnd is { } we
+                    ? InstantForMinutes(we.Hour * 60 + we.Minute)
+                    : dayEnd;
                 chosen = CandidateStarts(slots)
                         .Where(t => t >= windowStart && t < windowEnd && CanPlace(slots, t, needed))
                         .Cast<DateTimeOffset?>()

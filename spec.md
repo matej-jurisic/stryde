@@ -113,8 +113,11 @@ to work with before an activity has any completed history.
 re-iconed, or deleted like a category. An activity has at most one type, or none. Types hold
 **nothing but scheduling numbers**: no type refers to another type, and conditions belong to States.
 
-**No type is the unconstrained profile**, not a missing value: placed 08:00-21:00, no block floor, no
-cap, no cooldown, a 7-day cadence prior. That is why there is no built-in row standing for "general".
+**No type is the unconstrained profile**, not a missing value: no window, no block floor, no cap, no
+cooldown, a 7-day cadence prior. That is why there is no built-in row standing for "general". It is
+genuinely unconstrained - a wide default window would still be a window, and its end a hard limit, so
+a typeless activity carries no window at all and is placed wherever the day has room. The one bound
+it keeps is the global 08:00 civil-hour floor every activity gets regardless of type.
 
 | Field | Meaning |
 |---|---|
@@ -529,6 +532,8 @@ same empty day and they all land on the first gap that fits.
 - **Unhabituated activities** take the first opening inside their type's window; with no room there,
   the first opening at or after 08:00 local (the day boundary is usually the small hours) but **never
   past the window end**. A day with room left only after the window closes yields no slot.
+  A **typeless** activity has no window, so this reduces to the first opening at or after 08:00 with
+  no ceiling but the end of the day.
 - An activity with no completion history is sized at 30 minutes, matching the span the calendar draws
   for it.
 

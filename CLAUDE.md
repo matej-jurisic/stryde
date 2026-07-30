@@ -71,7 +71,9 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Common/Validators.cs` — shared static validation rules.
 - `Common/ActivityProfiles.cs` — `ActivityProfile`, the scheduling numbers flattened off an
   `ActivityType` row so the engine never holds an entity, plus `Unconstrained` (what an activity with
-  **no** type gets) and two engine constants. There is no default table any more: types are user rows,
+  **no** type gets), the `DefaultWindow*` pair a new type row starts at, and two engine constants.
+  `Unconstrained`'s window is **null, not wide**: a window's end is a hard placement limit, so any
+  default window would be a constraint the "No type" label denies having. Keep it null. There is no default table any more: types are user rows,
   so nothing needs reconciling against a built-in. `ActivityTypeService.ResolveAsync` returns the
   user's profiles keyed by id; a missing key is `Unconstrained`.
   **Types hold scheduling numbers only** — no type refers to another type, and conditions belong to
