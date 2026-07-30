@@ -1425,4 +1425,147 @@ public class RecommendationServiceTests : IDisposable
         // at opposite ends of the axis; indexed from the 04:00 boundary they are neighbours.
         Assert.Equal("23:55", Assert.Single(recs).TypicalStartTime);
     }
+
+    // --- Chained suggestions ---
+
+    /// <summary>
+    /// The day the whole feature exists for: an ordinary office day, none of it scheduled yet, so the
+    /// only thing that could put the user at work is a suggestion nobody has accepted.
+    /// <para>
+    /// Each leg is given a habit on the 2nd and the 6th, which is what the real thing has and what
+    /// makes the order of a chained day meaningful rather than three ghosts in the first free gap. The
+    /// history leaves Location on its default going into the target day: the last setter of each of
+    /// those days is the trip home.
+    /// </para>
+    /// </summary>
+    private async Task<(Activity Into, Activity Work, Activity Back)> CommuteDayAsync(Guid userId)
+    {
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
+
+        var into = await AddActivityAsync(userId, "work commute", GoalStatus.focus);
+        await SetsAsync(into, Value(location, "Work"));
+        await RequiresAsync(into, Value(location, "Home"));
+
+        var work = await AddActivityAsync(userId, "work", GoalStatus.focus);
+        await RequiresAsync(work, Value(location, "Work"));
+
+        var back = await AddActivityAsync(userId, "home commute", GoalStatus.focus);
+        await SetsAsync(back, Value(location, "Home"));
+        await RequiresAsync(back, Value(location, "Work"));
+
+        foreach (var day in new[] { 2, 6 })
+        {
+            await CompleteAsync(userId, into, At(day, 8), At(day, 8, 30));
+            await CompleteAsync(userId, work, At(day, 9), At(day, 17));
+            await CompleteAsync(userId, back, At(day, 17), At(day, 17, 30));
+        }
+
+        return (into, work, back);
+    }
+
+    [Fact]
+    public async Task GetAsync_strict_mode_drops_activities_no_scheduled_occurrence_unlocks()
+    {
+        var userId = await CreateUserAsync();
+        var (into, _, _) = await CommuteDayAsync(userId);
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        // Only the leg that starts from the default value is possible. The other two are gated on a
+        // Location nothing on the day ever sets, and a suggestion is not something the day holds.
+        Assert.Equal(into.Id, Assert.Single(recs).Activity.Id);
+    }
+
+    [Fact]
+    public async Task GetAsync_chained_mode_lets_a_suggestion_unlock_the_next()
+    {
+        var userId = await CreateUserAsync();
+        var (into, work, back) = await CommuteDayAsync(userId);
+
+        var recs = await _ctx.RecommendationService.GetAsync(
+            userId, new DateOnly(2026, 7, 9), Now, chain: true);
+
+        // The whole chain, each leg at its own habitual time, and each one possible only because the
+        // one before it was placed. Strict mode answers the first line of this and nothing else.
+        Assert.Equal(3, recs.Count);
+        var byId = recs.ToDictionary(r => r.Activity.Id);
+        Assert.Equal(At(9, 8), byId[into.Id].SuggestedStartAt);
+        Assert.Equal(At(9, 9), byId[work.Id].SuggestedStartAt);
+        Assert.Equal(At(9, 17), byId[back.Id].SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_chained_suggestion_names_what_it_is_standing_on()
+    {
+        var userId = await CreateUserAsync();
+        var (into, work, _) = await CommuteDayAsync(userId);
+
+        var recs = await _ctx.RecommendationService.GetAsync(
+            userId, new DateOnly(2026, 7, 9), Now, chain: true);
+
+        // The leg that was possible on its own is a plain suggestion; the one behind it is not, and
+        // has to say so or the calendar draws a slot the user cannot actually take.
+        Assert.Null(recs.Single(r => r.Activity.Id == into.Id).UnlockedBy);
+        Assert.Equal(
+            ["work commute"],
+            recs.Single(r => r.Activity.Id == work.Id).UnlockedBy);
+    }
+
+    [Fact]
+    public async Task GetAsync_chained_mode_still_drops_what_nothing_can_unlock()
+    {
+        var userId = await CreateUserAsync();
+        var location = await AddStateAsync(userId, "Location", "Home", "Work", "Abroad");
+
+        // Requires a value no activity produces, so no amount of speculation reaches it. Chaining
+        // widens what a requirement is measured against; it is not an off switch for the gate.
+        var trip = await AddActivityAsync(userId, "sightseeing", GoalStatus.focus);
+        await RequiresAsync(trip, Value(location, "Abroad"));
+
+        var recs = await _ctx.RecommendationService.GetAsync(
+            userId, new DateOnly(2026, 7, 9), Now, chain: true);
+
+        Assert.Empty(recs);
+    }
+
+    [Fact]
+    public async Task GetAsync_chained_mode_matches_strict_mode_when_nothing_is_gated()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "focus task", GoalStatus.focus);
+        await AddActivityAsync(userId, "active task", GoalStatus.active);
+
+        var strict = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+        var chained = await _ctx.RecommendationService.GetAsync(userId, Today, Now, chain: true);
+
+        // No requirements anywhere means chaining has nothing to fold in, and the toggle must not be
+        // visible in the output at all - same order, same slots, no UnlockedBy.
+        Assert.Equal(
+            strict.Select(r => (r.Activity.Id, r.SuggestedStartAt)),
+            chained.Select(r => (r.Activity.Id, r.SuggestedStartAt)));
+        Assert.All(chained, r => Assert.Null(r.UnlockedBy));
+    }
+
+    [Fact]
+    public async Task GetAsync_chained_mode_keeps_a_real_occurrence_ahead_of_a_speculative_one()
+    {
+        var userId = await CreateUserAsync();
+        var location = await AddStateAsync(userId, "Location", "Home", "Work");
+
+        // Already at work from 08:30 - a fact, not a proposal. The suggestion that would also have
+        // set Location is redundant, and what it unlocks must not be attributed to it.
+        var into = await AddActivityAsync(userId, "commute in");
+        await SetsAsync(into, Value(location, "Work"));
+        await AddOccurrenceAsync(userId, into, startAt: At(9, 8), endAt: At(9, 8, 30));
+
+        var work = await AddActivityAsync(userId, "work", GoalStatus.focus);
+        await RequiresAsync(work, Value(location, "Work"));
+
+        var recs = await _ctx.RecommendationService.GetAsync(
+            userId, new DateOnly(2026, 7, 9), Now, chain: true);
+
+        var rec = Assert.Single(recs);
+        Assert.Equal(At(9, 8, 30), rec.SuggestedStartAt);
+        Assert.Null(rec.UnlockedBy);
+    }
 }

@@ -1,5 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
+import type { SuggestionMode } from '@/store/suggestionMode'
 import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityStateEffect, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile, State, StateSnapshot } from './types'
 
 export class ApiError extends Error {
@@ -284,9 +285,15 @@ export const stateValuesApi = {
 }
 
 export const recommendationsApi = {
-  list: (date?: string) => {
+  /**
+   * `chained` lets a placed suggestion set its states for the ones after it, so a day can be
+   * proposed from an empty schedule. It is a view of the same day rather than a stored preference,
+   * which is why it belongs in the query key and not in settings.
+   */
+  list: (date?: string, mode: SuggestionMode = 'strict') => {
     const q = new URLSearchParams()
     if (date) q.set('date', date)
+    if (mode === 'chained') q.set('chain', 'true')
     return request<Recommendation[]>(`/api/recommendations${q.size ? `?${q}` : ''}`)
   },
 }

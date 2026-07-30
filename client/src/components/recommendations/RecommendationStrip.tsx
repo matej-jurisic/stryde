@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarPlus, History, Plus, Sparkles, X } from 'lucide-react'
+import { CalendarPlus, History, Link2, Plus, Sparkles, X } from 'lucide-react'
 import { occurrencesApi, recommendationsApi } from '@/lib/api'
 import type { Activity, GoalStatus, Occurrence, Recommendation } from '@/lib/types'
 import { toastError } from '@/store/toasts'
+import { useSuggestionMode } from '@/store/suggestionMode'
 import { Badge } from '@/components/ui/Badge'
 import { ActivityHistoryModal, statsOf, type RecommendationStats } from '@/components/activities/ActivityHistoryModal'
 
@@ -104,6 +105,35 @@ function formatDuration(o: Occurrence): string | null {
 }
 
 /**
+ * Flips the whole app between measuring state requirements against the day as it stands and letting
+ * suggestions unlock each other. Lives next to the suggestions rather than in Settings because the
+ * answer it changes is on screen: you flip it to see the other reading of the same day.
+ */
+export function SuggestionModeToggle({ className = '' }: { className?: string }) {
+  const { mode, setMode } = useSuggestionMode()
+  const chained = mode === 'chained'
+
+  return (
+    <button
+      onClick={() => setMode(chained ? 'strict' : 'chained')}
+      aria-pressed={chained}
+      title={
+        chained
+          ? 'Chained: suggestions may unlock each other'
+          : 'Direct: only what today already allows'
+      }
+      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors ${
+        chained
+          ? 'border-primary bg-primary/10 text-primary'
+          : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground'
+      } ${className}`}
+    >
+      <Link2 className="h-3.5 w-3.5" strokeWidth={2} />
+    </button>
+  )
+}
+
+/**
  * Reaches the activity's track record without leaving the day being planned. Recedes until the row is
  * hovered, but never disappears: on touch there is no hover to reveal it with.
  */
@@ -198,6 +228,14 @@ function ActivityRecItem({
               <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{meta}</span>
             )}
           </div>
+          {/* A chained suggestion is conditional, and the slot alone does not say so. Named above the
+              cadence reason because it is the stronger caveat: the rest assumes you do this first. */}
+          {rec.unlockedBy && rec.unlockedBy.length > 0 && (
+            <p className="mt-0.5 flex items-center gap-1 text-[11px] leading-tight text-primary/80">
+              <Link2 className="h-2.5 w-2.5 shrink-0" strokeWidth={2.5} />
+              <span className="truncate">After {rec.unlockedBy.join(', ')}</span>
+            </p>
+          )}
           {reason && (
             <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground/80">{reason}</p>
           )}
@@ -264,9 +302,13 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
     onError: (err) => toastError(err, 'Could not schedule that.'),
   })
 
+  // The mode is part of the key, not a refetch trigger: both readings of the day stay cached, so
+  // flipping back and forth costs one request each and then nothing.
+  const mode = useSuggestionMode((s) => s.mode)
+
   const { data: recommendations = [], isLoading } = useQuery({
-    queryKey: ['recommendations', date],
-    queryFn: () => recommendationsApi.list(date),
+    queryKey: ['recommendations', date, mode],
+    queryFn: () => recommendationsApi.list(date, mode),
     staleTime: 30 * 1000,
   })
 
@@ -380,7 +422,10 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
       {/* Desktop sidebar */}
       <section className="hidden md:flex w-80 shrink-0 flex-col overflow-hidden border-r border-border bg-background">
         <div className="shrink-0 px-5 py-5">
-          <h1 className="text-lg font-semibold text-foreground">Suggestions</h1>
+          <div className="flex items-start justify-between gap-2">
+            <h1 className="text-lg font-semibold text-foreground">Suggestions</h1>
+            <SuggestionModeToggle className="mt-0.5" />
+          </div>
           <p className="mt-0.5 text-sm text-muted-foreground">
             What to add to your schedule {isNamedDay ? label : `on ${label}`}.
           </p>
@@ -401,12 +446,15 @@ export function RecommendationPanel({ date, today, onOccurrenceClick, onActivity
                 <span className="text-sm font-semibold text-foreground">Suggestions</span>
                 <span className="text-xs text-muted-foreground">{label}</span>
               </div>
-              <button
-                onClick={onMobileClose}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <X className="h-4 w-4" strokeWidth={2} />
-              </button>
+              <div className="flex items-center gap-1.5">
+                <SuggestionModeToggle />
+                <button
+                  onClick={onMobileClose}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-4 w-4" strokeWidth={2} />
+                </button>
+              </div>
             </div>
             <div className="scroll-slim flex-1 overflow-y-auto px-3 pb-6">{renderBody()}</div>
           </div>

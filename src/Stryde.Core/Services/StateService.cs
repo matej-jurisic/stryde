@@ -254,7 +254,13 @@ public class StateService(StrydeDbContext db)
             .ToListAsync();
 
         var valueById = states.SelectMany(s => s.Values).ToDictionary(v => v.Id);
-        var effectsByActivity = effects.GroupBy(e => e.ActivityId).ToDictionary(g => g.Key, g => g.ToList());
+        var effectsByActivity = effects
+            .GroupBy(e => e.ActivityId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Where(e => valueById.ContainsKey(e.StateValueId))
+                    .Select(e => new StateEffect(e.StateId, e.StateValueId, e.DurationMinutes))
+                    .ToList());
 
         // Sorted here rather than inside the fold so equal instants break on creation order, giving a
         // day with two setters landing on the same minute a stable answer.
@@ -270,20 +276,20 @@ public class StateService(StrydeDbContext db)
         foreach (var (at, _, activityId, occurrenceId) in sources)
             foreach (var effect in effectsByActivity[activityId])
             {
-                if (!valueById.TryGetValue(effect.StateValueId, out var value)) continue;
                 if (!settersByState.TryGetValue(effect.StateId, out var list))
                     settersByState[effect.StateId] = list = [];
                 // The duration comes off the effect, not the value: the same "Tired: Yes" lasts ten
                 // hours after a run and two days after a hike.
-                list.Add(new StateSetter(at, value.Id, effect.DurationMinutes));
-                origins.Add(new StateSetterOrigin(effect.StateId, value.Id, at, occurrenceId));
+                list.Add(new StateSetter(at, effect.StateValueId, effect.DurationMinutes));
+                origins.Add(new StateSetterOrigin(effect.StateId, effect.StateValueId, at, occurrenceId));
             }
+
+        var defaultValueByState = states.ToDictionary(
+            s => s.Id, s => s.Values.FirstOrDefault(v => v.IsDefault)?.Id);
 
         var timelines = states.ToDictionary(
             s => s.Id,
-            s => StateTimeline.Build(
-                s.Values.FirstOrDefault(v => v.IsDefault)?.Id,
-                settersByState.GetValueOrDefault(s.Id) ?? []));
+            s => StateTimeline.Build(defaultValueByState[s.Id], settersByState.GetValueOrDefault(s.Id) ?? []));
 
         var requirementsByActivity = requirements
             .Where(r => valueById.ContainsKey(r.StateValueId))
@@ -297,7 +303,12 @@ public class StateService(StrydeDbContext db)
         // States keep their creation order, which is the order the states admin and every requirement
         // string use - so a snapshot lists them the same way the rest of the app does.
         return new StateContext(
-            states.OrderBy(s => s.CreatedAt).ToList(), timelines, requirementsByActivity, origins);
+            states.OrderBy(s => s.CreatedAt).ToList(), timelines, requirementsByActivity, origins)
+        {
+            EffectsByActivity = effectsByActivity,
+            SettersByState = settersByState,
+            DefaultValueByState = defaultValueByState,
+        };
     }
 
     /// <summary>
@@ -339,9 +350,53 @@ public sealed record StateContext(
     Dictionary<Guid, List<(Guid StateId, HashSet<Guid> Allowed)>> RequirementsByActivity,
     List<StateSetterOrigin> Setters)
 {
+    /// <summary>
+    /// What each activity does to the states, keyed by activity. The <see cref="Timelines"/> above are
+    /// this applied to occurrences that exist; kept separately so a caller can ask what would happen if
+    /// one more did - which is what chained suggestions are.
+    /// </summary>
+    public Dictionary<Guid, List<StateEffect>> EffectsByActivity { get; init; } = [];
+
+    /// <summary>The real setters behind <see cref="Timelines"/>, in the order they were folded.</summary>
+    public Dictionary<Guid, List<StateSetter>> SettersByState { get; init; } = [];
+
+    /// <summary>Each state's default value, or null for a state with no values at all.</summary>
+    public Dictionary<Guid, Guid?> DefaultValueByState { get; init; } = [];
+
     /// <summary>A user with no states: no timeline to read and nothing gated.</summary>
     public static StateContext Empty { get; } = new([], [], [], []);
+
+    /// <summary>
+    /// The timelines rebuilt with extra setters folded in, for asking what the day would look like if
+    /// something that has not happened did. Untouched states are shared with <see cref="Timelines"/>
+    /// rather than rebuilt - a timeline is immutable once folded.
+    /// <para>
+    /// The extras go in after the real setters, so two landing on the same instant resolve in favour of
+    /// the speculative one. That is the same rule the real fold uses (later setter wins) applied to the
+    /// only ordering that makes sense here: the hypothetical is the newer decision.
+    /// </para>
+    /// </summary>
+    public Dictionary<Guid, StateTimeline> Rebuild(IEnumerable<(Guid StateId, StateSetter Setter)> extra)
+    {
+        var byState = extra
+            .GroupBy(x => x.StateId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Setter).ToList());
+        if (byState.Count == 0) return Timelines;
+
+        var rebuilt = new Dictionary<Guid, StateTimeline>(Timelines);
+        foreach (var (stateId, setters) in byState)
+            rebuilt[stateId] = StateTimeline.Build(
+                DefaultValueByState.GetValueOrDefault(stateId),
+                (SettersByState.GetValueOrDefault(stateId) ?? []).Concat(setters));
+
+        return rebuilt;
+    }
 }
+
+/// <summary>
+/// One state change an activity causes, flattened off its <see cref="ActivityStateEffect"/> row.
+/// </summary>
+public sealed record StateEffect(Guid StateId, Guid StateValueId, int? DurationMinutes);
 
 /// <summary>
 /// Which occurrence produced a <see cref="StateSetter"/>. The fold itself has no use for this - it

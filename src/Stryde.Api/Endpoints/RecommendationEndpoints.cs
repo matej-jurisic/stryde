@@ -9,13 +9,16 @@ public static class RecommendationEndpoints
     {
         app.MapGet("/api/recommendations", async (
             DateOnly? date,
+            bool? chain,
             ClaimsPrincipal principal,
             RecommendationService svc) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
             // No date means "the user's current day" — the service resolves it in the user's timezone.
-            var items = await svc.GetAsync(userId.Value, date);
+            // chain is a per-request view of the same day, not a stored preference: the client holds
+            // which mode it is looking at and both answers cache side by side.
+            var items = await svc.GetAsync(userId.Value, date, chain: chain ?? false);
             return Results.Ok(items);
         }).RequireAuthorization();
     }

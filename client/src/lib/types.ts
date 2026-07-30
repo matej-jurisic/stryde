@@ -176,6 +176,11 @@ export interface Recommendation {
    * activity's habitual time is taken and every opening is too far from it.
    */
   suggestedStartAt: string | null
+  /**
+   * Chained mode only: the other suggestions this one needs first, by title. Null means it stands on
+   * its own - which is the difference between a slot you can take now and one that is conditional.
+   */
+  unlockedBy: string[] | null
 }
 
 export interface InsightsActivity {

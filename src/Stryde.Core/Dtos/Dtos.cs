@@ -301,7 +301,10 @@ public sealed record RecommendationDto(
     int? DaysSinceLast,
     double? MedianGapDays,
     int? PatternCount,
-    DateTimeOffset? SuggestedStartAt);
+    DateTimeOffset? SuggestedStartAt,
+    // Chained mode only: the suggestions this one is standing on, by title. Null means it would have
+    // been suggested anyway - which is what the UI needs to tell a real opening from a conditional one.
+    List<string>? UnlockedBy = null);
 
 // Insights — server-side day bucketing; floating occurrences (no StartAt) are excluded.
 // Time = EndAt-StartAt when both set, else DurationMinutes, else 0.

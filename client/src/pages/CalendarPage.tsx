@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Menu, Plus, LayoutGrid, CalendarCheck, Sparkles } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Menu, Plus, LayoutGrid, CalendarCheck, Link2, Sparkles } from 'lucide-react'
 import { useQuery, useQueries, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { occurrencesApi, settingsApi, insightsApi, recommendationsApi, goalsApi, categoriesApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
+import { useSuggestionMode } from '@/store/suggestionMode'
 import type { Activity, Occurrence, InsightsFreeRange } from '@/lib/types'
 import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
 import { useStates } from '@/lib/useStates'
@@ -289,6 +290,8 @@ interface SuggestionGhost {
   activity: Activity
   startAt: string
   durationMinutes: number | null
+  /** Chained mode: the suggestions this slot assumes you take first. Null when it stands alone. */
+  unlockedBy: string[] | null
   /** Carried through so the history dialog quotes the same cadence figures the panel does. */
   stats: RecommendationStats
 }
@@ -311,6 +314,7 @@ function SuggestionBlock({
   onHistory: (g: SuggestionGhost) => void
 }) {
   const { ghost, col, totalCols, topPx, heightPx } = layout
+  const chained = !!ghost.unlockedBy?.length
   const accentColor = ghost.activity.category?.color ?? 'var(--color-primary)'
   const isHex = accentColor.startsWith('#')
   const accentFaded = isHex ? `${accentColor}12` : `color-mix(in srgb, ${accentColor} 7%, transparent)`
@@ -374,15 +378,27 @@ function SuggestionBlock({
         onPointerMove={handlePointerMove}
         onPointerUp={clearPress}
         onPointerCancel={clearPress}
-        title={`Suggested: ${ghost.activity.title} at ${timeLabel(ghost.startAt)} (right-click or hold for history)`}
-        className="absolute inset-0 overflow-hidden rounded-[4px] text-left opacity-70 transition-opacity hover:opacity-100"
+        title={
+          chained
+            ? `Suggested: ${ghost.activity.title} at ${timeLabel(ghost.startAt)}, after ${ghost.unlockedBy!.join(', ')} (right-click or hold for history)`
+            : `Suggested: ${ghost.activity.title} at ${timeLabel(ghost.startAt)} (right-click or hold for history)`
+        }
+        className={`absolute inset-0 overflow-hidden rounded-[4px] text-left transition-opacity hover:opacity-100 ${
+          chained ? 'opacity-50' : 'opacity-70'
+        }`}
         style={{
-          border: `1.5px dotted ${accentColor}`,
+          // A chained ghost is conditional on another ghost, so it reads one step fainter than one
+          // the day already allows. There is no room on a 20px block for words to say it.
+          border: `1.5px ${chained ? 'dashed' : 'dotted'} ${accentColor}`,
           background: `linear-gradient(${accentFaded}, ${accentFaded}), var(--color-card)`,
         }}
       >
         <div className={`flex items-center gap-1 px-1.5 ${compact ? 'py-px' : 'py-0.5'}`}>
-          <Sparkles className="h-2.5 w-2.5 shrink-0" strokeWidth={2.5} style={{ color: accentColor }} />
+          {chained ? (
+            <Link2 className="h-2.5 w-2.5 shrink-0" strokeWidth={2.5} style={{ color: accentColor }} />
+          ) : (
+            <Sparkles className="h-2.5 w-2.5 shrink-0" strokeWidth={2.5} style={{ color: accentColor }} />
+          )}
           <p
             className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] font-medium ${compact ? 'leading-none' : 'leading-tight'}`}
             style={{ color: accentColor }}
@@ -1424,15 +1440,18 @@ export function CalendarPage() {
     return map
   }, [emptyProfile])
 
-  // Suggested slots for every visible day, on the same ['recommendations', date] cache the
-  // panel uses - so the panel's own day costs no extra request. Past days come back with no
-  // slot (the server only fits suggestions into remaining free time), and therefore no ghosts.
+  // Suggested slots for every visible day, on the same ['recommendations', date, mode] cache the
+  // panel uses - so the panel's own day costs no extra request, and the toggle in its header moves
+  // the grid too. Past days come back with no slot (the server only fits suggestions into remaining
+  // free time), and therefore no ghosts.
+  const suggestionMode = useSuggestionMode((s) => s.mode)
+
   const suggestionQueries = useQueries({
     queries: days.map((day) => {
       const date = formatDateInput(day)
       return {
-        queryKey: ['recommendations', date],
-        queryFn: () => recommendationsApi.list(date),
+        queryKey: ['recommendations', date, suggestionMode],
+        queryFn: () => recommendationsApi.list(date, suggestionMode),
         staleTime: 30 * 1000,
         enabled: showSuggestions,
       }
@@ -1448,6 +1467,7 @@ export function CalendarPage() {
               activity: rec.activity,
               startAt: rec.suggestedStartAt,
               durationMinutes: rec.typicalDurationMinutes,
+              unlockedBy: rec.unlockedBy,
               stats: statsOf(rec),
             }]
           : [],

@@ -98,7 +98,7 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   timezone offset by `DayBoundaryTime`. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
   Key methods: `OccurrenceDay(Occurrence, DayContext)`, `IsOverdue(Occurrence, DayContext, DateTimeOffset)`.
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
-  Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split — `Type`, the scheduling profile, `SetsStateValues` — `(StateValueId, DurationMinutes)` pairs — and flat `RequiredStateValueIds`), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (always an activity to schedule; `SuggestedStartAt` nullable), `CategoryDto`/`CategorySummaryDto`, `StateDto` (values nested), `CheckpointDto` (has `Size` enum — not numeric progress).
+  Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split — `Type`, the scheduling profile, `SetsStateValues` — `(StateValueId, DurationMinutes)` pairs — and flat `RequiredStateValueIds`), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (always an activity to schedule; `SuggestedStartAt` nullable, `UnlockedBy` set only in chained mode), `CategoryDto`/`CategorySummaryDto`, `StateDto` (values nested), `CheckpointDto` (has `Size` enum — not numeric progress).
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
 - `Services/RecommendationService.cs` — `committedOccurrences` is the one list every day-contents
   decision reads (suppression, type caps, free slots, state setters), so what is filtered out of it is
@@ -114,6 +114,16 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   `StateService.LoadContextAsync` (`StateContext.Empty` when the user has no states, the case that must
   cost nothing). `AllowedIntervals` intersects the groups over the day; `StateAllows` is the gate;
   `AllowedSlots` masks `freeSlots` per activity and every placement branch draws candidates from it.
+  The `chain` parameter picks between two loops over one `candidates` list. Strict places in rank
+  order after filtering; **chained** defers `StateAllows`/`FitsASlot` into the loop (`StateFiltersPass`
+  is the switch), because what a candidate may do depends on where the ones above it landed - each
+  placement calls `FoldIn`, which appends a provisional `StateSetter` and rebuilds the timelines, then
+  the scan **restarts from the top** so a just-unlocked candidate gets its rank back. A pass that
+  places nothing ends it, and the survivors are dropped exactly as strict mode drops them. The closing
+  sweep exists because placement is greedy by rank, not chronological: a setter folded in late can
+  land on a span decided earlier, and that suggestion loses its time rather than being backtracked.
+  `UnlockedBy` is null for anything that would have surfaced anyway - it is what the UI reads to tell a
+  real opening from a conditional one. See `spec.md` → Recommendations → Suggestion mode.
 - `Services/ActivityTypeService.cs` — type CRUD, `ResolveAsync` for the engine, and
   `SeedDefaultsAsync`/`DefaultsFor`, which `AuthService.RegisterAsync` calls (types cannot fall back
   to a built-in table the way `UserSettings` does — the rows *are* the list). Anything seeded must be
@@ -122,7 +132,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   `LoadContextAsync` (the `StateContext` the recommendation engine's gate uses - timelines, per-activity
   requirement groups, and the setters' origins) and `SnapshotAsync` (what every state held at one
   instant and why, for the calendar dialog). `SetsState` is the one predicate for "does this occurrence
-  set state", so the engine and a snapshot can't disagree about it.
+  set state", so the engine and a snapshot can't disagree about it. `StateContext` also carries
+  `EffectsByActivity`/`SettersByState`/`DefaultValueByState` and `Rebuild(extra)`, which folds in
+  setters for things that have **not** happened — the whole of chained suggestions, and the reason the
+  raw setters are kept alongside the already-folded `Timelines`.
   Invariants: exactly one default per state (the first
   value is forced to be it), deleting a value still referenced returns `Conflict`, deleting the default
   promotes the oldest survivor. Value writes return the whole parent `StateDto`, since an invariant can
@@ -181,6 +194,9 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
 - `store/toasts.ts` — Zustand toast store; `toastError(err)` for mutation failures without inline error display.
+- `store/suggestionMode.ts` — `'strict' | 'chained'`, localStorage-backed. Read by the panel and by
+  `CalendarPage`'s ghost queries, which is what makes one toggle move both. It is part of the query
+  key rather than an invalidation trigger, so both readings of a day stay cached.
 - `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field, ConfirmDialog, ActionMenu, Toasts`,
   plus `input.ts` (`inputCls`, the bare input/select treatment; `SettingSection` re-exports it).
 - `components/events/OccurrenceListRow.tsx` — shared occurrence list row (Plan + Categories): optimistic status toggle, action menu, confirmed delete.
@@ -221,6 +237,11 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   between ids and durations. A pick on the state's *default* value gets no duration (it would decay to
   itself), just the words that say why. Changing the unit reinterprets the number rather than
   converting it.
+- `components/recommendations/RecommendationStrip.tsx` — `RecommendationPanel` (desktop column +
+  mobile drawer, rendered by Plan and Calendar) and `SuggestionModeToggle`, which lives in both of its
+  headers. The toggle is in the panel rather than Settings because it changes an answer already on
+  screen; it moves the calendar's ghosts too, via the shared store. A row with `unlockedBy` names what
+  it follows ("After work commute") above its reason line.
 - `components/activities/ActivityHistoryModal.tsx` — read-only "have I been doing this", opened from a
   suggestion: the history icon on a `RecommendationPanel` row, or right-click / 400ms hold on a
   calendar ghost (`SuggestionBlock`, which owns that gesture itself - plain click still schedules).
@@ -295,6 +316,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   (an activity's state requirements decide whether it is suggested at all) **and `['events']`** (occurrences
   embed their activity: its title feeds `effectiveTitle` and its category feeds every row and calendar block's
   colour). After any goal write also invalidate `['goals']`.
+  Suggestions are `['recommendations', date, mode]` (mode from `store/suggestionMode.ts`); every
+  invalidation above uses the `['recommendations']` prefix, so it still covers both modes.
   States live under `['states']`; after a state or value write invalidate `['states']` and `['recommendations']`.
   Insights live under `['insights', period]`; a settings write invalidates `['insights']`, since the
   unaccounted-time mask moves every figure on that page.

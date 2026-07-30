@@ -73,7 +73,15 @@ public class RecommendationService(
 
     /// <param name="date">The day to recommend for; defaults to the user's current day.</param>
     /// <param name="nowUtc">Injectable clock for tests; defaults to the real time.</param>
-    public async Task<List<RecommendationDto>> GetAsync(Guid userId, DateOnly? date = null, DateTimeOffset? nowUtc = null)
+    /// <param name="chain">
+    /// Let suggestions unlock each other. Off, a state requirement is measured against the day as it
+    /// actually stands, so the trip home is impossible on a day whose only trip in is still a
+    /// suggestion. On, each placed suggestion folds its effects into the timelines as if it had
+    /// happened, and the ones it unlocks come with the <see cref="RecommendationDto.UnlockedBy"/> that
+    /// says what they are standing on. See <c>spec.md</c> -> Recommendations.
+    /// </param>
+    public async Task<List<RecommendationDto>> GetAsync(
+        Guid userId, DateOnly? date = null, DateTimeOffset? nowUtc = null, bool chain = false)
     {
         var now = nowUtc ?? DateTimeOffset.UtcNow;
         var ctx = await settings.GetDayContextAsync(userId);
@@ -152,7 +160,11 @@ public class RecommendationService(
 
         // What the user's states held over time, and what each activity needs them to hold. Both are
         // empty for a user who has configured no states, which is the case that has to cost nothing.
-        var (_, stateTimelines, requirementsByActivity, _) = await states.LoadContextAsync(userId, committedOccurrences);
+        var stateCtx = await states.LoadContextAsync(userId, committedOccurrences);
+        var requirementsByActivity = stateCtx.RequirementsByActivity;
+        // Reassigned by FoldIn below, which is the whole of chained mode: everything that reads the
+        // day's states reads this one variable, so a provisional setter is visible to all of it at once.
+        var stateTimelines = stateCtx.Timelines;
 
         // Per-activity timing and cadence stats from windowed completed history
         var statsByActivity = completedHistory
@@ -183,6 +195,16 @@ public class RecommendationService(
             var civil = InstantForMinutes(EarliestFallbackStart.Hour * 60 + EarliestFallbackStart.Minute);
             earliestFallback = civil > slotStart && civil < endOfDay ? civil : slotStart;
         }
+
+        // Chained mode costs a multi-pass scan and buys nothing when no activity is gated on a state,
+        // and a past day has no placement to chain off, so both collapse back to the strict path.
+        var chaining = chain && requirementsByActivity.Count > 0 && freeSlots is not null;
+
+        // Effects of suggestions already placed this request, folded in as though they had happened.
+        // Empty in strict mode, which is what makes every state-aware helper below answer identically
+        // in both modes until the first FoldIn.
+        var provisional = new List<(Guid StateId, StateSetter Setter)>();
+        var provisionalBy = new List<(Guid StateId, DateTimeOffset At, string Title)>();
 
         var allowedIntervalCache = new Dictionary<Guid, List<(DateTimeOffset Start, DateTimeOffset End)>>();
 
@@ -217,6 +239,47 @@ public class RecommendationService(
             requirementsByActivity.ContainsKey(activityId)
                 ? Intervals.Intersect(freeSlots!, AllowedIntervals(activityId))
                 : freeSlots!;
+
+        // Records a placed suggestion's effects as if it had happened, at the instant its span ends -
+        // the same rule a real setter follows, since you are at work once the commute in *finishes*.
+        // Everything derived from the old timelines is dropped, because the point of chaining is that
+        // the next candidate gets to see a different day than the last one did.
+        void FoldIn(Activity activity, DateTimeOffset endsAt)
+        {
+            if (!stateCtx.EffectsByActivity.TryGetValue(activity.Id, out var effects) || effects.Count == 0)
+                return;
+
+            foreach (var e in effects)
+            {
+                provisional.Add((e.StateId, new StateSetter(endsAt, e.StateValueId, e.DurationMinutes)));
+                provisionalBy.Add((e.StateId, endsAt, activity.Title));
+            }
+
+            stateTimelines = stateCtx.Rebuild(provisional);
+            allowedIntervalCache.Clear();
+        }
+
+        // Which placed suggestions this one is standing on: per state it constrains, whichever
+        // provisional setter put that state into the value it needs at the moment it was placed. A
+        // suggestion that got unlocked but found no slot has no such moment, so it names every
+        // provisional setter on a state it requires - still the honest answer to "why is this here".
+        // Null in strict mode, and null for anything that would have been suggested anyway.
+        List<string>? UnlockedBy(Guid activityId, DateTimeOffset? at)
+        {
+            if (provisionalBy.Count == 0) return null;
+            if (!requirementsByActivity.TryGetValue(activityId, out var groups)) return null;
+
+            var titles = new List<string>();
+            foreach (var (stateId, _) in groups)
+            {
+                var since = at is { } instant ? stateTimelines[stateId].SegmentAt(instant).Since : null;
+                titles.AddRange(provisionalBy
+                    .Where(p => p.StateId == stateId && (at is null || p.At == since))
+                    .Select(p => p.Title));
+            }
+
+            return titles.Count == 0 ? null : titles.Distinct().ToList();
+        }
 
         // An activity needs a gap big enough for whichever is larger: what it usually takes, or the
         // floor its type declares. Zero on both sides means "no evidence, no floor" - let it through.
@@ -261,7 +324,9 @@ public class RecommendationService(
         // it caps how many ghosts one gap can absorb, rather than stacking them on one slot.
         // Every candidate comes from AllowedSlots, so a state requirement is a hard mask: the rules
         // below choose *within* what the requirement permits and can never step outside it.
-        DateTimeOffset? PlaceActivity(Guid activityId, Guid? typeId)
+        // Returns the whole span rather than the start: chained mode needs the end, which is where a
+        // setter fires, and deriving it again at the call site would mean recomputing `needed`.
+        (DateTimeOffset Start, DateTimeOffset End)? PlaceActivity(Guid activityId, Guid? typeId)
         {
             if (freeSlots is null) return null;
             statsByActivity.TryGetValue(activityId, out var s);
@@ -317,8 +382,11 @@ public class RecommendationService(
                         .FirstOrDefault();
             }
 
-            if (chosen is { } c) placedSpans.Add((c, c.AddMinutes(needed)));
-            return chosen;
+            if (chosen is not { } c) return null;
+
+            var span = (Start: c, End: c.AddMinutes(needed));
+            placedSpans.Add(span);
+            return span;
         }
 
         // Overdueness relative to the activity's own rhythm: days since last completion divided by
@@ -380,10 +448,16 @@ public class RecommendationService(
         var goalTierActivities = new List<(int tier, Activity activity)>();
         var seenActivityIds = new HashSet<Guid>();
 
+        // The two state-dependent filters, held back in chained mode: what a candidate is allowed to do
+        // there depends on what has been placed above it, which is not known until the placement loop
+        // runs. Everything else about a candidate is settled here as before.
+        bool StateFiltersPass(Activity a) =>
+            chaining || (StateAllows(a.Id) && FitsASlot(a.Id, a.ActivityTypeId));
+
         void AddActivity(int tier, Activity activity)
         {
             if (seenActivityIds.Add(activity.Id) && !todayActivityIds.Contains(activity.Id)
-                && StateAllows(activity.Id) && FitsASlot(activity.Id, activity.ActivityTypeId) && PastCooldown(activity))
+                && PastCooldown(activity) && StateFiltersPass(activity))
                 goalTierActivities.Add((tier, activity));
         }
 
@@ -426,12 +500,14 @@ public class RecommendationService(
 
             habitRecs = patternedActivityIds
                 .Select(p => activities.FirstOrDefault(a => a.Id == p.ActivityId))
-                .Where(a => a is not null && StateAllows(a.Id) && FitsASlot(a.Id, a.ActivityTypeId) && PastCooldown(a))
+                .Where(a => a is not null && PastCooldown(a) && StateFiltersPass(a))
                 .Select(a => a!)
                 .ToList();
         }
 
-        RecommendationDto MakeActivityRec(int tier, Activity activity)
+        // Takes the placement rather than doing it: chained mode needs the span's end before the DTO
+        // exists, and placement must happen exactly once per activity however the caller is looping.
+        RecommendationDto MakeActivityRec(int tier, Activity activity, DateTimeOffset? start)
         {
             statsByActivity.TryGetValue(activity.Id, out var s);
             patternCountById.TryGetValue(activity.Id, out var patternCount);
@@ -440,7 +516,8 @@ public class RecommendationService(
                 s is null ? null : today.DayNumber - s.LastDoneDay.DayNumber,
                 s?.MedianGapDays,
                 patternCount == 0 ? null : patternCount,
-                PlaceActivity(activity.Id, activity.ActivityTypeId));
+                start,
+                UnlockedBy(activity.Id, start));
         }
 
         // A type's MaxPerDay is a ceiling on the whole day, seeded with what is already scheduled.
@@ -461,19 +538,73 @@ public class RecommendationService(
         // Tiers 1/2 rank by overdueness within the tier; tier 3 keeps its frequency order (spec).
         // Order is materialised first because placement is stateful - each suggestion consumes the
         // gap it takes, so the best-ranked activity must get first pick of the day. The type cap is
-        // checked in the same pass and before MakeActivityRec, so a capped-out activity does not
-        // consume a slot on its way to being dropped.
-        var ranked = goalTierActivities
+        // checked before MakeActivityRec, so a capped-out activity does not consume a slot on its
+        // way to being dropped.
+        var candidates = goalTierActivities
             .OrderBy(x => x.tier).ThenByDescending(x => Score(x.activity))
+            .Concat(habitRecs.Select(a => (tier: 3, activity: a)))
             .ToList();
 
-        foreach (var (tier, activity) in ranked)
-            if (TakeTypeSlot(activity.ActivityTypeId))
-                result.Add(MakeActivityRec(tier, activity));
+        if (!chaining)
+        {
+            foreach (var (tier, activity) in candidates)
+                if (TakeTypeSlot(activity.ActivityTypeId))
+                    result.Add(MakeActivityRec(
+                        tier, activity, PlaceActivity(activity.Id, activity.ActivityTypeId)?.Start));
 
-        foreach (var a in habitRecs)
-            if (TakeTypeSlot(a.ActivityTypeId))
-                result.Add(MakeActivityRec(3, a));
+            return result;
+        }
+
+        // Chained placement. The state filters can only be applied here, one candidate at a time,
+        // because what a candidate is allowed to do depends on where the ones above it landed. After
+        // every placement the scan restarts from the top, so an activity that was impossible a moment
+        // ago gets its rank back rather than being reached only after everything below it.
+        // A pass that places nothing means the rest are blocked by states nothing on the day can move,
+        // and they are dropped exactly as strict mode drops them.
+        var placedByActivity = new Dictionary<Guid, (DateTimeOffset Start, DateTimeOffset End)>();
+        var pending = candidates.ToList();
+        bool progressed;
+        do
+        {
+            progressed = false;
+            for (var i = 0; i < pending.Count; i++)
+            {
+                var (tier, activity) = pending[i];
+                if (!StateAllows(activity.Id) || !FitsASlot(activity.Id, activity.ActivityTypeId)) continue;
+
+                pending.RemoveAt(i);
+                progressed = true;
+                if (!TakeTypeSlot(activity.ActivityTypeId)) break;
+
+                var span = PlaceActivity(activity.Id, activity.ActivityTypeId);
+                result.Add(MakeActivityRec(tier, activity, span?.Start));
+                // Only a suggestion with a slot can set state: a setter fires at an instant, and one
+                // the day had no room for never claimed one.
+                if (span is { } s)
+                {
+                    placedByActivity[activity.Id] = s;
+                    FoldIn(activity, s.End);
+                }
+                break;
+            }
+        } while (progressed);
+
+        // Placement is greedy by rank, not chronological, so a setter folded in late can land on top of
+        // a suggestion placed earlier - nothing stops the evening's trip home being decided after the
+        // afternoon's work block. Rather than backtrack, such a suggestion keeps its place in the list
+        // and loses its time, which is the answer the engine already gives when a day has no room for
+        // one. Recomputed against the final timelines, so this is the state of the world as proposed.
+        allowedIntervalCache.Clear();
+        for (var i = 0; i < result.Count; i++)
+        {
+            var rec = result[i];
+            if (!placedByActivity.TryGetValue(rec.Activity.Id, out var span)) continue;
+            if (!requirementsByActivity.ContainsKey(rec.Activity.Id)) continue;
+            if (AllowedIntervals(rec.Activity.Id).Any(iv => span.Start >= iv.Start && span.End <= iv.End))
+                continue;
+
+            result[i] = rec with { SuggestedStartAt = null };
+        }
 
         return result;
     }

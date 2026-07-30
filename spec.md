@@ -260,7 +260,9 @@ Requirements are **suggestion-only**. Nothing here ever blocks scheduling someth
 - **The gate.** An activity whose requirements are never satisfied anywhere on the target day is
   dropped from every tier, however overdue it is. This is the only filter keyed off the day's
   *contents* rather than the activity's own history, and the only one that can silence an activity
-  that is genuinely due.
+  that is genuinely due. What "the day's contents" means is the one thing the suggestion mode
+  changes: in **chained** mode the suggestions already placed count too. See Recommendations →
+  Suggestion mode.
 - **The mask.** Where requirements *are* satisfied, those stretches are intersected with the day's
   free slots, and every placement rule chooses within the result. The mask is hard and the window
   stays soft: a habitual start time still beats a type's window, but neither steps outside the mask.
@@ -277,8 +279,9 @@ right after work finishes.
 two suggestions would break the dedupe set, the per-activity cooldown, and the already-scheduled
 exclusion, all of which assume one suggestion per activity. Separate legs also give each a habitual
 time that means something: a single commute activity has a *bimodal* start-time history. Because each
-leg requires the state the other sets, the pairing falls out of the data - the return leg cannot be
-offered until the outbound one is on the calendar.
+leg requires the state the other sets, the pairing falls out of the data - in **direct** mode the
+return leg cannot be offered until the outbound one is on the calendar, and in **chained** mode it is
+offered behind it, marked with what it follows.
 
 **Invariants.** Exactly one default per state; the first value created is forced to be it. Clearing
 the default flag without naming a replacement is refused. Deleting a value an activity still sets or
@@ -439,9 +442,9 @@ huge=8, and 0 when there are no checkpoints. It is computed client-side from the
 
 ## Recommendations
 
-`GET /api/recommendations?date=YYYY-MM-DD` (date optional, defaults to the user's current day)
-answers: *what should I add to this day's schedule?* Every tier returns **activities**, never
-occurrences.
+`GET /api/recommendations?date=YYYY-MM-DD&chain=true` (both optional; the date defaults to the user's
+current day, `chain` to false) answers: *what should I add to this day's schedule?* Every tier returns
+**activities**, never occurrences.
 
 1. Activities on **Focus** goals
 2. Activities on **Active** goals
@@ -454,7 +457,8 @@ An activity appears at most once, in its highest tier. Dropped from all tiers:
   much as planning it. A skipped occurrence does not exclude, matching how skipped time frees up.
 - Activities on **Bench** or **Closed** goals.
 - Activities flagged **exclude from suggestions**.
-- Activities whose **state requirements** are satisfied nowhere on the target day.
+- Activities whose **state requirements** are satisfied nowhere on the target day (see
+  *Suggestion mode* below for what "the target day" contains).
 - Activities inside their type's **cooldown** (skipped when there is no completed history, since that
   figure comes from the creation date and says nothing about rest).
 - Activities that **fit no free gap**: the gap must hold whichever is larger, the median duration or
@@ -553,6 +557,31 @@ same empty day and they all land on the first gap that fits.
 The slot is null on past days, when nothing fits, when a habit-anchored activity is displaced too
 far, and when state requirements leave no room. The recommendation still surfaces, without a time.
 
+### Suggestion mode
+
+A state is read off the schedule, and a suggestion is not on the schedule. That leaves two honest
+readings of a day, and the user picks which one they are looking at. The mode is per device
+(`localStorage`), not per account, and travels as `chain` on the request, so both readings of a day
+cache side by side and flipping between them costs nothing after the first look.
+
+- **Direct** (default) measures every requirement against the day as it actually stands. On a day
+  with nothing scheduled, only activities whose requirements hold from the day's opening values are
+  suggested at all: the trip home is impossible, because the trip in is still only a suggestion.
+- **Chained** lets each placed suggestion set its states as though it had happened, at the end of the
+  slot it was given - the same instant a real occurrence would fire at. The suggestions this unlocks
+  carry `unlockedBy`, the titles of the ones they are standing on. A whole ordinary day can be
+  proposed from an empty one: commute in at 08:00, work at 09:00, commute home at 17:00.
+
+Chained mode widens what a requirement is measured against; it is **not** an override. An activity
+requiring a value nothing produces is still dropped, per-day type caps and cooldowns still apply, and
+every slot still comes from the permitted stretches. Placement stays greedy in rank order, so a
+suggestion placed early can be overtaken by a state change decided later; when that happens it keeps
+its place in the list and loses its time, which is the same answer the engine gives for a day with no
+room left.
+
+`unlockedBy` is null for anything that would have been suggested anyway, which is what lets the UI
+tell an opening you can take now from a conditional one.
+
 ### Where suggestions appear
 
 - **Suggestions panel** — a 320px desktop column on the Daily Plan and Calendar pages, and a mobile
@@ -560,13 +589,18 @@ far, and when state requirements leave no room. The recommendation still surface
   "Based on Your Habits") with counts. Each row shows title, effort or timing hint, reason line, and
   goal badge. When a slot exists the action is a `+ HH:mm` pill that creates the occurrence at that
   time with no modal, deriving `endAt` from the median duration; otherwise it opens the modal. The
-  panel targets the viewed day, and the header names it ("today", "tomorrow", "Tue, Jul 21").
+  panel targets the viewed day, and the header names it ("today", "tomorrow", "Tue, Jul 21"). The
+  header also holds the **suggestion mode** toggle, which moves the calendar's ghosts too - it is one
+  setting, read from the same place by both. A chained row names what it follows ("After work
+  commute") above its reason line.
 - **Calendar ghosts** — a header toggle (persisted in `localStorage`) draws each visible day's top
   suggestions as dotted blocks at their slot for the length of their median duration, fetched per
   visible day so a week view shows placement across the whole week. The count per day is the
   `Calendar suggestions` setting (1-12, default 6), a ceiling rather than the main throttle since
   placement already spreads suggestions and caps overlap at two. Clicking a ghost opens the modal
-  pre-filled rather than creating anything.
+  pre-filled rather than creating anything. A **chained** ghost is drawn one step fainter, dashed
+  rather than dotted, with a link icon in place of the sparkle: there is no room on a 20px block for
+  words, and it is conditional on another ghost the user may not take.
 
 ### Activity history dialog
 
@@ -784,7 +818,7 @@ Unauthorized→401, Forbidden→403.
 | `/api/states[/{id}]` | `GET`, `POST`, `PUT`, `DELETE` |
 | `/api/states/snapshot` | `GET` (`at`, defaults to now) |
 | `/api/states/{stateId}/values[/{id}]` | `POST`, `PUT`, `DELETE` |
-| `/api/recommendations` | `GET` (`date`) |
+| `/api/recommendations` | `GET` (`date`, `chain`) |
 | `/api/insights`, `/api/insights/empty-profile` | `GET` (`period`) |
 | `/api/settings` | `GET`, `PUT` |
 | `/api/export` | `GET` |
