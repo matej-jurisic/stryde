@@ -220,8 +220,14 @@ export const checkpointsApi = {
 
 export const settingsApi = {
   get: () => request<UserSettings>('/api/settings'),
-  update: (body: { maxFocusGoals: number; dayBoundaryTime: string; timezone: string; maxCalendarSuggestions: number }) =>
-    request<UserSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
+  /** Omitting `unaccountedStateValueIds` leaves the mask untouched; `[]` clears it. */
+  update: (body: {
+    maxFocusGoals: number
+    dayBoundaryTime: string
+    timezone: string
+    maxCalendarSuggestions: number
+    unaccountedStateValueIds?: string[]
+  }) => request<UserSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
 }
 
 export interface ActivityTypeBody {

@@ -176,6 +176,11 @@ Each activity then declares two optional things, both from the activity modal:
 - **Only suggest when** — the values a state must hold. Values listed for one state are **ORed**;
   the groups for different states are **ANDed**.
 
+The same requirement shape is read once more outside the engine, by the unaccounted-time mask in
+Settings: see Insights.
+
+A value cannot be deleted while any activity, or the mask, still points at it.
+
 The commute case is then data rather than code:
 
 ```
@@ -490,8 +495,16 @@ and cadence.
 
 - `typicalDurationMinutes` — median duration (span when both timestamps exist, else the typed
   estimate).
-- `typicalStartTime` — most common start, rounded to 15 minutes, in the user's timezone, computed
-  over timed completions only.
+- `typicalStartTime` — the activity's habitual start, in the user's timezone, computed over timed
+  completions only. Every observed start is tried as the centre of a ±20 minute window, the fullest
+  window wins (ties to the earliest), and the answer is that group's mean to the nearest five minutes.
+  Start times are measured from the **day boundary**, not midnight, so a 23:50 session and a 00:10 one
+  are the ten minutes apart they feel like rather than opposite ends of the clock.
+  A group must hold **at least two completions and at least 40% of them** to count as habitual;
+  below that the activity simply has none. This is a threshold rather than a best guess because a
+  habitual time is not only displayed - it overrides the activity type's preferred window during
+  placement, and can leave a suggestion with no time at all when that hour is busy. Two completions
+  out of six is the most common start time without being a habit.
 - `daysSinceLast`, `medianGapDays`, `patternCount` — the raw "why" signals. The server ships numbers
   only; the panel composes the sentence ("6d since last, usually every 2d" / "Usually on Tuesdays,
   3x lately"). An activity with no history carries no signals and shows no reason line.
@@ -671,12 +684,26 @@ excluded - they have no day to count on.
 |---|---|
 | Time by activity | Per activity over the window: summed minutes and count, from occurrences with both timestamps and positive elapsed time. Sorted by time. Bars in the activity's category colour. |
 | Time by category | Same set grouped by the activity's category; uncategorized completions form a "No category" bucket. |
-| Avg unaccounted time | Per day: `1440 − sum(durations)` (duration = `EndAt − StartAt`, else `DurationMinutes`), clamped at 0, averaged over "tracked days" (days with at least one timed occurrence). Null when no such day exists. Also computed for the immediately preceding window of the same length, for the trend line. |
-| Largest gaps | Top 5 contiguous untracked stretches across tracked days. Busy intervals come from all completed timed occurrences (so an overnight one covers the next morning), clamped to each day's boundary-to-boundary span and merged before gaps are read off. Times are local clock strings. |
+| Avg unaccounted time | Per day: the counted minutes with nothing logged in them, averaged over "tracked days". Null when no such day exists. Also computed for the immediately preceding window of the same length, for the trend line. |
+| Largest gaps | Top 5 contiguous empty stretches across tracked days. Times are local clock strings. |
 | Unused blocks | Top 3 maximal runs of consecutive 1-hour slots (aligned to the day boundary) fully empty on a strict majority of tracked days, ranked by days-empty (the run's weakest slot) then length. |
+
+All three read one measurement at different resolutions. Per tracked day - a day at least one timed
+completed occurrence starts on - busy spans come from **all** completed timed occurrences (duration =
+`EndAt − StartAt`, else `DurationMinutes`), so an overnight one covers the next morning; they are
+clamped to the day's boundary-to-boundary span, merged, and what is left over is that day's empty
+stretches.
 
 The unaccounted-time stats end on the day **before** today: today is still in progress, and its
 remaining hours would read as unaccounted. The previous window shifts back accordingly.
+
+**Unaccounted-time mask.** A setting (Settings → Insights) names state values that make time count at
+all: "Location: Home or Work", read like an activity's requirements - ORed within a state, ANDed
+across states. Stretches the mask excludes are folded in with the busy spans, so they vanish from all
+three stats at once: a week away is not ten empty evenings, because those hours were never the user's
+to spend. A tracked day the mask lets nothing through is dropped from the average entirely rather than
+scored as zero unaccounted. With no mask set - the default - the whole day counts and the state
+machinery is skipped.
 
 **Likely-free profile** (`GET /api/insights/empty-profile`) powers the calendar overlay. Days here
 are midnight-to-midnight local calendar dates, not boundary days, because that is the grid the
@@ -698,6 +725,7 @@ is genuinely free time, since everything is assumed logged.
 | Day start | The time the day rolls over. |
 | Max focus goals | Hard limit on simultaneous Focus goals, 1-20. |
 | Calendar suggestions | How many suggestion ghosts the calendar draws per day, 1-12, default 6. |
+| Unaccounted time | State values that make time count towards the insights stats. Hidden until a state has values; empty means the whole day counts. See Insights → unaccounted-time mask. |
 | Theme | Light / dark / system. Client-side preference in `localStorage`, defaults to system. |
 | Server URL | Native shells only: where the app points its API calls. |
 | Export data | Downloads `stryde-export-<date>.md`. |

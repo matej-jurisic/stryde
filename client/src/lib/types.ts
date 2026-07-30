@@ -236,6 +236,11 @@ export interface UserSettings {
   timezone: string // IANA id
   /** Suggestion ghosts drawn per day on the calendar. */
   maxCalendarSuggestions: number
+  /**
+   * State values that make time count towards the unaccounted-time stats: ORed within a state, ANDed
+   * across states, exactly like an activity's requirements. Empty means the whole day counts.
+   */
+  unaccountedStateValueIds: string[]
 }
 
 /**

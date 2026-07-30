@@ -16,7 +16,9 @@ public class ExportService(StrydeDbContext db)
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         if (user is null) return Result<string>.Fail(new Error(ErrorType.NotFound, "User not found."));
 
-        var settings = await db.UserSettings.FirstOrDefaultAsync(s => s.UserId == userId)
+        var settings = await db.UserSettings
+                .Include(s => s.UnaccountedRequirements)
+                .FirstOrDefaultAsync(s => s.UserId == userId)
             ?? new UserSettings { UserId = userId };
 
         var types = await db.ActivityTypes.Where(t => t.UserId == userId).ToListAsync();

@@ -10,7 +10,9 @@ public class UserSettingsService(StrydeDbContext db)
 {
     public async Task<UserSettings> GetOrCreateAsync(Guid userId)
     {
-        var settings = await db.UserSettings.FindAsync(userId);
+        var settings = await db.UserSettings
+            .Include(s => s.UnaccountedRequirements)
+            .FirstOrDefaultAsync(s => s.UserId == userId);
         if (settings is not null) return settings;
 
         settings = new UserSettings { UserId = userId };
@@ -41,22 +43,36 @@ public class UserSettingsService(StrydeDbContext db)
         return new DayContext(DayMath.ResolveTimeZone(row.Timezone), row.DayBoundaryTime);
     }
 
+    /// <summary>
+    /// The values that make time count towards the unaccounted-time stats, grouped the way a
+    /// requirement is read: ORed within a state, ANDed across states. Empty when unconfigured, which
+    /// is the case that has to stay free - the caller then skips the state machinery entirely.
+    /// </summary>
+    public async Task<List<(Guid StateId, HashSet<Guid> Allowed)>> GetUnaccountedMaskAsync(Guid userId) =>
+        (await db.UnaccountedTimeRequirements
+            .AsNoTracking()
+            .Where(r => r.UserId == userId)
+            .Select(r => new { r.StateValueId, r.StateValue.StateId })
+            .ToListAsync())
+        .GroupBy(r => r.StateId)
+        .Select(g => (StateId: g.Key, Allowed: g.Select(r => r.StateValueId).ToHashSet()))
+        .ToList();
+
     public async Task<Result<UserSettingsDto>> GetDtoAsync(Guid userId)
     {
-        // Single query: JOIN UserSettings → User via navigation property
-        var row = await db.UserSettings
-            .Where(s => s.UserId == userId)
-            .Select(s => new { Settings = s, s.User.Timezone })
-            .FirstOrDefaultAsync();
+        var settings = await db.UserSettings
+            .Include(s => s.User)
+            .Include(s => s.UnaccountedRequirements)
+            .FirstOrDefaultAsync(s => s.UserId == userId);
 
-        if (row is not null)
-            return Result<UserSettingsDto>.Success(UserSettingsDto.FromEntity(row.Settings, row.Timezone));
+        if (settings is not null)
+            return Result<UserSettingsDto>.Success(UserSettingsDto.FromEntity(settings, settings.User.Timezone));
 
         // UserSettings not created yet — verify the user exists then create defaults
         var user = await db.Users.FindAsync(userId);
         if (user is null) return Result<UserSettingsDto>.Fail(new Error(ErrorType.NotFound, "User not found."));
-        var settings = await GetOrCreateAsync(userId);
-        return Result<UserSettingsDto>.Success(UserSettingsDto.FromEntity(settings, user.Timezone));
+        var created = await GetOrCreateAsync(userId);
+        return Result<UserSettingsDto>.Success(UserSettingsDto.FromEntity(created, user.Timezone));
     }
 
     public async Task<Result<UserSettingsDto>> UpdateAsync(Guid userId, UpdateUserSettingsRequest req)
@@ -81,8 +97,65 @@ public class UserSettingsService(StrydeDbContext db)
         settings.DayBoundaryTime = boundary;
         settings.MaxCalendarSuggestions = req.MaxCalendarSuggestions;
         user.Timezone = req.Timezone;
+
+        var maskErr = await ApplyUnaccountedMaskAsync(settings, userId, req.UnaccountedStateValueIds);
+        if (maskErr is not null) return Result<UserSettingsDto>.Fail(maskErr);
+
         await db.SaveChangesAsync();
 
         return Result<UserSettingsDto>.Success(UserSettingsDto.FromEntity(settings, user.Timezone));
+    }
+
+    /// <summary>
+    /// Brings the unaccounted-time mask in line with the request. Null means "leave it alone", the
+    /// same contract <c>ActivityService.ApplyStatesAsync</c> offers, and for the same reason: a client
+    /// editing the day boundary should not have to know this field exists.
+    /// <para>
+    /// Diffed rather than cleared and rebuilt - the row keys on its own contents, so removing and
+    /// re-adding an unchanged one would put a Deleted and an Added entity with the same key in the
+    /// change tracker at once.
+    /// </para>
+    /// </summary>
+    private async Task<Error?> ApplyUnaccountedMaskAsync(
+        UserSettings settings, Guid userId, List<Guid>? valueIds)
+    {
+        if (valueIds is null) return null;
+
+        var desired = valueIds.Distinct().ToHashSet();
+
+        // Joined through State so one user cannot reference another's value by guessing an id.
+        var owned = await db.StateValues
+            .AsNoTracking()
+            .Where(v => desired.Contains(v.Id) && v.State.UserId == userId)
+            .Select(v => v.Id)
+            .ToListAsync();
+
+        if (owned.Count != desired.Count)
+            return new Error(ErrorType.NotFound, "State value not found.");
+
+        foreach (var existing in settings.UnaccountedRequirements.ToList())
+        {
+            if (desired.Contains(existing.StateValueId))
+            {
+                desired.Remove(existing.StateValueId);
+            }
+            else
+            {
+                settings.UnaccountedRequirements.Remove(existing);
+                db.UnaccountedTimeRequirements.Remove(existing);
+            }
+        }
+
+        // Explicit Add forces the Added state; the pre-set composite key would otherwise let change
+        // detection treat it as an existing row. Fixup then also appends it to the collection the
+        // response is built from, hence the guard.
+        foreach (var valueId in desired)
+        {
+            var row = new UnaccountedTimeRequirement { UserId = userId, StateValueId = valueId };
+            db.UnaccountedTimeRequirements.Add(row);
+            if (!settings.UnaccountedRequirements.Contains(row)) settings.UnaccountedRequirements.Add(row);
+        }
+
+        return null;
     }
 }

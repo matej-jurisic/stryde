@@ -56,13 +56,16 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 **Backend (`Stryde.Core`)**
 - `Entities/` — POCOs; `Guid Id = Guid.NewGuid()` + `DateTimeOffset CreatedAt`, no base class.
   Key entities: `User, Activity, Occurrence, Goal, Checkpoint, Category, UserSettings, ActivityType,
-  State, StateValue, ActivityStateEffect, ActivityStateRequirement, ActivitySubtask, OccurrenceSubtask`
+  State, StateValue, ActivityStateEffect, ActivityStateRequirement, UnaccountedTimeRequirement,
+  ActivitySubtask, OccurrenceSubtask`
   (subtasks are two levels: `ActivitySubtask` is the title-only template, copied into
   `OccurrenceSubtask` rows — which carry `IsDone` — when an occurrence is created.)
   (the last three are link/child rows keyed by their contents, not by a `Guid Id`: `StateValue` is a
   normal child of `State`, while `ActivityStateEffect` keys on `(ActivityId, StateId)` — one value per
   state, structurally — and `ActivityStateRequirement` on `(ActivityId, StateValueId)` — many per state,
-  ORed within a state and ANDed across them.)
+  ORed within a state and ANDed across them, and `UnaccountedTimeRequirement` on
+  `(UserId, StateValueId)` - the same requirement shape hung off `UserSettings`, read only by
+  `InsightsService`.)
   `ActivityStateEffect.DurationMinutes` is how long the value holds: it belongs to the **cause**, not
   the value, since a run leaves you tired for ten hours and a hike for two days.
 - `Enums/` — stored as strings (`HasConversion<string>`).
@@ -87,6 +90,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   decays it back to the state default, so one value can be held for different lengths by different
   activities. A later setter that *changes* the value replaces the pending expiry; one that re-sets the
   value already in force takes whichever expiry is further out. See `spec.md` → States.
+- `Common/Intervals.cs` — `Intersect`/`Complement`/`Merge` over `(Start, End)` lists. The one place
+  time-range set algebra lives: the engine ANDs state requirements with it, `InsightsService` masks a
+  day with it. Inputs are assumed sorted and disjoint except for `Merge`, which is the door raw
+  occurrence spans come in through.
 - `Common/DayMath.cs` — all "which day / is this overdue?" logic goes through here, in the user's IANA
   timezone offset by `DayBoundaryTime`. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
   Key methods: `OccurrenceDay(Occurrence, DayContext)`, `IsOverdue(Occurrence, DayContext, DateTimeOffset)`.
@@ -98,7 +105,11 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   invisible to the engine: skipped occurrences, and **all-day + planned** ones, which say only
   "sometime that day" (`IsAllDay` alone is a date commitment, `IsPlanned` alone a window - both count).
   `ComputeStats` separately ignores all-day rows for the habitual start time and span-derived duration:
-  midnight is not a start time. See `spec.md` → Recommendations.
+  midnight is not a start time. The habitual start is the fullest ±20min cluster of observed starts,
+  indexed **from the day boundary** so late-night and post-midnight sessions are neighbours, and it is
+  withheld entirely below `MinStartTimeSupport`/`MinStartTimeShare` - it overrides a type's window and
+  can cost a suggestion its slot, so it must not be earned by one completion. See `spec.md` →
+  Recommendations.
   The per-state timelines and each activity's requirement groups come from
   `StateService.LoadContextAsync` (`StateContext.Empty` when the user has no states, the case that must
   cost nothing). `AllowedIntervals` intersects the groups over the day; `StateAllows` is the gate;
@@ -118,6 +129,13 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   move the default onto a sibling. **Durations are not here** — they live on the effect, so
   `ActivityService.ApplyStatesAsync` validates them via `Validators.ValidateStateDuration`
   (1..`MaxStateDurationMinutes`, and none on a change to the state's default value).
+- `Services/InsightsService.cs` — `GetAsync` folds a day into "which stretches counted and had
+  nothing in them", and the average, the largest gaps and the often-empty hours are all read off that
+  one list. The **unaccounted-time mask** (`UserSettingsService.GetUnaccountedMaskAsync`) is applied by
+  folding the day's *non*-counted stretches in with the busy spans, so one change removes them from
+  all three at once; a tracked day the mask empties is dropped rather than scored as zero. No mask
+  (the default) skips the state machinery entirely. `GetEmptyProfileAsync` is separate and unmasked -
+  it answers "when are you usually free" for the calendar overlay, on plain calendar days.
 - `Services/ExportService.cs` + `Services/ExportMarkdown.cs` — the export loads the whole account and
   renders it as **one Markdown document**, not JSON. It has no DTOs and no import path, so the writer
   is free to drop ids, name everything, and turn stored numbers into the sentences the UI uses. Any
@@ -158,6 +176,7 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   for the Markdown export. Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`, `statesApi` (incl. `snapshot(atIso)`)/`stateValuesApi`, `activityTypesApi`, `exportApi`.
   On `activitiesApi.create`/`update`, **omitting** `setsStateValues`/`requiredStateValueIds` leaves them untouched
   and `[]` clears them — which is what lets `BulkAssignModal` resend everything else without knowing about states.
+  `settingsApi.update` follows the same contract for `unaccountedStateValueIds`.
 - `lib/types.ts` — mirrors backend DTOs. Key types: `Activity` (has `activityTypeId` plus an embedded `type` summary), `Occurrence` (has `effectiveTitle`), `Recommendation` (flat; `activity` always present), `State`/`StateValue`, `StateSnapshot`/`StateSnapshotEntry`, `ActivityType`.
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
@@ -224,6 +243,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   `lastPointerTypeRef.current !== 'touch'`, since a touch arrives there again as a compatibility event.
 - `components/settings/SettingSection.tsx` — `SettingSection`/`SettingRow`/`SectionFooter`, the layout
   primitives `SettingsPage` is built from. Settings now holds preferences only.
+- `pages/SettingsPage.tsx` — one `form` object and one save mutation behind several sections; the
+  mutation's variable is the section that pressed Save, which is all that decides where "Changes
+  saved." appears. The **Insights** section is the unaccounted-time mask (a `StateValuePicker`, no
+  `singlePerState`), hidden entirely until a state has values. Saving invalidates `['insights']` too.
 - `components/activities/ActivitiesTabs.tsx` — the underline tab strip the three activity routes share.
   A new activity-side vocabulary is a tab here, not a nav slot.
 - `pages/ActivityTypesPage.tsx` — types admin: accordion per type over the full CRUD (name, icon,
@@ -273,6 +296,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   embed their activity: its title feeds `effectiveTitle` and its category feeds every row and calendar block's
   colour). After any goal write also invalidate `['goals']`.
   States live under `['states']`; after a state or value write invalidate `['states']` and `['recommendations']`.
+  Insights live under `['insights', period]`; a settings write invalidates `['insights']`, since the
+  unaccounted-time mask moves every figure on that page.
   A snapshot is `['states', 'snapshot', iso]` with `staleTime: 0` - it depends on every occurrence around
   it, so it re-asks on open rather than being invalidated from the occurrence side.
   Activity types live under `['activityTypes']`; after a type write invalidate all three of

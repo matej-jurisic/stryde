@@ -152,6 +152,12 @@ public class StateService(StrydeDbContext db)
                 $"{value.Name} is still used by {Plural(setters + requirers, "activity", "activities")}. "
                 + "Change those activities first."));
 
+        // Same reasoning as above, one step further out: dropping the row would quietly widen which
+        // hours the insights page counts, and nothing on screen would say why the number moved.
+        if (await db.UnaccountedTimeRequirements.AnyAsync(r => r.StateValueId == id))
+            return Result<StateDto>.Fail(new Error(ErrorType.Conflict,
+                $"{value.Name} is still used by the unaccounted-time setting. Change that first."));
+
         state.Values.Remove(value);
         db.StateValues.Remove(value);
 

@@ -23,6 +23,7 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
     public DbSet<StateValue> StateValues => Set<StateValue>();
     public DbSet<ActivityStateEffect> ActivityStateEffects => Set<ActivityStateEffect>();
     public DbSet<ActivityStateRequirement> ActivityStateRequirements => Set<ActivityStateRequirement>();
+    public DbSet<UnaccountedTimeRequirement> UnaccountedTimeRequirements => Set<UnaccountedTimeRequirement>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -168,6 +169,23 @@ public class StrydeDbContext(DbContextOptions<StrydeDbContext> options) : DbCont
             .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<ActivityStateRequirement>()
+            .HasOne(r => r.StateValue)
+            .WithMany()
+            .HasForeignKey(r => r.StateValueId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Hung off UserSettings rather than User: it is a preference, and the settings row is the
+        // thing the export and the settings endpoint already load.
+        modelBuilder.Entity<UnaccountedTimeRequirement>()
+            .HasKey(r => new { r.UserId, r.StateValueId });
+
+        modelBuilder.Entity<UnaccountedTimeRequirement>()
+            .HasOne(r => r.Settings)
+            .WithMany(s => s.UnaccountedRequirements)
+            .HasForeignKey(r => r.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<UnaccountedTimeRequirement>()
             .HasOne(r => r.StateValue)
             .WithMany()
             .HasForeignKey(r => r.StateValueId)

@@ -6,8 +6,20 @@ using Stryde.Core.Enums;
 
 namespace Stryde.Core.Services;
 
-public class InsightsService(StrydeDbContext db, UserSettingsService settings)
+public class InsightsService(StrydeDbContext db, UserSettingsService settings, StateService states)
 {
+    /// <summary>
+    /// One tracked day, analysed. <paramref name="CountedMinutes"/> is how much of it the unaccounted
+    /// -time mask lets through: zero drops the day from the stats entirely, because a day that was
+    /// never the user's to spend has nothing to say about how they spent it.
+    /// </summary>
+    private sealed record DayAnalysis(
+        DateOnly Day,
+        DateTimeOffset Start,
+        DateTimeOffset End,
+        int CountedMinutes,
+        List<(DateTimeOffset Start, DateTimeOffset End)> Empty);
+
     private static int? DurationOf(Entities.Occurrence o) =>
         o.StartAt.HasValue && o.EndAt.HasValue
             ? (int)(o.EndAt.Value - o.StartAt.Value).TotalMinutes
@@ -67,78 +79,112 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
             .ThenBy(c => c.Name)
             .ToList();
 
-        // Unaccounted time: 1440 - sum(durations) per day, averaged over days with at least one timed occurrence.
-        // Today is excluded (still in progress, its remaining hours would read as unaccounted): the window is
-        // the windowDays full days before today, and the previous window shifts back accordingly.
-        Dictionary<DateOnly, int> TrackedByDay(DateOnly from, DateOnly to) => completed
+        // Everything below reads one day at a time, and all three stats - the average, the biggest
+        // gaps, the often-empty hours - are the same measurement at different resolutions: which
+        // stretches of a day counted and had nothing in them.
+        //
+        // Today is excluded (still in progress, its remaining hours would read as unaccounted): the
+        // window is the windowDays full days before today, and the previous window shifts back.
+        var trackedEnd = today.AddDays(-1);
+
+        // A day is tracked when at least one completed timed occurrence starts on it. Busy intervals
+        // come from all completed occurrences regardless of day, so an overnight span covers the
+        // following morning.
+        HashSet<DateOnly> TrackedDays(DateOnly from, DateOnly to) => completed
             .Select(o => (Day: DayMath.DayOf(o.StartAt!.Value, ctx), Minutes: DurationOf(o)))
             .Where(x => x.Minutes is > 0 && x.Day >= from && x.Day <= to)
-            .GroupBy(x => x.Day)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.Minutes!.Value));
+            .Select(x => x.Day)
+            .ToHashSet();
 
-        static int? AvgUnaccounted(Dictionary<DateOnly, int> byDay) => byDay.Count > 0
-            ? (int)byDay.Values.Select(m => Math.Max(0, 1440 - m)).Average()
-            : null;
-
-        var trackedEnd = today.AddDays(-1);
-        var trackedByDay = TrackedByDay(trackedEnd.AddDays(-(windowDays - 1)), trackedEnd);
-        var prevTrackedByDay = TrackedByDay(trackedEnd.AddDays(-(2 * windowDays - 1)), trackedEnd.AddDays(-windowDays));
-
-        // Gap analysis runs only over tracked days (>=1 timed occurrence starting that day), but busy
-        // intervals come from all completed occurrences so overnight spans cover the following morning.
         var intervals = completed
             .Select(o => (Start: o.StartAt!.Value, Minutes: DurationOf(o)))
             .Where(x => x.Minutes is > 0)
             .Select(x => (x.Start, End: x.Start.AddMinutes(x.Minutes!.Value)))
             .ToList();
 
-        string LocalClock(DateTimeOffset instant) =>
-            TimeZoneInfo.ConvertTime(instant, ctx.TimeZone).ToString("HH:mm");
+        // The unaccounted-time mask: the state values that make a stretch of the day count at all.
+        // Empty for an account that has not configured one, and the whole state machinery is skipped
+        // then - which is every account by default.
+        var mask = await settings.GetUnaccountedMaskAsync(userId);
+        var stateContext = StateContext.Empty;
+        if (mask.Count > 0)
+        {
+            // Setters are read off the whole schedule, not just done rows: a state is a reading of the
+            // calendar (see spec.md -> States), and a pending occurrence still says where you were.
+            var all = await db.Occurrences.AsNoTracking().Where(o => o.UserId == userId).ToListAsync();
+            stateContext = await states.LoadContextAsync(userId, all);
+            // A state deleted since the mask was set leaves rows behind pointing at nothing; dropping
+            // them here means the mask loosens rather than silencing every day.
+            mask = mask.Where(g => stateContext.Timelines.ContainsKey(g.StateId)).ToList();
+        }
 
-        var gaps = new List<InsightsGapDto>();
-        var slotEmptyDays = new int[24];
-
-        foreach (var day in trackedByDay.Keys)
+        DayAnalysis Analyse(DateOnly day)
         {
             var dayStart = DayMath.StartOfDay(day, ctx);
             var dayEnd = DayMath.EndOfDay(day, ctx);
 
-            var merged = new List<(DateTimeOffset Start, DateTimeOffset End)>();
-            foreach (var iv in intervals
-                         .Where(x => x.End > dayStart && x.Start < dayEnd)
-                         .Select(x => (Start: x.Start < dayStart ? dayStart : x.Start, End: x.End > dayEnd ? dayEnd : x.End))
-                         .OrderBy(x => x.Start))
-            {
-                if (merged.Count > 0 && iv.Start <= merged[^1].End)
-                    merged[^1] = (merged[^1].Start, iv.End > merged[^1].End ? iv.End : merged[^1].End);
-                else
-                    merged.Add(iv);
-            }
+            List<(DateTimeOffset Start, DateTimeOffset End)> counted = [(dayStart, dayEnd)];
+            foreach (var (stateId, allowed) in mask)
+                counted = Intervals.Intersect(
+                    counted, stateContext.Timelines[stateId].IntervalsWhere(allowed, dayStart, dayEnd));
 
-            var cursor = dayStart;
-            foreach (var iv in merged)
-            {
-                if (iv.Start > cursor)
-                    gaps.Add(new InsightsGapDto(day.ToString("O"), LocalClock(cursor), LocalClock(iv.Start), (int)(iv.Start - cursor).TotalMinutes));
-                cursor = iv.End;
-            }
-            if (cursor < dayEnd)
-                gaps.Add(new InsightsGapDto(day.ToString("O"), LocalClock(cursor), LocalClock(dayEnd), (int)(dayEnd - cursor).TotalMinutes));
+            // Time the mask excludes is folded in with the busy spans rather than handled separately:
+            // it is neither empty nor available, so it should disappear from every stat at once.
+            var blocked = Intervals.Merge(intervals
+                .Where(x => x.End > dayStart && x.Start < dayEnd)
+                .Select(x => (Start: x.Start < dayStart ? dayStart : x.Start, End: x.End > dayEnd ? dayEnd : x.End))
+                .Concat(Intervals.Complement(counted, dayStart, dayEnd)));
 
-            for (var i = 0; i < 24; i++)
-            {
-                var slotStart = dayStart.AddHours(i);
-                var slotEnd = slotStart.AddHours(1);
-                if (slotStart >= dayEnd) break;
-                if (!merged.Any(x => x.Start < slotEnd && x.End > slotStart)) slotEmptyDays[i]++;
-            }
+            return new DayAnalysis(
+                day, dayStart, dayEnd,
+                (int)counted.Sum(c => (c.End - c.Start).TotalMinutes),
+                Intervals.Complement(blocked, dayStart, dayEnd));
         }
 
-        var largestGaps = gaps.OrderByDescending(g => g.Minutes).Take(5).ToList();
+        // Days the mask lets nothing through are dropped, not scored as zero: a week away from home
+        // would otherwise pull the average down as if every hour of it had been spent well.
+        // Ordered so gaps of equal length always come back in the same order rather than in whatever
+        // order the set enumerated.
+        List<DayAnalysis> AnalyseWindow(DateOnly from, DateOnly to) => TrackedDays(from, to)
+            .OrderBy(d => d)
+            .Select(Analyse)
+            .Where(d => d.CountedMinutes > 0)
+            .ToList();
+
+        static int EmptyMinutes(DayAnalysis d) => (int)d.Empty.Sum(e => (e.End - e.Start).TotalMinutes);
+
+        static int? AvgUnaccounted(List<DayAnalysis> days) =>
+            days.Count > 0 ? (int)days.Select(EmptyMinutes).Average() : null;
+
+        var trackedDays = AnalyseWindow(trackedEnd.AddDays(-(windowDays - 1)), trackedEnd);
+        var prevTrackedDays = AnalyseWindow(trackedEnd.AddDays(-(2 * windowDays - 1)), trackedEnd.AddDays(-windowDays));
+
+        string LocalClock(DateTimeOffset instant) =>
+            TimeZoneInfo.ConvertTime(instant, ctx.TimeZone).ToString("HH:mm");
+
+        var largestGaps = trackedDays
+            .SelectMany(d => d.Empty.Select(e => new InsightsGapDto(
+                d.Day.ToString("O"), LocalClock(e.Start), LocalClock(e.End), (int)(e.End - e.Start).TotalMinutes)))
+            .OrderByDescending(g => g.Minutes)
+            .Take(5)
+            .ToList();
+
+        var slotEmptyDays = new int[24];
+        foreach (var d in trackedDays)
+            for (var i = 0; i < 24; i++)
+            {
+                var slotStart = d.Start.AddHours(i);
+                var slotEnd = slotStart.AddHours(1);
+                if (slotStart >= d.End) break;
+                if (slotEnd > d.End) slotEnd = d.End;
+                // Fully inside one empty stretch, which is the same test as "no blocked span overlaps
+                // it" - Empty is that set's complement.
+                if (d.Empty.Any(e => e.Start <= slotStart && e.End >= slotEnd)) slotEmptyDays[i]++;
+            }
 
         // Unused blocks: maximal runs of consecutive hour slots empty on a strict majority of tracked days.
         var runs = new List<(InsightsUnusedBlockDto Block, int Hours)>();
-        var threshold = trackedByDay.Count / 2 + 1;
+        var threshold = trackedDays.Count / 2 + 1;
         for (var i = 0; i < 24;)
         {
             if (slotEmptyDays[i] < threshold) { i++; continue; }
@@ -153,7 +199,7 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
                 ctx.DayBoundary.AddHours(start).ToString("HH:mm"),
                 ctx.DayBoundary.AddHours(i).ToString("HH:mm"),
                 emptyDays,
-                trackedByDay.Count), i - start));
+                trackedDays.Count), i - start));
         }
         var unusedBlocks = runs
             .OrderByDescending(r => r.Block.EmptyDays)
@@ -164,7 +210,7 @@ public class InsightsService(StrydeDbContext db, UserSettingsService settings)
 
         return new InsightsDto(
             activities, categories,
-            AvgUnaccounted(trackedByDay), AvgUnaccounted(prevTrackedByDay),
+            AvgUnaccounted(trackedDays), AvgUnaccounted(prevTrackedDays),
             largestGaps, unusedBlocks);
     }
 

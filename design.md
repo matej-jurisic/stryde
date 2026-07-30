@@ -238,7 +238,7 @@ Mobile: single column, suggestions behind the header's `Menu` toggle.
 One `max-w-2xl` column of sections, each an uppercase label over a bordered card with `divide-y` rows. No chart: every stat here is a duration, and a labelled row with a bar reads better than a column per day.
 
 - **Period toggle:** segmented control (7 days / 30 days) on a `bg-muted` track with a `p-0.5` inset; the active option is a raised `bg-card` chip. Sits above the first section, left-aligned.
-- **Unaccounted time:** headline row (label left, duration right in `tabular-nums`) with the trend against the previous period as a `text-xs text-muted-foreground` line beneath.
+- **Unaccounted time:** headline row (label left, duration right in `tabular-nums`) with the trend against the previous period as a `text-xs text-muted-foreground` line beneath, and, when an unaccounted-time mask is set, a second muted line naming it ("Only counting time when Location: Home or Work"). A figure measured over part of the day has to say so on the same card.
 - **Gap lists** (*Biggest empty blocks*, *Often empty*): one row each — day or time range on the left, duration or "empty on X of Y days" right-aligned, all figures `tabular-nums`.
 - **Time by activity / by category:** rows with title (category rows lead with the category icon; never colored text), duration right-aligned (`tabular-nums`), and a 4px proportional bar underneath in the category's own color on a `bg-muted` track. Uncategorized uses `CircleDashed` + muted tones.
 

@@ -112,6 +112,25 @@ public class StateServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteValueAsync_refuses_while_the_unaccounted_time_setting_uses_it()
+    {
+        var userId = await CreateUserAsync();
+        var state = await CreateStateAsync(userId);
+        await _ctx.StateService.CreateValueAsync(state.Id, userId, new CreateStateValueRequest("Home"));
+        var withWork = await _ctx.StateService.CreateValueAsync(
+            state.Id, userId, new CreateStateValueRequest("Work"));
+        var work = withWork.Value!.Values.Single(v => v.Name == "Work");
+
+        await _ctx.UserSettingsService.UpdateAsync(
+            userId, new UpdateUserSettingsRequest(3, "00:00", "UTC", 6, [work.Id]));
+
+        var result = await _ctx.StateService.DeleteValueAsync(work.Id, state.Id, userId);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ErrorType.Conflict, result.Error!.Type);
+    }
+
+    [Fact]
     public async Task DeleteValueAsync_promotes_the_oldest_survivor_when_the_default_goes()
     {
         var userId = await CreateUserAsync();

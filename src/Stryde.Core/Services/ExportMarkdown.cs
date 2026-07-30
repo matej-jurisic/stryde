@@ -147,6 +147,11 @@ internal sealed class ExportMarkdown(
         Bullet($"Day boundary: {settings.DayBoundaryTime.ToString("HH:mm", Inv)} - a day runs from here to the same time next day, so anything earlier counts as the previous day");
         Bullet($"Max focus goals at once: {settings.MaxFocusGoals}");
         Bullet($"Suggestions drawn on the calendar per day: {settings.MaxCalendarSuggestions}");
+        Bullet(settings.UnaccountedRequirements.Count > 0
+            ? "Unaccounted time is only measured while "
+              + DescribeRequirements(settings.UnaccountedRequirements.Select(r => r.StateValueId))
+              + " - hours outside that are left out of the stats entirely rather than counted as free time"
+            : "Unaccounted time is measured over the whole day");
         Line();
     }
 
@@ -363,7 +368,7 @@ internal sealed class ExportMarkdown(
             Bullet($"Doing it sets {ValueName(e.StateValueId)}, {Holds(e)}");
 
         if (a.StateRequirements.Count > 0)
-            Bullet($"Only suggested when {DescribeRequirements(a)}");
+            Bullet($"Only suggested when {DescribeRequirements(a.StateRequirements.Select(r => r.StateValueId))}");
 
         var stats = Stats(a);
         Bullet(stats);
@@ -474,13 +479,14 @@ internal sealed class ExportMarkdown(
     /// <summary>
     /// A requirement set the way the engine reads it: values of one state are ORed, states are ANDed.
     /// </summary>
-    private string DescribeRequirements(Activity a)
+    private string DescribeRequirements(IEnumerable<Guid> valueIds)
     {
+        var wanted = valueIds.ToHashSet();
         var parts = new List<string>();
         foreach (var s in states.OrderBy(s => s.CreatedAt))
         {
             var names = s.Values.OrderBy(v => v.CreatedAt)
-                .Where(v => a.StateRequirements.Any(r => r.StateValueId == v.Id))
+                .Where(v => wanted.Contains(v.Id))
                 .Select(v => v.Name)
                 .ToList();
             if (names.Count > 0) parts.Add($"{s.Name} is {string.Join(" or ", names)}");

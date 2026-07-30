@@ -331,15 +331,26 @@ public sealed record InsightsDto(
 // Export has no DTOs: it is a Markdown document, rendered by ExportMarkdown straight off the entities.
 
 // UserSettings
+/// <param name="UnaccountedStateValueIds">
+/// Flat, like <c>ActivityDto.RequiredStateValueIds</c>: the values that make time count towards the
+/// unaccounted-time stats. Empty means all of it counts.
+/// </param>
 public sealed record UserSettingsDto(
-    Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions)
+    Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions,
+    List<Guid> UnaccountedStateValueIds)
 {
     public static UserSettingsDto FromEntity(UserSettings us, string timezone) => new(
-        us.UserId, us.MaxFocusGoals, us.DayBoundaryTime.ToString("HH:mm"), timezone, us.MaxCalendarSuggestions);
+        us.UserId, us.MaxFocusGoals, us.DayBoundaryTime.ToString("HH:mm"), timezone, us.MaxCalendarSuggestions,
+        us.UnaccountedRequirements.Select(r => r.StateValueId).ToList());
 }
 
+/// <param name="UnaccountedStateValueIds">
+/// Null leaves the set untouched and <c>[]</c> clears it, following the activity write path, so a
+/// caller that knows nothing about states can still round-trip the other fields.
+/// </param>
 public sealed record UpdateUserSettingsRequest(
-    int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions);
+    int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions,
+    List<Guid>? UnaccountedStateValueIds = null);
 
 // Activity types
 /// <summary>

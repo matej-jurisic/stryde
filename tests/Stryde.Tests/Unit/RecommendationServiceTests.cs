@@ -1363,4 +1363,66 @@ public class RecommendationServiceTests : IDisposable
         Assert.Null(rec.TypicalStartTime);
         Assert.Equal(At(7, 12), rec.SuggestedStartAt);
     }
+
+    [Fact]
+    public async Task GetAsync_single_completion_is_not_a_habitual_start_time()
+    {
+        var userId = await CreateUserAsync();
+        var typeId = await TypeAsync(userId, "Evening", new(18, 0), new(22, 0));
+        var activity = await AddActivityAsync(userId, "done once", GoalStatus.active, typeId);
+        await CompleteAsync(userId, activity, At(2, 7));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, new DateOnly(2026, 7, 9), Now);
+
+        // One completion is an anecdote. Treated as a habit it would override the type's window - and
+        // when 07:00 is taken, leave the suggestion with no time rather than drift outside it.
+        var rec = Assert.Single(recs);
+        Assert.Null(rec.TypicalStartTime);
+        Assert.Equal(At(9, 18), rec.SuggestedStartAt);
+    }
+
+    [Fact]
+    public async Task GetAsync_scattered_start_times_yield_no_habitual_time()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "whenever", GoalStatus.active);
+        foreach (var (day, hour) in new[] { (1, 7), (2, 7), (3, 11), (4, 15), (5, 19), (6, 21) })
+            await CompleteAsync(userId, activity, At(day, hour));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        // The biggest cluster is two of six. That is the most common time without being a habitual
+        // one, and answering 07:00 would hand it the same authority a real rhythm gets.
+        Assert.Null(Assert.Single(recs).TypicalStartTime);
+    }
+
+    [Fact]
+    public async Task GetAsync_habitual_time_survives_falling_either_side_of_a_bucket_edge()
+    {
+        var userId = await CreateUserAsync();
+        var activity = await AddActivityAsync(userId, "just after seven", GoalStatus.active);
+        await CompleteAsync(userId, activity, At(2, 7, 7));
+        await CompleteAsync(userId, activity, At(4, 7, 12));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        // Five minutes apart. Rounded into fixed quarters these landed in 07:00 and 07:15 as two
+        // clusters of one, so a plainly habitual time counted as no evidence at all.
+        Assert.Equal("07:10", Assert.Single(recs).TypicalStartTime);
+    }
+
+    [Fact]
+    public async Task GetAsync_habitual_time_spans_the_midnight_seam()
+    {
+        var userId = await CreateUserAsync(dayBoundary: new TimeOnly(4, 0));
+        var activity = await AddActivityAsync(userId, "late night", GoalStatus.active);
+        await CompleteAsync(userId, activity, At(2, 23, 50));
+        await CompleteAsync(userId, activity, At(4, 0, 0));
+
+        var recs = await _ctx.RecommendationService.GetAsync(userId, Today, Now);
+
+        // Ten minutes apart, and on the same logical day either way. Indexed from midnight they sat
+        // at opposite ends of the axis; indexed from the 04:00 boundary they are neighbours.
+        Assert.Equal("23:55", Assert.Single(recs).TypicalStartTime);
+    }
 }

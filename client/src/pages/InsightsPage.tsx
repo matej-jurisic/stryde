@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { CircleDashed } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { insightsApi } from '@/lib/api'
+import { insightsApi, settingsApi } from '@/lib/api'
+import { useStates, describeRequirements } from '@/lib/useStates'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
 import type { InsightsActivity, InsightsCategory, InsightsGap, InsightsUnusedBlock } from '@/lib/types'
 
@@ -59,12 +60,15 @@ function UnaccountedTimeSections({
   gaps,
   blocks,
   period,
+  mask,
 }: {
   avg: number
   prevAvg: number | null
   gaps: InsightsGap[]
   blocks: InsightsUnusedBlock[]
   period: number
+  /** The unaccounted-time mask in words, when one is set. Every figure here is measured inside it. */
+  mask: string | null
 }) {
   return (
     <>
@@ -83,6 +87,11 @@ function UnaccountedTimeSections({
             {prevAvg != null && (
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {trendLabel(avg, prevAvg, period)}
+              </p>
+            )}
+            {mask && (
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Only counting time when {mask}
               </p>
             )}
           </div>
@@ -229,6 +238,16 @@ export function InsightsPage() {
     queryFn: () => insightsApi.get(period),
   })
 
+  // The unaccounted-time figures are measured inside the mask, so the page has to say what it is.
+  const { states } = useStates()
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: settingsApi.get,
+    staleTime: 5 * 60 * 1000,
+  })
+  const maskIds = settings?.unaccountedStateValueIds ?? []
+  const mask = maskIds.length > 0 ? describeRequirements(states, maskIds) || null : null
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <PageHeader title="Insights" />
@@ -250,6 +269,7 @@ export function InsightsPage() {
                   gaps={data.largestGaps}
                   blocks={data.unusedBlocks}
                   period={period}
+                  mask={mask}
                 />
               )}
 

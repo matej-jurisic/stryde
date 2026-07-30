@@ -223,6 +223,111 @@ public class InsightsServiceTests : IDisposable
         Assert.Null(insights.PrevAvgUnaccountedMinutesPerDay);
     }
 
+    // ── unaccounted-time mask ───────────────────────────────────────────────
+    //
+    // "Only count time while Location is Home": hours the mask excludes are dropped from the stats
+    // rather than counted as empty, so a trip does not read as free time nobody used.
+
+    private async Task<(StateValue Home, StateValue Away)> AddLocationStateAsync(Guid userId)
+    {
+        var state = new State { UserId = userId, Name = "Location" };
+        var home = new StateValue { StateId = state.Id, Name = "Home", IsDefault = true };
+        var away = new StateValue { StateId = state.Id, Name = "Away" };
+        _ctx.Db.States.Add(state);
+        _ctx.Db.StateValues.AddRange(home, away);
+        await _ctx.Db.SaveChangesAsync();
+        return (home, away);
+    }
+
+    private async Task SetsStateAsync(Activity activity, StateValue value, int? durationMinutes)
+    {
+        _ctx.Db.ActivityStateEffects.Add(new ActivityStateEffect
+        {
+            ActivityId = activity.Id,
+            StateId = value.StateId,
+            StateValueId = value.Id,
+            DurationMinutes = durationMinutes,
+        });
+        await _ctx.Db.SaveChangesAsync();
+    }
+
+    private async Task SetUnaccountedMaskAsync(Guid userId, params StateValue[] values)
+    {
+        _ctx.Db.UserSettings.Add(new UserSettings { UserId = userId });
+        foreach (var v in values)
+            _ctx.Db.UnaccountedTimeRequirements.Add(
+                new UnaccountedTimeRequirement { UserId = userId, StateValueId = v.Id });
+        await _ctx.Db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task GetAsync_unaccounted_mask_excludes_hours_the_states_disallow()
+    {
+        var userId = await CreateUserAsync();
+        var (home, away) = await AddLocationStateAsync(userId);
+        await SetUnaccountedMaskAsync(userId, home);
+
+        var flight = await AddActivityAsync(userId, "flight");
+        await SetsStateAsync(flight, away, 1440);
+        // Pending, so it sets state without making its own day tracked: Away from Jul 5 12:00 for a
+        // day, back Home at Jul 6 12:00.
+        await AddOccurrenceAsync(userId, flight, At(5, 12), status: EventStatus.pending);
+
+        var read = await AddActivityAsync(userId, "read");
+        await AddOccurrenceAsync(userId, read, At(6, 13), At(6, 14));
+
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
+
+        // Jul 6 counts from 12:00 (720 min), of which one hour was logged.
+        Assert.Equal(660, insights.AvgUnaccountedMinutesPerDay);
+        Assert.Equal(2, insights.LargestGaps.Count);
+        Assert.All(insights.LargestGaps, g => Assert.Equal("2026-07-06", g.Day));
+        Assert.Contains(insights.LargestGaps, g => g is { Start: "14:00", End: "00:00", Minutes: 600 });
+        Assert.Contains(insights.LargestGaps, g => g is { Start: "12:00", End: "13:00", Minutes: 60 });
+    }
+
+    [Fact]
+    public async Task GetAsync_unaccounted_mask_drops_days_it_excludes_entirely()
+    {
+        var userId = await CreateUserAsync();
+        var (home, away) = await AddLocationStateAsync(userId);
+        await SetUnaccountedMaskAsync(userId, home);
+
+        var flight = await AddActivityAsync(userId, "flight");
+        await SetsStateAsync(flight, away, 2880);
+        await AddOccurrenceAsync(userId, flight, At(5, 12), status: EventStatus.pending); // Away all of Jul 6
+
+        var read = await AddActivityAsync(userId, "read");
+        await AddOccurrenceAsync(userId, read, At(4, 12), At(4, 13)); // a normal day at home
+        await AddOccurrenceAsync(userId, read, At(6, 13), At(6, 14)); // logged while away
+
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
+
+        // Jul 6 has no counted minutes at all, so it is left out rather than averaged in as a full
+        // empty day - which is the whole point of the setting.
+        Assert.Equal(1440 - 60, insights.AvgUnaccountedMinutesPerDay);
+        Assert.All(insights.LargestGaps, g => Assert.Equal("2026-07-04", g.Day));
+    }
+
+    [Fact]
+    public async Task GetAsync_without_a_mask_measures_the_whole_day()
+    {
+        var userId = await CreateUserAsync();
+        var (_, away) = await AddLocationStateAsync(userId);
+
+        var flight = await AddActivityAsync(userId, "flight");
+        await SetsStateAsync(flight, away, 2880);
+        await AddOccurrenceAsync(userId, flight, At(5, 12), status: EventStatus.pending);
+
+        var read = await AddActivityAsync(userId, "read");
+        await AddOccurrenceAsync(userId, read, At(6, 13), At(6, 14));
+
+        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
+
+        // States exist and one is held all day, but nothing was asked of them: every hour counts.
+        Assert.Equal(1440 - 60, insights.AvgUnaccountedMinutesPerDay);
+    }
+
     [Fact]
     public async Task GetAsync_categories_group_timed_occurrences()
     {

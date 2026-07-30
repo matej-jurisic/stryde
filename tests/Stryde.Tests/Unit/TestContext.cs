@@ -51,7 +51,7 @@ public class TestContext : IDisposable
         CheckpointService = new CheckpointService(Db);
         StateService = new StateService(Db);
         RecommendationService = new RecommendationService(Db, UserSettingsService, ActivityTypeService, StateService);
-        InsightsService = new InsightsService(Db, UserSettingsService);
+        InsightsService = new InsightsService(Db, UserSettingsService, StateService);
     }
 
     public void Dispose()

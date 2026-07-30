@@ -45,6 +45,25 @@ public class RecommendationService(
     private const int MaxHabitualDriftMinutes = 120;
 
     /// <summary>
+    /// Half-width of the window that gathers completions into one habitual start time. Wide enough to
+    /// hold 07:07 and 07:12 together - the fixed 15-minute buckets this replaced split them across the
+    /// 07:00/07:15 edge and left two clusters of one - and narrow enough that 07:00, 08:00 and 09:00
+    /// stay three answers rather than averaging into an 08:00 the user never started at.
+    /// </summary>
+    private const int StartTimeClusterRadiusMinutes = 20;
+
+    /// <summary>
+    /// What it takes for a cluster of start times to count as habitual. A habitual time is not just a
+    /// display figure: it overrides the type's preferred window in PlaceActivity and can leave a
+    /// suggestion with no time at all when that hour is taken, so one completion must not earn one.
+    /// The share is what stops a coincidence winning by default - three completions at 07:00 among
+    /// forty scattered ones is not a habit, and no answer beats a confident wrong one.
+    /// </summary>
+    private const int MinStartTimeSupport = 2;
+
+    private const double MinStartTimeShare = 0.4;
+
+    /// <summary>
     /// Earliest local time a suggestion may land at when it has no habitual start time of its own and
     /// its type's preferred window has no room left. The day boundary is usually the small hours,
     /// and a ghost at 04:00 is noise scrolled off the top of the grid. Ignored for today, where
@@ -177,7 +196,7 @@ public class RecommendationService(
             List<(DateTimeOffset Start, DateTimeOffset End)> intervals = [(dayStart, dayEnd)];
             if (requirementsByActivity.TryGetValue(activityId, out var groups))
                 foreach (var (stateId, allowed) in groups)
-                    intervals = IntersectIntervals(
+                    intervals = Intervals.Intersect(
                         intervals, stateTimelines[stateId].IntervalsWhere(allowed, dayStart, dayEnd));
 
             allowedIntervalCache[activityId] = intervals;
@@ -196,7 +215,7 @@ public class RecommendationService(
         // no requirements at all.
         List<(DateTimeOffset Start, DateTimeOffset End)> AllowedSlots(Guid activityId) =>
             requirementsByActivity.ContainsKey(activityId)
-                ? IntersectIntervals(freeSlots!, AllowedIntervals(activityId))
+                ? Intervals.Intersect(freeSlots!, AllowedIntervals(activityId))
                 : freeSlots!;
 
         // An activity needs a gap big enough for whichever is larger: what it usually takes, or the
@@ -459,27 +478,6 @@ public class RecommendationService(
         return result;
     }
 
-    /// <summary>
-    /// Overlap of two sorted, non-overlapping interval lists. Both the free slots and a state's
-    /// allowed stretches come out that way, so a linear sweep is enough.
-    /// </summary>
-    private static List<(DateTimeOffset Start, DateTimeOffset End)> IntersectIntervals(
-        List<(DateTimeOffset Start, DateTimeOffset End)> a,
-        List<(DateTimeOffset Start, DateTimeOffset End)> b)
-    {
-        var result = new List<(DateTimeOffset Start, DateTimeOffset End)>();
-        int i = 0, j = 0;
-        while (i < a.Count && j < b.Count)
-        {
-            var start = a[i].Start > b[j].Start ? a[i].Start : b[j].Start;
-            var end = a[i].End < b[j].End ? a[i].End : b[j].End;
-            if (start < end) result.Add((start, end));
-            if (a[i].End < b[j].End) i++;
-            else j++;
-        }
-        return result;
-    }
-
     /// <summary>Per-activity stats derived from windowed completed occurrences (all have StartAt).</summary>
     private sealed record ActivityStats(
         int? DurationMinutes, string? StartTime, int? StartMinutes, DateOnly LastDoneDay, double? MedianGapDays);
@@ -507,21 +505,46 @@ public class RecommendationService(
             ? (int)Math.Round(durations[durations.Count / 2])
             : null;
 
-        // Most common start time rounded to nearest 15 min, in user's timezone
-        var modeMinutes = timed
+        // Habitual start time: the largest cluster of completions, measured in minutes since the
+        // user's *day boundary* rather than midnight. Off midnight a 01:00 session sat at the far end
+        // of the axis from the 23:00 ones it belongs with; off the boundary they are adjacent, so one
+        // window can span them. The axis therefore ends at the boundary, which is the seam the user
+        // already chose as the quiet hour - no wraparound handling needed.
+        var boundaryMinutes = ctx.DayBoundary.Hour * 60 + ctx.DayBoundary.Minute;
+        var startOffsets = timed
             .Select(o =>
             {
                 var local = TimeZoneInfo.ConvertTime(o.StartAt!.Value, ctx.TimeZone);
-                var total = local.Hour * 60 + local.Minute;
-                return ((total + 7) / 15) * 15 % (24 * 60);
+                return (local.Hour * 60 + local.Minute - boundaryMinutes + 24 * 60) % (24 * 60);
             })
-            .GroupBy(m => m)
-            .OrderByDescending(g => g.Count())
-            .Select(g => (int?)g.Key)
-            .FirstOrDefault();
+            .OrderBy(m => m)
+            .ToList();
 
-        string? typicalStartTime = modeMinutes.HasValue
-            ? $"{modeMinutes.Value / 60:D2}:{modeMinutes.Value % 60:D2}"
+        int? startMinutes = null;
+        if (startOffsets.Count > 0)
+        {
+            // Every observed time is tried as a centre and keeps whatever falls within the radius.
+            // Sorted input plus a stable sort means ties go to the earliest centre, so the answer no
+            // longer depends on row order - the bucket version resolved an all-ties field by whatever
+            // order SQLite happened to return.
+            var best = startOffsets
+                .Select(centre => startOffsets
+                    .Where(m => Math.Abs(m - centre) <= StartTimeClusterRadiusMinutes)
+                    .ToList())
+                .OrderByDescending(cluster => cluster.Count)
+                .First();
+
+            if (best.Count >= MinStartTimeSupport && best.Count >= startOffsets.Count * MinStartTimeShare)
+            {
+                // The cluster's mean, to five minutes: a real average of when the thing was started
+                // rather than a bucket edge, without claiming 07:07 of precision it does not have.
+                var rounded = (int)Math.Round(best.Average() / 5) * 5;
+                startMinutes = (rounded + boundaryMinutes) % (24 * 60);
+            }
+        }
+
+        string? typicalStartTime = startMinutes.HasValue
+            ? $"{startMinutes.Value / 60:D2}:{startMinutes.Value % 60:D2}"
             : null;
 
         // Cadence: median gap in days between distinct completion days
@@ -541,7 +564,7 @@ public class RecommendationService(
             medianGap = gaps[gaps.Count / 2];
         }
 
-        return new ActivityStats(medianDuration, typicalStartTime, modeMinutes, doneDays[^1], medianGap);
+        return new ActivityStats(medianDuration, typicalStartTime, startMinutes, doneDays[^1], medianGap);
     }
 
     /// <summary>Next quarter hour at or after <paramref name="t"/>, so suggested times read cleanly.</summary>

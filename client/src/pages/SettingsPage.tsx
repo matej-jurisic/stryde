@@ -9,6 +9,8 @@ import { toastError } from '@/store/toasts'
 import { useAuthStore } from '@/store/auth'
 import { getThemePref, setThemePref, type ThemePref } from '@/lib/theme'
 import { isNative, getServerUrl, setServerUrl } from '@/lib/server-config'
+import { useStates } from '@/lib/useStates'
+import { StateValuePicker } from '@/components/activities/StateValuePicker'
 
 function timezoneOptions(current: string): string[] {
   const supported =
@@ -24,6 +26,12 @@ const THEME_OPTIONS: { value: ThemePref; label: string; Icon: typeof Sun }[] = [
   { value: 'system', label: 'System', Icon: Monitor },
 ]
 
+/**
+ * Which section's Save button was last used. Every section writes the same settings row through one
+ * mutation, so this is only about putting "Changes saved." under the button that was pressed.
+ */
+type SavedSection = 'planning' | 'insights'
+
 // ── page ───────────────────────────────────────────────────────────────────
 
 export function SettingsPage() {
@@ -38,8 +46,23 @@ export function SettingsPage() {
     queryFn: settingsApi.get,
   })
 
-  const [form, setForm] = useState({ timezone: '', dayBoundaryTime: '00:00', maxFocusGoals: 3, maxCalendarSuggestions: 6 })
-  const [saved, setSaved] = useState(false)
+  const { states } = useStates()
+  const hasStates = states.some((s) => s.values.length > 0)
+
+  const [form, setForm] = useState({
+    timezone: '',
+    dayBoundaryTime: '00:00',
+    maxFocusGoals: 3,
+    maxCalendarSuggestions: 6,
+    unaccountedStateValueIds: [] as string[],
+  })
+  const [savedSection, setSavedSection] = useState<SavedSection | null>(null)
+
+  // Every edit clears the confirmation, so "Changes saved." never describes a stale value.
+  function edit(patch: Partial<typeof form>) {
+    setSavedSection(null)
+    setForm((f) => ({ ...f, ...patch }))
+  }
 
   useEffect(() => {
     if (settings) {
@@ -48,19 +71,32 @@ export function SettingsPage() {
         dayBoundaryTime: settings.dayBoundaryTime,
         maxFocusGoals: settings.maxFocusGoals,
         maxCalendarSuggestions: settings.maxCalendarSuggestions,
+        unaccountedStateValueIds: settings.unaccountedStateValueIds,
       })
     }
   }, [settings])
 
   const saveMutation = useMutation({
-    mutationFn: () => settingsApi.update(form),
-    onSuccess: () => {
-      setSaved(true)
+    mutationFn: (_section: SavedSection) => settingsApi.update(form),
+    onSuccess: (_data, section) => {
+      setSavedSection(section)
       qc.invalidateQueries({ queryKey: ['settings'] })
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
+      // The mask decides which hours the unaccounted-time stats look at, so every figure moves.
+      qc.invalidateQueries({ queryKey: ['insights'] })
     },
   })
+
+  function footerProps(section: SavedSection) {
+    const isPending = saveMutation.isPending && saveMutation.variables === section
+    return {
+      status: savedSection === section && !isPending ? 'Changes saved.' : undefined,
+      error: saveMutation.variables === section ? saveError : null,
+      onSave: () => saveMutation.mutate(section),
+      isPending,
+    }
+  }
 
 
   async function handleLogout() {
@@ -116,7 +152,7 @@ export function SettingsPage() {
                 <SettingRow label="Timezone">
                   <select
                     value={form.timezone}
-                    onChange={(e) => { setSaved(false); setForm((f) => ({ ...f, timezone: e.target.value })) }}
+                    onChange={(e) => edit({ timezone: e.target.value })}
                     className={`${inputCls} max-w-[200px]`}
                   >
                     {timezoneOptions(form.timezone).map((tz) => (
@@ -130,7 +166,7 @@ export function SettingsPage() {
                     type="time"
                     lang="en-GB"
                     value={form.dayBoundaryTime}
-                    onChange={(e) => { setSaved(false); setForm((f) => ({ ...f, dayBoundaryTime: e.target.value })) }}
+                    onChange={(e) => edit({ dayBoundaryTime: e.target.value })}
                     className={inputCls}
                   />
                 </SettingRow>
@@ -141,7 +177,7 @@ export function SettingsPage() {
                     min={1}
                     max={20}
                     value={form.maxFocusGoals}
-                    onChange={(e) => { setSaved(false); setForm((f) => ({ ...f, maxFocusGoals: Number(e.target.value) })) }}
+                    onChange={(e) => edit({ maxFocusGoals: Number(e.target.value) })}
                     className={`${inputCls} w-16 text-center`}
                   />
                 </SettingRow>
@@ -155,18 +191,35 @@ export function SettingsPage() {
                     min={1}
                     max={12}
                     value={form.maxCalendarSuggestions}
-                    onChange={(e) => { setSaved(false); setForm((f) => ({ ...f, maxCalendarSuggestions: Number(e.target.value) })) }}
+                    onChange={(e) => edit({ maxCalendarSuggestions: Number(e.target.value) })}
                     className={`${inputCls} w-16 text-center`}
                   />
                 </SettingRow>
 
-                <SectionFooter
-                  status={saved && !saveMutation.isPending ? 'Changes saved.' : undefined}
-                  error={saveError}
-                  onSave={() => saveMutation.mutate()}
-                  isPending={saveMutation.isPending}
-                />
+                <SectionFooter {...footerProps('planning')} />
               </SettingSection>
+
+              {hasStates && (
+                <SettingSection label="Insights">
+                  <div className="flex flex-col gap-3 px-4 py-3.5">
+                    <div>
+                      <p className="text-sm text-foreground">Only count unaccounted time when</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Hours outside this are left out of the insights entirely rather than read as
+                        free time you did not use, so a week away does not register as empty days.
+                        Pick nothing to measure the whole day.
+                      </p>
+                    </div>
+                    <StateValuePicker
+                      states={states}
+                      value={form.unaccountedStateValueIds}
+                      onChange={(next) => edit({ unaccountedStateValueIds: next })}
+                    />
+                  </div>
+
+                  <SectionFooter {...footerProps('insights')} />
+                </SettingSection>
+              )}
 
               <SettingSection label="Appearance">
                 <SettingRow label="Theme">
