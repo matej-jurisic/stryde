@@ -3,8 +3,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { activitiesApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import type { Activity, Category, Goal } from '@/lib/types'
-import { NO_TYPE_LABEL } from '@/lib/activityTypes'
-import { useActivityTypes } from '@/lib/useActivityTypes'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
@@ -31,12 +29,10 @@ export function BulkAssignModal({
   onApplied,
 }: BulkAssignModalProps) {
   const qc = useQueryClient()
-  const types = useActivityTypes()
-  const [type, setType] = useState(KEEP)
   const [goalId, setGoalId] = useState(KEEP)
   const [categoryId, setCategoryId] = useState(KEEP)
 
-  const dirty = type !== KEEP || goalId !== KEEP || categoryId !== KEEP
+  const dirty = goalId !== KEEP || categoryId !== KEEP
 
   // No bulk endpoint exists; the PUT is a full replace, so unchanged fields are
   // resent from the activity itself.
@@ -46,19 +42,15 @@ export function BulkAssignModal({
         activities.map((a) =>
           activitiesApi.update(a.id, {
             title: a.title,
-            activityTypeId:
-              type === KEEP ? a.activityTypeId : type === CLEAR ? null : type,
             goalId: goalId === KEEP ? a.goalId : goalId === CLEAR ? null : goalId,
             categoryId:
               categoryId === KEEP ? a.categoryId : categoryId === CLEAR ? null : categoryId,
-            excludeFromRecommendations: a.excludeFromRecommendations,
           }),
         ),
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['activities'] })
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onApplied()
       onClose()
     },
@@ -83,19 +75,6 @@ export function BulkAssignModal({
         </>
       }
     >
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-foreground">Type</label>
-        <Select
-          value={type}
-          onChange={setType}
-          options={[
-            { value: KEEP, label: 'Keep current' },
-            { value: CLEAR, label: NO_TYPE_LABEL },
-            ...(types ?? []).map((t) => ({ value: t.id, label: t.name })),
-          ]}
-        />
-      </div>
-
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-foreground">Goal</label>
         <Select

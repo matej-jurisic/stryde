@@ -1,15 +1,14 @@
-import { Check, Lightbulb, LightbulbOff, Pencil, Trash2 } from 'lucide-react'
+import { Check, History, Pencil, Trash2 } from 'lucide-react'
 import type { Activity } from '@/lib/types'
-import { NO_TYPE_LABEL } from '@/lib/activityTypes'
 import { Badge } from '@/components/ui/Badge'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
-import { ActivityTypeIcon } from '@/components/activities/ActivityTypeIcon'
 
 const GOAL_TONE: Record<string, 'focus' | 'active' | 'bench' | 'neutral'> = {
   focus: 'focus',
   active: 'active',
   bench: 'bench',
+  neutral: 'neutral',
   closed: 'neutral',
 }
 
@@ -22,9 +21,8 @@ interface ActivityListRowProps {
   onOpen: () => void
   onEdit: () => void
   onDelete: () => void
-  onToggleSuggestions: () => void
+  onHistory: () => void
   /** Hidden when the section already says it (grouping by that attribute). */
-  hideType?: boolean
   hideCategory?: boolean
   hideGoal?: boolean
 }
@@ -37,19 +35,15 @@ export function ActivityListRow({
   onOpen,
   onEdit,
   onDelete,
-  onToggleSuggestions,
-  hideType,
+  onHistory,
   hideCategory,
   hideGoal,
 }: ActivityListRowProps) {
-  const muted = activity.excludeFromRecommendations
-  const type = activity.type
+  const category = activity.category
 
-  // No type is the unconstrained default - naming it on every row is noise.
-  const showType = !hideType && type !== null
-  const showCategory = !hideCategory && activity.category
+  const showCategory = !hideCategory && category
   const showGoal = !hideGoal && activity.goal
-  const hasMeta = showType || showCategory || showGoal || activity.subtasks.length > 0
+  const hasMeta = showCategory || showGoal || activity.subtasks.length > 0
 
   return (
     <li
@@ -76,13 +70,18 @@ export function ActivityListRow({
           </span>
         </button>
       ) : (
+        /* The category's own colour, tinted: it already drives every occurrence row and calendar
+           block for this activity, so the list reads in the same language as the calendar. */
         <span
-          title={type?.name ?? NO_TYPE_LABEL}
-          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground ${
-            muted ? 'opacity-50' : ''
-          }`}
+          title={category?.name ?? 'No category'}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted"
+          style={category ? { backgroundColor: `${category.color}1f` } : undefined}
         >
-          <ActivityTypeIcon icon={type?.icon} />
+          <CategoryIcon
+            icon={category?.icon}
+            color={category?.color ?? 'var(--color-muted-foreground)'}
+            size={15}
+          />
         </span>
       )}
 
@@ -90,25 +89,18 @@ export function ActivityListRow({
         onClick={selecting ? onToggleSelect : onOpen}
         className="min-w-0 flex-1 text-left"
       >
-        <span
-          className={`block truncate text-sm ${muted ? 'text-muted-foreground' : 'text-foreground'}`}
-        >
-          {activity.title}
-        </span>
+        <span className="block truncate text-sm text-foreground">{activity.title}</span>
         {hasMeta && (
           <span className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            {showType && (
-              <span className="text-xs text-muted-foreground">{type!.name}</span>
-            )}
             {showCategory && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <CategoryIcon
-                  icon={activity.category!.icon}
-                  color={activity.category!.color}
+                  icon={category!.icon}
+                  color={category!.color}
                   size={11}
                   strokeWidth={2}
                 />
-                {activity.category!.name}
+                {category!.name}
               </span>
             )}
             {activity.subtasks.length > 0 && (
@@ -128,28 +120,11 @@ export function ActivityListRow({
 
       {!selecting && (
         <div className="flex shrink-0 items-center gap-0.5">
-          {/* Muting is the one action worth a permanent tap target: it is used in streaks. */}
-          <button
-            onClick={onToggleSuggestions}
-            title={muted ? 'Allow suggestions' : 'Stop suggesting this'}
-            aria-label={muted ? 'Allow suggestions' : 'Stop suggesting this'}
-            aria-pressed={!muted}
-            className={`rounded-md p-1.5 transition-colors hover:bg-muted ${
-              muted
-                ? 'text-muted-foreground/60 hover:text-foreground'
-                : 'text-goal-focus hover:text-goal-focus'
-            }`}
-          >
-            {muted ? (
-              <LightbulbOff className="h-3.5 w-3.5" strokeWidth={2} />
-            ) : (
-              <Lightbulb className="h-3.5 w-3.5" strokeWidth={2} />
-            )}
-          </button>
           <ActionMenu
             ariaLabel={`Actions for ${activity.title}`}
             iconClassName="h-3.5 w-3.5"
             items={[
+              { icon: History, label: 'History', onClick: onHistory },
               { icon: Pencil, label: 'Edit', onClick: onEdit },
               'separator',
               { icon: Trash2, label: 'Delete', onClick: onDelete, destructive: true },

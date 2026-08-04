@@ -1,7 +1,5 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Stryde.Core.Data;
 using Xunit;
 
@@ -19,9 +17,6 @@ namespace Stryde.Tests.Unit;
 /// </summary>
 public class MigrationTests : IDisposable
 {
-    /// <summary>The migration immediately before types became rows.</summary>
-    private const string BeforeActivityTypes = "20260729230000_ResetRemovedActivityTypes";
-
     private readonly string _path = Path.Combine(
         Path.GetTempPath(), $"stryde-migrate-{Guid.NewGuid():N}.db");
 
@@ -46,101 +41,25 @@ public class MigrationTests : IDisposable
         Assert.Empty(db.Database.GetPendingMigrations());
     }
 
-    [Fact]
-    public void Migrate_seeds_activity_types_for_a_user_that_predates_them()
-    {
-        using (var db = NewContext())
-        {
-            // Stop one migration short, so the user row exists before ActivityTypes does - the
-            // situation the deployed database is actually in.
-            db.GetService<IMigrator>().Migrate(BeforeActivityTypes);
-            db.Database.ExecuteSqlRaw("""
-                INSERT INTO "Users" ("Id", "Username", "PasswordHash", "Timezone", "CreatedAt")
-                VALUES ('11111111-1111-1111-1111-111111111111', 'existing', 'x', 'UTC',
-                        '2026-07-01 00:00:00.0000000+00:00');
-                """);
-        }
-
-        using (var db = NewContext())
-        {
-            db.Database.Migrate();
-
-            var types = db.ActivityTypes.AsNoTracking().ToList();
-            Assert.Equal(
-                ["General", "Training", "Deep work"],
-                types.OrderBy(t => t.CreatedAt).Select(t => t.Name));
-
-            // The seed SQL builds ids by hand, so a malformed one would only show up as EF failing
-            // to read the row back - which is exactly what materialising the list above proves.
-            Assert.All(types, t => Assert.NotEqual(Guid.Empty, t.Id));
-            // Reading a row back is not enough: Guid.Parse ignores case, but a query does not.
-            // See Migrate_seeds_activity_types_that_can_be_found_by_id.
-            Assert.All(types, t => Assert.Equal(
-                Guid.Parse("11111111-1111-1111-1111-111111111111"), t.UserId));
-
-            var deepWork = types.Single(t => t.Name == "Deep work");
-            Assert.Equal(new TimeOnly(9, 0), deepWork.WindowStart);
-            Assert.Equal(90, deepWork.MinBlockMinutes);
-            Assert.Equal(2.5, deepWork.CadencePriorDays);
-        }
-    }
-
     /// <summary>
     /// Microsoft.Data.Sqlite binds a <see cref="Guid"/> parameter as UPPER-case TEXT and SQLite
-    /// compares TEXT case-sensitively, so a seed that mints ids in lower-case hex produces rows that
-    /// list fine - <see cref="Guid.Parse(string)"/> ignores case - but match nothing by key: every
-    /// update, delete and FK lookup on them 404s. Listing the rows cannot catch that; only a query
-    /// can.
+    /// compares TEXT case-sensitively, so a row whose id was written as lower-case hex lists fine -
+    /// <see cref="Guid.Parse(string)"/> ignores case - but matches nothing by key: every update,
+    /// delete and FK lookup on it 404s. Listing rows cannot catch that; only a query can.
     /// </summary>
     [Fact]
-    public void Migrate_seeds_activity_types_that_can_be_found_by_id()
+    public void Migrated_schema_round_trips_a_row_by_id()
     {
-        using (var db = NewContext())
-        {
-            db.GetService<IMigrator>().Migrate(BeforeActivityTypes);
-            db.Database.ExecuteSqlRaw("""
-                INSERT INTO "Users" ("Id", "Username", "PasswordHash", "Timezone", "CreatedAt")
-                VALUES ('44444444-4444-4444-4444-444444444444', 'existing', 'x', 'UTC',
-                        '2026-07-01 00:00:00.0000000+00:00');
-                """);
-        }
+        using var db = NewContext();
+        db.Database.Migrate();
 
-        using (var db = NewContext())
-        {
-            db.Database.Migrate();
+        var user = new Core.Entities.User { Username = "u", PasswordHash = "x", Timezone = "UTC" };
+        db.Users.Add(user);
+        db.Activities.Add(new Core.Entities.Activity { UserId = user.Id, Title = "run" });
+        db.SaveChanges();
 
-            foreach (var id in db.ActivityTypes.AsNoTracking().Select(t => t.Id).ToList())
-                Assert.NotNull(db.ActivityTypes.AsNoTracking().FirstOrDefault(t => t.Id == id));
-        }
-    }
-
-    [Fact]
-    public void Migrate_leaves_existing_activities_typeless_rather_than_dropping_them()
-    {
-        using (var db = NewContext())
-        {
-            db.GetService<IMigrator>().Migrate(BeforeActivityTypes);
-            db.Database.ExecuteSqlRaw("""
-                INSERT INTO "Users" ("Id", "Username", "PasswordHash", "Timezone", "CreatedAt")
-                VALUES ('22222222-2222-2222-2222-222222222222', 'existing', 'x', 'UTC',
-                        '2026-07-01 00:00:00.0000000+00:00');
-                INSERT INTO "Activities"
-                    ("Id", "UserId", "Title", "Kind", "Type", "ExcludeFromRecommendations", "CreatedAt")
-                VALUES ('33333333-3333-3333-3333-333333333333',
-                        '22222222-2222-2222-2222-222222222222', 'leg day', 'activity', 'training', 0,
-                        '2026-07-01 00:00:00.0000000+00:00');
-                """);
-        }
-
-        using (var db = NewContext())
-        {
-            db.Database.Migrate();
-
-            // The old Type column is dropped rather than mapped across: null is the unconstrained
-            // default now, and the activity has to survive the loss of its type.
-            var activity = db.Activities.AsNoTracking().Single();
-            Assert.Equal("leg day", activity.Title);
-            Assert.Null(activity.ActivityTypeId);
-        }
+        Assert.NotNull(db.Users.AsNoTracking().FirstOrDefault(u => u.Id == user.Id));
+        foreach (var id in db.Activities.AsNoTracking().Select(a => a.Id).ToList())
+            Assert.NotNull(db.Activities.AsNoTracking().FirstOrDefault(a => a.Id == id));
     }
 }

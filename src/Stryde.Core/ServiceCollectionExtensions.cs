@@ -20,15 +20,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<PasswordHasher>();
         services.AddScoped<AuthService>();
         services.AddScoped<UserSettingsService>();
-        services.AddScoped<ActivityTypeService>();
         services.AddScoped<GoalService>();
         services.AddScoped<ActivityService>();
         services.AddScoped<ActivitySubtaskService>();
         services.AddScoped<OccurrenceService>();
         services.AddScoped<CheckpointService>();
-        services.AddScoped<RecommendationService>();
         services.AddScoped<CategoryService>();
-        services.AddScoped<StateService>();
         services.AddScoped<InsightsService>();
         services.AddScoped<ExportService>();
 

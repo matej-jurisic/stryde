@@ -57,7 +57,6 @@ export function SkipRescheduleModal({ open, onClose, occurrence, onDone }: SkipR
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onDone()
     },
   })

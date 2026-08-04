@@ -11,8 +11,8 @@ using Stryde.Core.Data;
 namespace Stryde.Core.Migrations
 {
     [DbContext(typeof(StrydeDbContext))]
-    [Migration("20260720132052_AddActivityExcludeFromRecommendations")]
-    partial class AddActivityExcludeFromRecommendations
+    [Migration("20260804093310_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -31,9 +31,6 @@ namespace Stryde.Core.Migrations
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
-
-                    b.Property<bool>("ExcludeFromRecommendations")
-                        .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("GoalId")
                         .HasColumnType("TEXT");
@@ -179,6 +176,8 @@ namespace Stryde.Core.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("UserId");
+
                     b.ToTable("Goals");
                 });
 
@@ -231,6 +230,8 @@ namespace Stryde.Core.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ActivityId");
+
+                    b.HasIndex("UserId", "Status");
 
                     b.ToTable("Occurrences");
                 });

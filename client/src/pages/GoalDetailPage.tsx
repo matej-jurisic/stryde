@@ -243,7 +243,6 @@ export function GoalDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['goals'] })
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       navigate('/goals')
     },
     onError: (err) => toastError(err, 'Could not delete the goal.'),
@@ -255,7 +254,6 @@ export function GoalDetailPage() {
       setStatusError('')
       qc.invalidateQueries({ queryKey: ['goals'] })
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
     onError: (err) => {
       setStatusError(err instanceof ApiError ? err.message : 'Something went wrong.')

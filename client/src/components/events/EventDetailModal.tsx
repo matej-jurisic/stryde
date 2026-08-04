@@ -140,7 +140,6 @@ const statusMutation = useMutation({
     mutationFn: (status: EventStatus) => occurrencesApi.setStatus(occurrence!.id, status),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
     onError: (err) => toastError(err, 'Could not update the status.'),
@@ -154,7 +153,6 @@ const statusMutation = useMutation({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
     onError: (err) => toastError(err, 'Could not update the occurrence.'),
@@ -164,7 +162,6 @@ const statusMutation = useMutation({
     mutationFn: () => occurrencesApi.update(occurrence!.id, { title: occurrence!.title, startAt: null, endAt: null, isAllDay: false, isPlanned: false, durationMinutes: occurrence!.durationMinutes }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
     onError: (err) => toastError(err, 'Could not update the occurrence.'),
@@ -178,7 +175,6 @@ const statusMutation = useMutation({
         old ? old.filter((o) => o.id !== occurrence!.id) : old,
       )
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
     onError: (err) => toastError(err, 'Could not delete the occurrence.'),

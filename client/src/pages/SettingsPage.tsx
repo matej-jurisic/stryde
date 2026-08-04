@@ -38,7 +38,7 @@ export function SettingsPage() {
     queryFn: settingsApi.get,
   })
 
-  const [form, setForm] = useState({ timezone: '', dayBoundaryTime: '00:00', maxFocusGoals: 3, maxCalendarSuggestions: 6 })
+  const [form, setForm] = useState({ timezone: '', dayBoundaryTime: '00:00', maxFocusGoals: 3 })
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
@@ -47,7 +47,6 @@ export function SettingsPage() {
         timezone: settings.timezone,
         dayBoundaryTime: settings.dayBoundaryTime,
         maxFocusGoals: settings.maxFocusGoals,
-        maxCalendarSuggestions: settings.maxCalendarSuggestions,
       })
     }
   }, [settings])
@@ -58,7 +57,6 @@ export function SettingsPage() {
       setSaved(true)
       qc.invalidateQueries({ queryKey: ['settings'] })
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
   })
 
@@ -142,20 +140,6 @@ export function SettingsPage() {
                     max={20}
                     value={form.maxFocusGoals}
                     onChange={(e) => { setSaved(false); setForm((f) => ({ ...f, maxFocusGoals: Number(e.target.value) })) }}
-                    className={`${inputCls} w-16 text-center`}
-                  />
-                </SettingRow>
-
-                <SettingRow
-                  label="Calendar suggestions"
-                  hint="How many suggested slots the calendar draws per day"
-                >
-                  <input
-                    type="number"
-                    min={1}
-                    max={12}
-                    value={form.maxCalendarSuggestions}
-                    onChange={(e) => { setSaved(false); setForm((f) => ({ ...f, maxCalendarSuggestions: Number(e.target.value) })) }}
                     className={`${inputCls} w-16 text-center`}
                   />
                 </SettingRow>

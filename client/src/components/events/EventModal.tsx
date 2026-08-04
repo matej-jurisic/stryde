@@ -260,7 +260,6 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
   })
@@ -270,7 +269,6 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
     onSuccess: () => {
       setConfirmDelete(false)
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
     onError: (err) => toastError(err, 'Could not delete the occurrence.'),

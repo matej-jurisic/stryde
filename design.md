@@ -15,7 +15,7 @@ Modern, clean, minimalist web-based dashboard. Spacious, organized, strictly pro
 ### Base Colors
 
 - **Canvas (app background):** Light Gray `#F3F4F6`. The outer shell — visible between panels.
-- **Panel / Card background:** Pure White `#FFFFFF`. Sidebar, middle column, cards.
+- **Panel / Card background:** Pure White `#FFFFFF`. Sidebar, cards.
 - **Borders & Dividers:** Very Light Gray `#E5E7EB`. All column separators, card borders, list dividers.
 
 ### Text Colors
@@ -49,13 +49,13 @@ Modern, clean, minimalist web-based dashboard. Spacious, organized, strictly pro
 
 ## Layout & Structure
 
-### Three-Pane Layout
+### Two-Pane Layout
 
 ```
-[Left Sidebar 240px] | [Middle Column 320px] | [Right Canvas — fluid]
+[Left Sidebar 240px] | [Right Canvas — fluid]
 ```
 
-All panes are separated by a 1px `border-[var(--border)]` vertical divider. No gap, no padding between panes.
+The panes are separated by a 1px `border-[var(--border)]` vertical divider. No gap, no padding between them. The canvas is full width on every page; no view reserves a fixed side panel.
 
 ### 1. Left Sidebar (240px fixed)
 
@@ -67,28 +67,17 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - **Bottom (pinned):** Settings item, separated by `border-t`.
 - Sidebar is `sticky top-0 h-screen` — does not scroll.
 
-### 2. Middle Column (320px fixed)
-
-- White background (`--card`).
-- **Purpose:** In the Daily Plan and Calendar day views — Recommendation Engine surface. In other views — contextual panel or collapsed.
-- **Top:** Column header ("Recommendations"), followed by a full-width outlined "+ New Event" button.
-- **Content:** "Floating" first (already-committed work needing a time), then activities grouped by recommendation tier label ("Focus Goals", "Active Goals", "Based on Your Habits").
-- **Suggestion list items:** two side-by-side targets, never nested buttons.
-  - *Body* (opens the event modal): title, effort floated right (`~45m`), reason line beneath in `text-[11px] text-muted-foreground/80`, goal tag pill below (color-matched to goal status).
-  - *Action* (right edge): a `History` icon at 50% opacity rising to full on row hover, then when the server returned a suggested slot, an outlined mono pill showing `+ 18:00` that schedules there in one click, hover shifting to primary tint. With no slot the pill degrades to the plain `CalendarPlus` icon that opens the modal. The history icon never hides entirely: there is no hover on touch to reveal it with.
-  - The reason line is optional: activities with no completion history show title and action only.
-- Separated from canvas by 1px border-r.
-
-### 3. Right Canvas (fluid)
+### 2. Right Canvas (fluid)
 
 - White background.
 - **Top bar:** Current date, prev/next arrows, view toggle, zoom in/out controls (adjusts pixel-per-hour scale).
+- **View toggle:** Day / 3 days / Week as three segments in one `h-8 rounded-md border border-border` shell, matching the other header buttons - no track fill, the active segment is just `bg-muted`, which is also the header buttons' hover state. Only colour changes between states - never the font weight, which would resize the segment and shift the whole control on every switch. All three sit on the bar at every width, with full labels, so the current range is readable without opening anything.
 - **Floating row:** All-day row pinned above the time grid — shows floating occurrences as compact chips. Overdue occurrences are rendered in a separate sticky band at the top of the scroll container so they stay visible while scrolling.
 - **Content:** Time-based vertical grid. Hours listed on the far left. Event blocks placed in their time slots.
 - **Event blocks:** Light-tinted background + solid 1px colored left border, matching the event's goal color. Title + time range inside.
-- **Clicking empty grid** opens the state snapshot dialog for that quarter-hour (see below). Creating an occurrence keeps the drag, and the long press on touch: the gesture that costs nothing answers a question, and the one that writes has to be deliberate.
-- On touch the bar for "a tap" is high, because a scrolling finger keeps producing near-taps: under 250ms, no latched swipe direction, not landed on a still-gliding view, and the scroll position unchanged while it was down. A press that misses any of those does nothing at all - the dialog is a convenience, and a convenience that fires while you are reading the day is worse than no dialog.
-- **Suggestion ghosts:** Toggled by the `Sparkles` button in the top bar (tinted primary when on), capped per day by the `Calendar suggestions` setting. Placeholder blocks drawn where the engine would place a suggested activity: **dotted** 1.5px border in the activity's category color (planned occurrences own the dashed border, real ones the solid one), a very faint tint over an opaque card base, `Sparkles` icon + title, and `opacity-70` rising to full on hover. They render *below* the event layer, so a real block always wins the pixels. A ghost is often under 26px tall, so it gets no second button: click schedules, and **right-click or a 400ms hold** opens the activity history dialog. The `title` names both, since neither gesture announces itself.
+- **Clicking empty grid creates** a 30-minute occurrence there, pre-filled in the create modal. The calendar's job is to show what you decided and to make adding something cheap, so the cheapest gesture does the most common thing. A drag still sets an exact span, and a long press does it on touch, for when the length matters.
+- Nothing is drawn on empty grid: no availability overlay, no suggested slots. An empty hour means nothing in particular, because the calendar is not assumed to be complete.
+- On touch the bar for "a tap" is high, because a scrolling finger keeps producing near-taps: under 250ms, no latched swipe direction, not landed on a still-gliding view, and the scroll position unchanged while it was down. A press that misses any of those does nothing at all - creating something by accident while reading the day is far worse than a tap that does not register.
 
 ---
 
@@ -99,13 +88,7 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - 14px text, `gap-3`, `px-3 py-2`, `rounded-[var(--radius-md)]`.
 - Active: `bg-accent`, icon `text-primary`, label `text-foreground font-semibold`.
 - Inactive: icon + label both `text-muted-foreground`. Hover: `bg-accent`.
-- A sidebar item stays active on its sub-routes (an activity, a goal, the Types and States tabs), so drilling in never leaves the sidebar looking like nowhere is selected.
-
-### Page tabs
-
-- One screen split into sections gets an **underline** tab strip directly under the `PageHeader`: full-width `border-b border-border` bar, items `gap-4`, 12px medium text, active item `border-b-2 border-primary text-foreground` pulled onto the bar with `-mb-px`, inactive `text-muted-foreground` with no border.
-- Reserved for *navigation between sub-pages* (Activities / Types / States). Filters and grouping stay pills and segmented controls in the toolbar below, so the two never read as the same control.
-- The strip is a shared component (`ActivitiesTabs`) rendered by each of its routes, not a wrapper: each tab owns its own header action.
+- A sidebar item stays active on its sub-routes (an activity, a goal), so drilling in never leaves the sidebar looking like nowhere is selected.
 
 ### Buttons
 
@@ -114,40 +97,17 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 - Ghost: transparent bg, `hover:bg-accent`.
 - Height: `h-9` (md), `h-8` (sm). Font: regular weight (not semibold or bold).
 - Border radius: 6-8px.
-- **Delete is an icon-only square button**, never a labelled one: `Trash2` in `text-destructive` on a transparent ground, hover `bg-destructive/10`, sized to the row it sits in (`h-9 w-9` beside md buttons, `h-8 w-8` beside sm). It carries the name in `aria-label`, swaps the icon for an inline spinner while the delete is in flight, and always opens a `ConfirmDialog` rather than acting. Where the same footer holds Cancel and Save it gets `mr-auto`, so the full width separates it from the button the user actually meant to press. Used by `EventDetailModal`, the type editor and the state editor.
-- The `Button` component sets no gap between its children, so **never give a `Button` an icon and a label together** - they render flush and read as one glyph. Icon plus label is a hand-rolled `flex ... gap-1.5` button (see the empty-state "New state" / "New type" buttons).
-
-### Duration fields
-
-- A span of time the user *chooses the scale of* is a number input plus a unit select (`minutes / hours / days`), both on the shared `inputCls` treatment, reading as a sentence off the end of the control it qualifies: `Physical  [Fresh] [Tired]  for [10] [hours]`. Never a bare minutes box - the values people want are "10 hours" and "2 days", and a raw `2880` is a small arithmetic exam. Used by the "Changes" field in `ActivityModal`.
-- **The duration attaches to the pick, it does not summarise it.** A list underneath that restates `Physical: Tired  for [10] [hours]` prints the state name and value a second time for no new information; hang the input off the row that made the choice instead.
-- **Changing the unit reinterprets the number, it does not convert it.** Typing 2 and switching hours to days means 2 days, not 0.08 of one.
-- Blank means "no limit", and that only gets a helper line while the field is actually blank.
-- A fixed-scale span (a time-of-day window, a minimum block) stays a plain field; the unit select is for the ones that legitimately range from minutes to weeks.
-
-### State pickers (activity modal)
-
-- The two state fields are **one panel**, not two loose fields: `divide-y divide-border rounded-lg border border-border bg-muted/40`, a `text-xs font-medium` sub-label per half ("Only suggest when" / "Doing it changes"). Both halves draw the same chips from the same states, so as bare labelled rows they read as one control accidentally rendered twice - the divider and the sub-labels are the only thing that says which half is the condition and which is the consequence.
-- **One row per state, name in a fixed left column** (`h-8 w-20`, `text-xs text-muted-foreground`, truncating with a `title`), chips wrapping in the rest of the width. A name on its own line above its chips doubles the height of the field and leaves the right half of every row empty.
-- Chips are the activity-type chip: `h-8 rounded-lg border px-2.5 text-xs font-medium`, selected `border-primary bg-primary/10 text-foreground`.
-- Explain a *missing* control where it would have been, in three words, not in a paragraph below: picking a state's default value shows `defaults don't expire` where the duration would sit.
-
-### State snapshot dialog (calendar)
-
-- Opened by clicking empty grid. Titled with the moment itself (`States at Thu 30 Jul, 14:15`), so the dialog needs no restating line inside it.
-- Reuses the activity modal's state panel shape: `divide-y divide-border rounded-lg border border-border bg-muted/40`, one row per state, **name in a fixed left column** (`w-20`, `text-xs text-muted-foreground`), value on the right. The value is the selected chip (`border-primary bg-primary/10`) - the same glyph that would pick it, here just showing it.
-- Under the chip, `text-xs text-muted-foreground` prose carrying the cause then the expiry, as **two short sentences**: `Set by commute in at 09:00. Holds until 17:30, then Home.` One line, not a table: the fields are only ever read together, and half of them are absent for a value nothing has touched. Two facts though, so two sentences - comma-joining them stacks separators of different weight and the reader has to sort out which is which. The only comma left is the handover to the next value. A timestamp mid-sentence drops its own comma too (`Tue 28 Jul 19:30`), unlike the title's (`Thu 30 Jul, 14:15`), for the same reason.
-- **No buttons.** A derived reading has nothing to save, and offering an edit here would invite fixing the symptom instead of the schedule that produced it.
-- While loading, placeholder rows in the real rows' shape and count (from the cached state list). The panel is animating in as the request lands, so it must already be its final height: a one-line "loading" that grows into the answer reads as a stutter, and the first open - the slow one - is exactly when it happens.
+- **Delete is an icon-only square button**, never a labelled one: `Trash2` in `text-destructive` on a transparent ground, hover `bg-destructive/10`, sized to the row it sits in (`h-9 w-9` beside md buttons, `h-8 w-8` beside sm). It carries the name in `aria-label`, swaps the icon for an inline spinner while the delete is in flight, and always opens a `ConfirmDialog` rather than acting. Where the same footer holds Cancel and Save it gets `mr-auto`, so the full width separates it from the button the user actually meant to press. Used by `EventDetailModal`.
+- The `Button` component sets no gap between its children, so **never give a `Button` an icon and a label together** - they render flush and read as one glyph. Icon plus label is a hand-rolled `flex ... gap-1.5` button (see the empty-state "New Activity" button).
 
 ### Activity history dialog
 
-- Titled `<activity> - history`, opened from a suggestion. Meta line first (type, category, goal badge), then four stat tiles, then the day strip, then the recent list. Widest-to-narrowest: the tiles answer the question in one glance, the strip shows the shape, the list is the detail you only sometimes want.
+- Titled `<activity> - history`, opened from an activity row's action menu. Meta line first (category, goal badge), then four stat tiles, then the day strip, then the recent list. Widest-to-narrowest: the tiles answer the question in one glance, the strip shows the shape, the list is the detail you only sometimes want.
 - **Stat tiles:** `grid-cols-2 sm:grid-cols-4`, each `rounded-lg border border-border bg-muted/40 px-2.5 py-2` with a `text-[10px] uppercase tracking-wide` label over a `text-sm` value. A tile with nothing to show reads `Unknown` in muted text rather than vanishing: a missing figure is itself an answer, and four tiles that come and go make the dialog resize between activities.
 - **Day strip:** centered, laid out the way a calendar is - seven weekday columns under their `Mon`-`Sun` names, eight week rows, current week last. Eight is two months: enough to read a rhythm, not so much that the grid outweighs the tiles above it. Cells are `h-7 w-7 rounded-[4px]` with `gap-1`, sized so a three-letter weekday fits above the column rather than being abbreviated to an initial. Done is solid `bg-primary`, skipped `bg-muted-foreground/60`, pending an outlined `border-primary/50 bg-primary/10`, an empty day flat `bg-muted`, and a day that has not happened yet nothing at all. Each cell carries its date as a `title`; the legend, also centered, spells out the three fills and the window.
 - **Recent list:** the activity detail page's occurrence row, at ten rows: status dot, date with `HH:mm` in mono when the occurrence has a time, status word on the right. The box is a **fixed `h-[11.5rem]`** that scrolls - the row count is the one thing here that varies with the data, so it is the one thing not allowed to set the dialog's height.
-- **While loading**, the whole shell renders at its final height, as in the state snapshot: tiles with a pulsing bar where the value goes, the strip empty (its size does not depend on the data), and five placeholder rows filling the recent box.
-- **Read-only**, like the state snapshot: the two footer buttons are `Close` and an outlined `Open activity` that leads to the detail page for anything this dialog deliberately leaves out.
+- **While loading**, the whole shell renders at its final height: tiles with a pulsing bar where the value goes, the strip empty (its size does not depend on the data), and five placeholder rows filling the recent box. The panel is animating in as the request lands, so it must already be its final height - a shell that grows into the answer reads as a stutter, and the first open is exactly when it happens.
+- **Read-only**: the two footer buttons are `Close` and an outlined `Open activity` that leads to the detail page for anything this dialog deliberately leaves out.
 
 ### Checkboxes (events)
 
@@ -195,7 +155,7 @@ All panes are separated by a 1px `border-[var(--border)]` vertical divider. No g
 
 ### Scrollbars
 
-- Internal scroll areas (sidebar category list, suggestions panel, calendar grid) use the `.scroll-slim` utility from `index.css`: a thin scrollbar whose thumb is invisible until the container is hovered, tinted from `--muted-foreground`. Never leave a default OS scrollbar visible inside a panel.
+- Internal scroll areas (sidebar category list, calendar grid, the history dialog's recent list) use the `.scroll-slim` utility from `index.css`: a thin scrollbar whose thumb is invisible until the container is hovered, tinted from `--muted-foreground`. Never leave a default OS scrollbar visible inside a panel.
 
 ### Sidebar & Panel Animations
 
@@ -213,16 +173,49 @@ The left sidebar and the middle recommendation panel slide in/out with CSS trans
 
 ## Daily Plan Page
 
-The `/plan` view follows the three-pane layout: suggestions in the middle column, and the right canvas holds (top to bottom):
+The `/plan` view is a single canvas holding (top to bottom):
 
 1. **Day header** — 57px bar: prev/next chevrons, day title (full on `sm+`, compact below), jump-to-today button (only when the viewed day is not today), date input (`sm+` only), and a `+`. Same pattern as the calendar header.
-2. **Briefing hero** — `rounded-xl border` card on a `from-card to-muted/40` gradient: a 56px progress ring (5px stroke, primary) holding the day's completion percentage, a greeting line with a `Sunrise`/`MoonStar` icon, a `text-lg font-semibold` headline, and a stat row (done / left / planned / overdue) where the numbers are `tabular-nums` `text-foreground` and only overdue takes `text-destructive`.
-3. **Focus goal chips** — inside the hero, one bordered chip per Focus goal in a 1-up / `sm:`2-up grid: status dot, title, last-session recency, and either the milestone percentage (mono) or the ongoing occurrence bar.
-4. **Overdue** — `border-destructive/30 bg-destructive/5` card: the count, a "Move to tomorrow" button (`bg-foreground text-background`), then the rows in a plain card list.
-5. **Timeline agenda** — a three-column grid (content-sized time gutter, 0.75rem spine, fluid rows) so every row shares one time column. The spine is a 1px `border` line with a 2px dot per row, ringed in `background`; the current time is a primary label, dot, and hairline splitting past from upcoming. Relative labels ("now", "in 40m") sit under the gutter time. No hour grid: this is a checklist, not a scheduling surface.
-6. **Planned** and **Floating** — uppercase section labels over bordered card lists.
+2. **Focus goal chips** — one bordered chip per Focus goal in a 1-up / `sm:`2-up grid: status dot, title, last-session recency, and either the milestone percentage (mono) or the ongoing occurrence bar. **Goals open the day, not metrics.** There is deliberately no completion ring and no done/left/planned stat row: those score how much of a day was executed, which turns the page into a report card for a schedule the app never asked you to keep.
+3. **Overdue** — `border-destructive/30 bg-destructive/5` card: the count, a "Move to tomorrow" button (`bg-foreground text-background`), then the rows in a plain card list.
+4. **Timeline agenda** — a three-column grid (content-sized time gutter, 0.75rem spine, fluid rows) so every row shares one time column. The spine is a 1px `border` line with a 2px dot per row, ringed in `background`; the current time is a primary label, dot, and hairline splitting past from upcoming. Relative labels ("now", "in 40m") sit under the gutter time. No hour grid: this is a checklist, not a scheduling surface.
+5. **Planned** and **Floating** — uppercase section labels over bordered card lists. These are the holding places: something can live here indefinitely without a time, which is the point.
 
-Mobile: single column, suggestions behind the header's `Menu` toggle.
+Mobile: single column.
+
+---
+
+## Calendar Grid
+
+The grid runs on its own line colour, `--calendar-line`, lighter than the app's `border` because these
+rules sit under content for the whole visible day. Half-hour lines, the column borders and the header's
+bottom rule all share it, so the grid reads as two shades and not three; full hours are the second
+shade, `muted-foreground` at 30% (dropping to `--calendar-line` in compact view, where the collapsed
+bands already break the grid up). The current time is a `destructive` hairline with
+a dot in the gutter. Blocks carry their category's colour; the grid itself stays neutral so colour
+means category and nothing else.
+
+**Collapsed bands** (compact mode) mark a stretch of the day that has been elided. A band is 20px
+tall, `bg-muted/40` under a 135° 1px `border` hatch, closed top and bottom by a full-width `border`
+line, with its range ("09:15 – 10:30") centred in `9px` `muted-foreground` on a `background/80` chip
+so it stays legible over the hatch. The hatch is the whole point: an elided run must never read as
+empty grid, because empty grid is a meaningful thing to see on this calendar.
+
+The band's height is a hard constraint, not a taste call: at the minimum zoom an hour of grid is only
+32px, so a band any taller stops being worth substituting exactly where the day is most cramped.
+
+Band edges land on the quarter hour, not the hour, so the hour and half-hour lines are drawn at
+absolute positions rather than stepped from a segment's start. The rhythm stays on the clock even
+though the segments do not.
+
+The left gutter carries the hour labels whenever one scale can speak for the whole grid — always in
+day view, and in every view while expanded, since expanded columns share the linear scale. **Only
+compact multi-day blanks it**, where each column collapses its own emptiness and no single set of
+labels would be true. Nothing replaces them there: the band labels give the boundaries and each block
+carries its own time, so per-column hour labels would only be clutter in a narrow column.
+
+The compact toggle sits left of the range switch in the toolbar: `FoldVertical` when the grid is full,
+`UnfoldVertical` when it is collapsed, tinted `bg-muted` while active.
 
 ---
 
@@ -237,9 +230,9 @@ Mobile: single column, suggestions behind the header's `Menu` toggle.
 
 One `max-w-2xl` column of sections, each an uppercase label over a bordered card with `divide-y` rows. No chart: every stat here is a duration, and a labelled row with a bar reads better than a column per day.
 
+Everything on this page is a **sum of what was logged**. Nothing is a percentage of a day and nothing counts what is missing, so the page stays honest however sparse the calendar is.
+
 - **Period toggle:** segmented control (7 days / 30 days) on a `bg-muted` track with a `p-0.5` inset; the active option is a raised `bg-card` chip. Sits above the first section, left-aligned.
-- **Unaccounted time:** headline row (label left, duration right in `tabular-nums`) with the trend against the previous period as a `text-xs text-muted-foreground` line beneath.
-- **Gap lists** (*Biggest empty blocks*, *Often empty*): one row each — day or time range on the left, duration or "empty on X of Y days" right-aligned, all figures `tabular-nums`.
 - **Time by activity / by category:** rows with title (category rows lead with the category icon; never colored text), duration right-aligned (`tabular-nums`), and a 4px proportional bar underneath in the category's own color on a `bg-muted` track. Uncategorized uses `CircleDashed` + muted tones.
 
 ---
@@ -258,7 +251,7 @@ One `max-w-2xl` column of sections, each an uppercase label over a bordered card
 
 Single-user app: the user designed the domain, so the UI never explains it back to them.
 
-- **No concept explainers.** Empty states are a title and a CTA, never a paragraph defining what a state, type, activity, or occurrence is.
+- **No concept explainers.** Empty states are a title and a CTA, never a paragraph defining what an activity, goal, or occurrence is.
 - **No restating the controls.** A helper line under a field is only worth its space if it says something the field itself does not.
 - **Generated data summaries are fine** (`describeProfile`/`profileHint`: the type's actual numbers), because they show values that are not otherwise on screen. Keep them to one terse line.
 - **Field labels are labels, not sentences.** "Assumed cadence", not "Before I've learned from your history, assume this happens".

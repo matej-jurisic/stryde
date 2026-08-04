@@ -74,10 +74,7 @@ app.MapActivityEndpoints();
 app.MapOccurrenceEndpoints();
 app.MapCheckpointEndpoints();
 app.MapSettingsEndpoints();
-app.MapRecommendationEndpoints();
 app.MapCategoryEndpoints();
-app.MapStateEndpoints();
-app.MapActivityTypeEndpoints();
 app.MapInsightsEndpoints();
 app.MapExportEndpoints();
 

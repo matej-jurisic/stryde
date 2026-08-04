@@ -64,9 +64,6 @@ public class UserSettingsService(StrydeDbContext db)
         if (req.MaxFocusGoals < 1 || req.MaxFocusGoals > 20)
             return Result<UserSettingsDto>.Fail(new Error(ErrorType.Validation, "Max focus goals must be between 1 and 20."));
 
-        if (req.MaxCalendarSuggestions < 1 || req.MaxCalendarSuggestions > 12)
-            return Result<UserSettingsDto>.Fail(new Error(ErrorType.Validation, "Calendar suggestions must be between 1 and 12."));
-
         if (!TimeOnly.TryParseExact(req.DayBoundaryTime, ["HH:mm", "H:mm"], out var boundary))
             return Result<UserSettingsDto>.Fail(new Error(ErrorType.Validation, "Day boundary time must be in HH:mm format."));
 
@@ -79,7 +76,6 @@ public class UserSettingsService(StrydeDbContext db)
         var settings = await GetOrCreateAsync(userId);
         settings.MaxFocusGoals = req.MaxFocusGoals;
         settings.DayBoundaryTime = boundary;
-        settings.MaxCalendarSuggestions = req.MaxCalendarSuggestions;
         user.Timezone = req.Timezone;
         await db.SaveChangesAsync();
 

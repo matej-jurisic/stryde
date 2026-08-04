@@ -62,7 +62,6 @@ export function GoalModal({ open, onClose, goal }: GoalModalProps) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['goals'] })
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
       onClose()
     },
     onError: (err) => {

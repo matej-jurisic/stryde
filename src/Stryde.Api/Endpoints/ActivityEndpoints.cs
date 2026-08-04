@@ -44,14 +44,6 @@ public static class ActivityEndpoints
             return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
         });
 
-        group.MapPatch("/{id:guid}/recommendations", async (Guid id, SetActivityRecommendationsRequest req, ClaimsPrincipal principal, ActivityService svc) =>
-        {
-            var userId = principal.GetUserId();
-            if (userId is null) return Results.Unauthorized();
-            var result = await svc.SetRecommendationsAsync(id, userId.Value, req);
-            return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
-        });
-
         group.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal principal, ActivityService svc) =>
         {
             var userId = principal.GetUserId();

@@ -23,17 +23,11 @@ namespace Stryde.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ActivityTypeId")
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("CategoryId")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
-
-                    b.Property<bool>("ExcludeFromRecommendations")
-                        .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("GoalId")
                         .HasColumnType("TEXT");
@@ -51,8 +45,6 @@ namespace Stryde.Core.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ActivityTypeId");
-
                     b.HasIndex("CategoryId");
 
                     b.HasIndex("GoalId");
@@ -60,42 +52,6 @@ namespace Stryde.Core.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("Activities");
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.ActivityStateEffect", b =>
-                {
-                    b.Property<Guid>("ActivityId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("StateId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("DurationMinutes")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<Guid>("StateValueId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("ActivityId", "StateId");
-
-                    b.HasIndex("StateValueId");
-
-                    b.ToTable("ActivityStateEffects");
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.ActivityStateRequirement", b =>
-                {
-                    b.Property<Guid>("ActivityId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("StateValueId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("ActivityId", "StateValueId");
-
-                    b.HasIndex("StateValueId");
-
-                    b.ToTable("ActivityStateRequirements");
                 });
 
             modelBuilder.Entity("Stryde.Core.Entities.ActivitySubtask", b =>
@@ -119,52 +75,6 @@ namespace Stryde.Core.Migrations
                     b.HasIndex("ActivityId");
 
                     b.ToTable("ActivitySubtasks");
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.ActivityType", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<double>("CadencePriorDays")
-                        .HasColumnType("REAL");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Icon")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("MaxPerDay")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("MinBlockMinutes")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<double>("MinDueFraction")
-                        .HasColumnType("REAL");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WindowEnd")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WindowStart")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("ActivityTypes");
                 });
 
             modelBuilder.Entity("Stryde.Core.Entities.Category", b =>
@@ -381,55 +291,6 @@ namespace Stryde.Core.Migrations
                     b.ToTable("RefreshTokens");
                 });
 
-            modelBuilder.Entity("Stryde.Core.Entities.State", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("States");
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.StateValue", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsDefault")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("StateId")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("StateId");
-
-                    b.ToTable("StateValues");
-                });
-
             modelBuilder.Entity("Stryde.Core.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -465,9 +326,6 @@ namespace Stryde.Core.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("MaxCalendarSuggestions")
-                        .HasColumnType("INTEGER");
-
                     b.Property<int>("MaxFocusGoals")
                         .HasColumnType("INTEGER");
 
@@ -478,11 +336,6 @@ namespace Stryde.Core.Migrations
 
             modelBuilder.Entity("Stryde.Core.Entities.Activity", b =>
                 {
-                    b.HasOne("Stryde.Core.Entities.ActivityType", "Type")
-                        .WithMany()
-                        .HasForeignKey("ActivityTypeId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("Stryde.Core.Entities.Category", "Category")
                         .WithMany()
                         .HasForeignKey("CategoryId")
@@ -503,47 +356,7 @@ namespace Stryde.Core.Migrations
 
                     b.Navigation("Goal");
 
-                    b.Navigation("Type");
-
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.ActivityStateEffect", b =>
-                {
-                    b.HasOne("Stryde.Core.Entities.Activity", "Activity")
-                        .WithMany("StateEffects")
-                        .HasForeignKey("ActivityId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Stryde.Core.Entities.StateValue", "StateValue")
-                        .WithMany()
-                        .HasForeignKey("StateValueId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Activity");
-
-                    b.Navigation("StateValue");
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.ActivityStateRequirement", b =>
-                {
-                    b.HasOne("Stryde.Core.Entities.Activity", "Activity")
-                        .WithMany("StateRequirements")
-                        .HasForeignKey("ActivityId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Stryde.Core.Entities.StateValue", "StateValue")
-                        .WithMany()
-                        .HasForeignKey("StateValueId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Activity");
-
-                    b.Navigation("StateValue");
                 });
 
             modelBuilder.Entity("Stryde.Core.Entities.ActivitySubtask", b =>
@@ -555,17 +368,6 @@ namespace Stryde.Core.Migrations
                         .IsRequired();
 
                     b.Navigation("Activity");
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.ActivityType", b =>
-                {
-                    b.HasOne("Stryde.Core.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Stryde.Core.Entities.Category", b =>
@@ -623,28 +425,6 @@ namespace Stryde.Core.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Stryde.Core.Entities.State", b =>
-                {
-                    b.HasOne("Stryde.Core.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.StateValue", b =>
-                {
-                    b.HasOne("Stryde.Core.Entities.State", "State")
-                        .WithMany("Values")
-                        .HasForeignKey("StateId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("State");
-                });
-
             modelBuilder.Entity("Stryde.Core.Entities.UserSettings", b =>
                 {
                     b.HasOne("Stryde.Core.Entities.User", "User")
@@ -658,10 +438,6 @@ namespace Stryde.Core.Migrations
 
             modelBuilder.Entity("Stryde.Core.Entities.Activity", b =>
                 {
-                    b.Navigation("StateEffects");
-
-                    b.Navigation("StateRequirements");
-
                     b.Navigation("Subtasks");
                 });
 
@@ -673,11 +449,6 @@ namespace Stryde.Core.Migrations
             modelBuilder.Entity("Stryde.Core.Entities.Occurrence", b =>
                 {
                     b.Navigation("Subtasks");
-                });
-
-            modelBuilder.Entity("Stryde.Core.Entities.State", b =>
-                {
-                    b.Navigation("Values");
                 });
 
             modelBuilder.Entity("Stryde.Core.Entities.User", b =>

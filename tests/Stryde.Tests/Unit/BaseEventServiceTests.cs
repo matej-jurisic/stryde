@@ -83,34 +83,6 @@ public class ActivityServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SetRecommendationsAsync_toggles_exclusion()
-    {
-        var (userId, goalId) = await CreateUserWithGoalAsync();
-        var created = (await _ctx.ActivityService.CreateAsync(userId, new CreateActivityRequest("Sleep", null, goalId))).Value!;
-
-        var excluded = await _ctx.ActivityService.SetRecommendationsAsync(userId: userId, id: created.Id, req: new SetActivityRecommendationsRequest(true));
-        var included = await _ctx.ActivityService.SetRecommendationsAsync(userId: userId, id: created.Id, req: new SetActivityRecommendationsRequest(false));
-
-        Assert.True(excluded.IsSuccess);
-        Assert.True(excluded.Value!.ExcludeFromRecommendations);
-        Assert.True(included.IsSuccess);
-        Assert.False(included.Value!.ExcludeFromRecommendations);
-    }
-
-    [Fact]
-    public async Task SetRecommendationsAsync_other_user_returns_not_found()
-    {
-        var (userId, goalId) = await CreateUserWithGoalAsync();
-        var (otherUserId, _) = await CreateUserWithGoalAsync();
-        var created = (await _ctx.ActivityService.CreateAsync(userId, new CreateActivityRequest("Sleep", null, goalId))).Value!;
-
-        var result = await _ctx.ActivityService.SetRecommendationsAsync(created.Id, otherUserId, new SetActivityRecommendationsRequest(true));
-
-        Assert.False(result.IsSuccess);
-        Assert.Equal(ErrorType.NotFound, result.Error!.Type);
-    }
-
-    [Fact]
     public async Task DeleteAsync_removes_activity()
     {
         var (userId, goalId) = await CreateUserWithGoalAsync();

@@ -20,7 +20,15 @@ Keep `CLAUDE.md` small: it is a navigation and convention guide, not a product s
 
 ## What this is
 
-Personal operations app built around three primitives: **Activities**, **Goals**, and the **Daily Plan**. Single-user initially; schema and auth are multi-user-ready from day one.
+A brain space for goals, deadlines and motivation, built around **Goals**, **Activities** and
+**Occurrences**. Single-user initially; schema and auth are multi-user-ready from day one.
+
+**The app does not ask the user to log their life.** No suggestion engine, no scheduling model, no
+stat with a 24-hour denominator - so sleep, work and commuting need never be entered, and nothing
+computes a wrong answer when they are missing. Before adding anything, apply the test in `spec.md`:
+*does this still produce a correct answer if the user logs only what they care about?* Free-slot
+placement, availability inference, and "unaccounted time" all fail it. The calendar is a
+visualization and a fast way to add things, not a planner.
 
 ## Stack & layout
 
@@ -55,71 +63,26 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Backend (`Stryde.Core`)**
 - `Entities/` — POCOs; `Guid Id = Guid.NewGuid()` + `DateTimeOffset CreatedAt`, no base class.
-  Key entities: `User, Activity, Occurrence, Goal, Checkpoint, Category, UserSettings, ActivityType,
-  State, StateValue, ActivityStateEffect, ActivityStateRequirement, ActivitySubtask, OccurrenceSubtask`
-  (subtasks are two levels: `ActivitySubtask` is the title-only template, copied into
-  `OccurrenceSubtask` rows — which carry `IsDone` — when an occurrence is created.)
-  (the last three are link/child rows keyed by their contents, not by a `Guid Id`: `StateValue` is a
-  normal child of `State`, while `ActivityStateEffect` keys on `(ActivityId, StateId)` — one value per
-  state, structurally — and `ActivityStateRequirement` on `(ActivityId, StateValueId)` — many per state,
-  ORed within a state and ANDed across them.)
-  `ActivityStateEffect.DurationMinutes` is how long the value holds: it belongs to the **cause**, not
-  the value, since a run leaves you tired for ten hours and a hike for two days.
+  Entities: `User, Activity, Occurrence, Goal, Checkpoint, Category, UserSettings, ActivitySubtask,
+  OccurrenceSubtask` (subtasks are two levels: `ActivitySubtask` is the title-only template, copied
+  into `OccurrenceSubtask` rows — which carry `IsDone` — when an occurrence is created).
 - `Enums/` — stored as strings (`HasConversion<string>`).
-- `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. `Occurrence → Activity` cascade delete; `Activity → Category/Goal/ActivityType` set-null.
+- `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. `Occurrence → Activity` cascade delete; `Activity → Category/Goal` set-null.
 - `Common/Result.cs` — `Result`/`Result<T>` + `Error(ErrorType, msg)`. **Expected failures = Results, not exceptions.**
 - `Common/Validators.cs` — shared static validation rules.
-- `Common/ActivityProfiles.cs` — `ActivityProfile`, the scheduling numbers flattened off an
-  `ActivityType` row so the engine never holds an entity, plus `Unconstrained` (what an activity with
-  **no** type gets) and two engine constants. There is no default table any more: types are user rows,
-  so nothing needs reconciling against a built-in. `ActivityTypeService.ResolveAsync` returns the
-  user's profiles keyed by id; a missing key is `Unconstrained`.
-  **Types hold scheduling numbers only** — no type refers to another type, and conditions belong to
-  States. Don't add a field that names a real-life thing (work, commute) instead of a scheduling
-  behaviour.
-- `Common/StateTimeline.cs` — folds `StateSetter`s into a state's piecewise value over time, and
-  answers `IntervalsWhere(allowedValueIds, from, to)` for the engine's gate and `SegmentAt(instant)`
-  for a snapshot (value + when it began + when it ends). Nothing about a state is persisted: the value at
-  an instant is derived from the schedule, so moving an occurrence moves the state with it. A setter
-  fires at its occurrence's **end** (`EndAt ?? StartAt`); the setting **effect's** `DurationMinutes`
-  decays it back to the state default, so one value can be held for different lengths by different
-  activities. A later setter that *changes* the value replaces the pending expiry; one that re-sets the
-  value already in force takes whichever expiry is further out. See `spec.md` → States.
 - `Common/DayMath.cs` — all "which day / is this overdue?" logic goes through here, in the user's IANA
   timezone offset by `DayBoundaryTime`. Get a `DayContext` via `UserSettingsService.GetDayContextAsync`.
   Key methods: `OccurrenceDay(Occurrence, DayContext)`, `IsOverdue(Occurrence, DayContext, DateTimeOffset)`.
 - `Dtos/Dtos.cs` — request/response records with `FromEntity` static factory. Never leak entities.
-  Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split — `Type`, the scheduling profile, `SetsStateValues` — `(StateValueId, DurationMinutes)` pairs — and flat `RequiredStateValueIds`), `OccurrenceDto` (has `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`), `RecommendationDto` (always an activity to schedule; `SuggestedStartAt` nullable), `CategoryDto`/`CategorySummaryDto`, `StateDto` (values nested), `CheckpointDto` (has `Size` enum — not numeric progress).
+  Key DTOs: `ActivityDto` (has `Kind` — internal activity/event split), `OccurrenceDto` (has
+  `EffectiveTitle = title ?? activity.title`, `IsPlanned`, `DurationMinutes`),
+  `CategoryDto`/`CategorySummaryDto`, `CheckpointDto` (has `Size` enum — not numeric progress).
 - `Services/*Service.cs` — ctor-inject `StrydeDbContext`; return `Result`/`Result<T>`. Registered in `AddStrydeCore`.
-- `Services/RecommendationService.cs` — `committedOccurrences` is the one list every day-contents
-  decision reads (suppression, type caps, free slots, state setters), so what is filtered out of it is
-  invisible to the engine: skipped occurrences, and **all-day + planned** ones, which say only
-  "sometime that day" (`IsAllDay` alone is a date commitment, `IsPlanned` alone a window - both count).
-  `ComputeStats` separately ignores all-day rows for the habitual start time and span-derived duration:
-  midnight is not a start time. See `spec.md` → Recommendations.
-  The per-state timelines and each activity's requirement groups come from
-  `StateService.LoadContextAsync` (`StateContext.Empty` when the user has no states, the case that must
-  cost nothing). `AllowedIntervals` intersects the groups over the day; `StateAllows` is the gate;
-  `AllowedSlots` masks `freeSlots` per activity and every placement branch draws candidates from it.
-- `Services/ActivityTypeService.cs` — type CRUD, `ResolveAsync` for the engine, and
-  `SeedDefaultsAsync`/`DefaultsFor`, which `AuthService.RegisterAsync` calls (types cannot fall back
-  to a built-in table the way `UserSettings` does — the rows *are* the list). Anything seeded must be
-  expressible in the editor's cadence/cooldown dropdowns, or a built-in becomes unreachable by hand.
-- `Services/StateService.cs` — state + value CRUD, plus the two readers of the schedule:
-  `LoadContextAsync` (the `StateContext` the recommendation engine's gate uses - timelines, per-activity
-  requirement groups, and the setters' origins) and `SnapshotAsync` (what every state held at one
-  instant and why, for the calendar dialog). `SetsState` is the one predicate for "does this occurrence
-  set state", so the engine and a snapshot can't disagree about it.
-  Invariants: exactly one default per state (the first
-  value is forced to be it), deleting a value still referenced returns `Conflict`, deleting the default
-  promotes the oldest survivor. Value writes return the whole parent `StateDto`, since an invariant can
-  move the default onto a sibling. **Durations are not here** — they live on the effect, so
-  `ActivityService.ApplyStatesAsync` validates them via `Validators.ValidateStateDuration`
-  (1..`MaxStateDurationMinutes`, and none on a change to the state's default value).
+- `Services/InsightsService.cs` — totals over completed occurrences only. **Never add a stat whose
+  denominator is the length of a day**; see the boundary above.
 - ⚠️ **A child with a pre-set `Guid Id` added to a *tracked* parent's nav collection is treated as an
   existing row** (change detection sees a non-default key) and issues an UPDATE matching nothing. Use
-  `db.Set<T>().Add(...)` explicitly — see `StateService.CreateValueAsync` and
-  `OccurrenceService.ApplySubtasks`. Relationship fixup then also appends it to the parent collection,
+  `db.Set<T>().Add(...)` explicitly — see `OccurrenceService.ApplySubtasks`. Relationship fixup then also appends it to the parent collection,
   so guard against adding it twice if you build the response from that collection.
 - ⚠️ **SQLite can't `ORDER BY` a `DateTimeOffset` or aggregate a `decimal`** — sort/sum client-side after `ToListAsync`.
   It also **can't translate a `DateTimeOffset` range `WHERE`** (EF throws at execution — stored as offset-bearing
@@ -133,96 +96,75 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   must be set — the static property alone is not enough.
 - `Endpoints/*Endpoints.cs` — thin: parse → service → `result.ToProblem()`. Auth required on all routes except `/api/auth/*`.
   Key endpoint files: `ActivityEndpoints.cs` (`/api/activities`), `OccurrenceEndpoints.cs` (`/api/occurrences`),
-  `SettingsEndpoints.cs` (`/api/settings`), `ActivityTypeEndpoints.cs` (`/api/activity-types`),
-  `StateEndpoints.cs` (`/api/states` + `/api/states/snapshot?at=` + `/api/states/{stateId}/values`).
+  `SettingsEndpoints.cs` (`/api/settings`), `InsightsEndpoints.cs` (`/api/insights`).
 - `Endpoints/ApiResults.cs` — `Error.ToProblem()` + `principal.GetUserId()` (reads `sub` claim).
 
 **Frontend (`client/src`)**
 - `App.tsx` — auth-gated routing; index → `/plan`.
 - `pages/` — `PlanPreviewPage` (**this is `/plan`**), `CalendarPage`, `CategoriesPage`,
   `GoalsPreviewPage` (**this is `/goals`**), `GoalDetailPage`, `ActivitiesPage`, `ActivityDetailPage`,
-  `ActivityTypesPage`, `StatesPage`, `InsightsPage`, `SettingsPage`. `PlanPage` and `GoalsPage` are the
-  previous layouts, still routed at `/plan-old` and `/goals-old` — check which file a route actually
-  renders before editing either pair.
-  The three activity routes are one screen in three tabs: `/activities`, `/activities/types`,
-  `/activities/states`. Types and states are user vocabulary, not app preferences, so they live here
-  rather than in Settings. Their static segments outrank `/activities/:id`.
-- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`, `statesApi` (incl. `snapshot(atIso)`)/`stateValuesApi`, `activityTypesApi`.
-  On `activitiesApi.create`/`update`, **omitting** `setsStateValues`/`requiredStateValueIds` leaves them untouched
-  and `[]` clears them — which is what lets `BulkAssignModal` resend everything else without knowing about states.
-- `lib/types.ts` — mirrors backend DTOs. Key types: `Activity` (has `activityTypeId` plus an embedded `type` summary), `Occurrence` (has `effectiveTitle`), `Recommendation` (flat; `activity` always present), `State`/`StateValue`, `StateSnapshot`/`StateSnapshotEntry`, `ActivityType`.
+  `InsightsPage`, `SettingsPage`. The `*PreviewPage` names are historical — they are the live pages.
+  `/activities`'s static segment outranks `/activities/:id`.
+- `lib/api.ts` — `request<T>` (bearer + one-shot 401 refresh). Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`.
+- `lib/types.ts` — mirrors backend DTOs. Key types: `Activity`, `Occurrence` (has `effectiveTitle`), `Goal`, `Category`, `Insights`.
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
 - `store/toasts.ts` — Zustand toast store; `toastError(err)` for mutation failures without inline error display.
 - `components/ui/` — `Button, Badge, Card(+Header/Title/Content), Modal, Field, ConfirmDialog, ActionMenu, Toasts`,
   plus `input.ts` (`inputCls`, the bare input/select treatment; `SettingSection` re-exports it).
 - `components/events/OccurrenceListRow.tsx` — shared occurrence list row (Plan + Categories): optimistic status toggle, action menu, confirmed delete.
-- `components/activities/ActivityListRow.tsx` — activity list row: type tile, meta line, mute toggle, action menu.
-  In multi-select mode the tile becomes a checkbox and the row selects instead of navigating. `hideType`/`hideCategory`/`hideGoal`
-  drop whatever the current grouping already says in the section header.
-- `components/activities/BulkAssignModal.tsx` — sets goal / category / type on a multi-select. No bulk endpoint exists:
+- `components/activities/ActivityListRow.tsx` — activity list row: leading tile in the **category's**
+  colour and icon (via `CategoryIcon`), meta line, action menu (history / edit / delete).
+  In multi-select mode the tile becomes a checkbox and the row selects instead of navigating.
+  `hideCategory`/`hideGoal` drop whatever the current grouping already says in the section header.
+- `components/activities/BulkAssignModal.tsx` — sets goal / category on a multi-select. No bulk endpoint exists:
   it fans out over `PUT /api/activities/{id}`, resending unchanged fields from each activity (the PUT is a full replace).
 - `components/events/SkipRescheduleModal.tsx` — opened after skipping; lets user pick a date and creates a new pending copy on that date.
-- `components/goals/OccurrenceBar.tsx` — done/skipped/pending counts bar for ongoing goals on GoalsPage; data from `GoalDto.OccurrenceStats`.
+- `components/goals/OccurrenceBar.tsx` — done/skipped/pending counts bar for ongoing goals; data from `GoalDto.OccurrenceStats`.
 - `components/layout/useUncategorizedCount.ts` — nav badge hook (shares `['events', 'all']` cache with CategoriesPage;
   predicate in `lib/categories.ts`). Currently unreferenced: neither nav renders a badge.
 - `components/layout/Sidebar.tsx` — desktop nav: five page items, then the category list (`Active` =
   `/categories?all=true`, `No category`, one per category with inline add/edit/delete), Settings pinned at the bottom.
 - `components/layout/BottomNav.tsx` — mobile nav: 4 tabs + "More" bottom sheet (Activities, Insights, Settings). Max 5 slots; new pages go in the sheet.
-- `lib/activityTypes.ts` — `describeProfile`/`profileHint`, which **generate** the numeric hint copy
-  from a type row, plus `CADENCE_OPTIONS`/`COOLDOWN_OPTIONS` (the only values those two fields may
-  hold, since the editor offers them as words) and the "no type" label and hint.
-  Never hardcode a window or block size in client copy: every value is the user's own.
-- `lib/useActivityTypes.ts` — `['activityTypes']` query; `useActivityTypeMap` keys it by id.
-- `components/activities/ActivityTypeIcon.tsx` — a type's stored lucide name through the shared
-  `ICON_MAP`, degrading to a neutral outline for an unknown key and for no type at all. Also exports
-  `TYPE_ICON_NAMES`, the short curated slice the type editor's picker offers (rendering still goes
-  through the full map, so any stored name keeps working).
-- `lib/useStates.ts` — `['states']` query plus `formatStateDuration`, `splitStateDuration`,
-  `STATE_DURATION_UNITS`, `MAX_STATE_DURATION_MINUTES`, `describeStateValue`, and
-  `describeRequirements` (a whole requirement set as "Location: Home or Work, Tired: No" - walks
-  `states` in their own order, so the string is stable enough to key a group by).
-- `components/activities/StateValuePicker.tsx` — chips grouped by state, the codebase's only
-  multi-value picker. One row per state: name in a fixed left column, chips wrapping beside it, and a
-  `trailing` render slot that puts caller-supplied controls at the end of the same row.
-  `singlePerState` makes a pick replace that state's other selection, which is the difference between
-  the "Changes" and "Only suggest when" fields in `ActivityModal`. Those two are one bordered "States"
-  panel there, hidden entirely until the user has defined a state with values.
-- `components/activities/StateEffectPicker.tsx` — the whole "Changes" field: the picker above with
-  `for [n] [unit]` rendered into its `trailing` slot, so the duration ends the row that made the pick
-  instead of a summary list restating it. Owns `ActivityStateEffect[]` so `ActivityModal` never maps
-  between ids and durations. A pick on the state's *default* value gets no duration (it would decay to
-  itself), just the words that say why. Changing the unit reinterprets the number rather than
-  converting it.
-- `components/activities/ActivityHistoryModal.tsx` — read-only "have I been doing this", opened from a
-  suggestion: the history icon on a `RecommendationPanel` row, or right-click / 400ms hold on a
-  calendar ghost (`SuggestionBlock`, which owns that gesture itself - plain click still schedules).
-  Reads `['events', 'activity', id]`, the same key `ActivityDetailPage` fills, so the two warm each
-  other. Cadence figures are **passed in** as `RecommendationStats` (`statsOf(rec)`) rather than
-  recomputed, so the dialog can't quote a different number than the row that opened it; a caller with
-  no recommendation behind it (a floating occurrence) passes null and those tiles degrade. The panel
-  owns its own instance of the dialog, so all three pages that render it get the feature.
-- `components/states/StateSnapshotModal.tsx` — read-only "what did the world look like here", opened by
-  clicking empty calendar grid (`CalendarPage.openStateSnapshot`, reached from the mouse no-drag path
-  and from the touch tap in `handleGridPointerUp`). Queries `['states', 'snapshot', iso]`; silent when
-  the user has no states. Creating an occurrence still needs a drag or a long press, so the plain click
-  was free to take.
-  ⚠️ The touch tap is guarded by four clauses (`TAP_MAX_MS`, `SCROLL_SETTLE_MS`, no latched swipe,
+- `components/activities/ActivityHistoryModal.tsx` — read-only "have I been doing this", opened from an
+  activity row's action menu. Reads `['events', 'activity', id]`, the same key `ActivityDetailPage`
+  fills, so the two warm each other. **Every figure is derived in the component** from that activity's
+  own occurrences (`summarise`): last done, median gap between completion *days*, modal quarter-hour
+  start, median measured length. Nothing is passed in, so any caller can open it with just an activity,
+  and no figure needs a complete calendar to be right.
+- `pages/CalendarPage.tsx` — ⚠️ **plain click / tap on empty grid creates** (`openCreateAt`,
+  `CLICK_CREATE_MINUTES`), reached from the mouse no-drag path and the touch tap in
+  `handleGridPointerUp`. Drag still sets an exact span; long press does it on touch.
+  The touch tap is guarded by four clauses (`TAP_MAX_MS`, `SCROLL_SETTLE_MS`, no latched swipe,
   unchanged `scrollTop`) because a scrolling finger produces near-taps constantly, and the mouse path
   additionally requires `lastPointerTypeRef.current === 'mouse'`: a touch reaches it a second time as a
   compatibility mouse event, which would otherwise walk straight past all four.
+- `lib/timeScale.ts` — the grid's minute↔pixel map, one `TimeScale` per visible day. `linearScale` is
+  the plain 0-24 map; `compactScale` elides empty stretches into fixed-height bands. **Every grid
+  coordinate goes through `toPx`/`toMin`** — event tops, hour lines, overlays, the now line, snapping
+  (`snapToGrid` takes the scale, not `hourPx`). Two invariants the calendar leans on:
+  1. **Any drag expands first.** `expandForDrag` swaps in the linear scale via `flushSync` before the
+     gesture reads a coordinate, so no drag code reasons about bands; `collapseAfterDrag` in each
+     gesture's `cleanup` restores it. Collapsing is a plain `setState`, so the drop still reads
+     expanded geometry. Expansion fires at each gesture's *commit* point (mouse drag threshold, touch
+     long press, resize-handle press), never on pointerdown — that would flicker on every click.
+  2. **An event's own span always sits inside one expanded segment**, so pixel offsets measured within
+     a block (grab offset, block height) survive the switch untouched. Only absolute tops are
+     re-derived, from `startMin`, which is why `dragRef` carries it.
+  ⚠️ Scroll position is corrected by `captureAnchor` + the anchor `useLayoutEffect`, not by the
+  caller: record the minute to hold still *before* any state is queued, apply it after layout. Zoom
+  and the compact toggle use it too. Three things about it are load-bearing:
+  - **Capture before queueing state.** It converts a pixel to a minute through the *current* scale,
+    and in a compacted one a 20px band spans hours — measuring after the grid has moved (the FLOAT /
+    all-day rows appear on drag start) turns a ~150px shift into a several-hour error.
+  - **The anchor is not one-shot.** One gesture moves the grid across more than one render, and which
+    render gets what depends on React's batching. Re-applying drives the delta to zero, so it is left
+    in place and every render converges. It expires after `ANCHOR_TTL_MS` instead of being consumed.
+  - **`dragSpacerRef`.** Holding a minute in place needs the scroll range to reach it; with the
+    compact grid shorter than the viewport there is none, so the browser clamps and the grid lurches
+    by the shortfall. The spacer adds a viewport of room under the grid while `dragExpanded`.
 - `components/settings/SettingSection.tsx` — `SettingSection`/`SettingRow`/`SectionFooter`, the layout
-  primitives `SettingsPage` is built from. Settings now holds preferences only.
-- `components/activities/ActivitiesTabs.tsx` — the underline tab strip the three activity routes share.
-  A new activity-side vocabulary is a tab here, not a nav slot.
-- `pages/ActivityTypesPage.tsx` — types admin: accordion per type over the full CRUD (name, icon,
-  window, min block, max/day, and cadence/cooldown as worded dropdowns), page-header `+` to add,
-  confirmed delete. Writes invalidate `['activityTypes']`, `['activities']` (rows embed the type's
-  name and icon) and `['recommendations']`.
-- `pages/StatesPage.tsx` — states admin: accordion per state, inline value list with a star for the
-  default. Names and the default flag only: how long a value holds is set on the activities that cause
-  it, in `StateEffectPicker`. Every value write returns the whole state, which replaces that entry in
-  the `['states']` cache.
+  primitives `SettingsPage` is built from. Settings holds preferences only.
 - `lib/quotes.ts` — local array of motivational quotes; Plan page picks one by day-of-year.
 
 **Tests**
@@ -256,21 +198,19 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - **Frontend:** `verbatimModuleSyntax` — use `import type` for type-only imports. TanStack Query for
   server state; Zustand for auth (access token in memory).
 - **Query keys:** every occurrence list lives under `['events', ...]` (`['events', 'all']` for Categories page + nav
-  badge, `['events', 'calendar', ...]` for calendar ranges). After any occurrence write invalidate `['events']`
-  and `['recommendations']`. After any activity write invalidate `['activities']`, `['recommendations']`
-  (an activity's state requirements decide whether it is suggested at all) **and `['events']`** (occurrences
-  embed their activity: its title feeds `effectiveTitle` and its category feeds every row and calendar block's
-  colour). After any goal write also invalidate `['goals']`.
-  States live under `['states']`; after a state or value write invalidate `['states']` and `['recommendations']`.
-  A snapshot is `['states', 'snapshot', iso]` with `staleTime: 0` - it depends on every occurrence around
-  it, so it re-asks on open rather than being invalidated from the occurrence side.
-  Activity types live under `['activityTypes']`; after a type write invalidate all three of
-  `['activityTypes']`, `['activities']` (rows embed the type's name and icon) and `['recommendations']`
-  (the engine resolves profiles per request).
+  badge, `['events', 'calendar', ...]` for calendar ranges, `['events', 'activity', id]` for one activity's history).
+  After any occurrence write invalidate `['events']`. After any activity write invalidate `['activities']`
+  **and `['events']`** (occurrences embed their activity: its title feeds `effectiveTitle` and its category
+  feeds every row and calendar block's colour). After any goal write also invalidate `['goals']`.
 - **Design:** see `design.md`. Use semantic color tokens, not hardcoded values.
 
 ## Gotchas
 
+- ⚠️ **`border-*` colour utilities do nothing.** `index.css` sets `border-color: var(--border)` on
+  `*, *::before, *::after` **outside any layer**, and unlayered CSS outranks all of `@layer utilities`,
+  so `border-primary`, `border-transparent`, `border-border/40` etc. are silently dead app-wide. Set
+  border colours inline (`style={{ borderTopColor: ... }}`) until that rule moves into `@layer base` —
+  moving it activates ~68 dormant utilities at once, which is a deliberate visual change, not a no-op.
 - **SQLite migrations only.** No Postgres migration set exists.
 - ⚠️ **Guids are UPPER-case TEXT in SQLite.** Microsoft.Data.Sqlite binds a `Guid` parameter as
   upper-case text and SQLite compares text case-sensitively, so raw SQL in a migration that mints an

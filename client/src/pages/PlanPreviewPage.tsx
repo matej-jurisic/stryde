@@ -1,14 +1,12 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Menu, Plus, CalendarCheck, Sunrise, MoonStar, ArrowRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, CalendarCheck, ArrowRight } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, goalsApi, settingsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
-import type { Activity, Checkpoint, CheckpointSize, Occurrence, Goal } from '@/lib/types'
-import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
+import type { Checkpoint, CheckpointSize, Occurrence, Goal } from '@/lib/types'
 import { OccurrenceBar } from '@/components/goals/OccurrenceBar'
 import { EventModal } from '@/components/events/EventModal'
 import { OccurrenceListRow } from '@/components/events/OccurrenceListRow'
-import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -62,13 +60,6 @@ function formatDuration(minutes: number | null): string {
   return `${m}m`
 }
 
-function occurrenceMinutes(o: Occurrence): number {
-  if (o.startAt && o.endAt) {
-    return Math.max(0, Math.round((new Date(o.endAt).getTime() - new Date(o.startAt).getTime()) / 60000))
-  }
-  return o.durationMinutes ?? 0
-}
-
 function formatTimeRange(event: Occurrence): string {
   if (event.isAllDay) {
     const dur = formatDuration(event.durationMinutes)
@@ -108,35 +99,6 @@ function believedProgress(checkpoints: Checkpoint[]): number {
     .reduce((sum, c) => sum + SIZE_WEIGHT[c.size], 0)
   return (reached / total) * 100
 }
-
-// ── Progress ring ────────────────────────────────────────────────────────────
-
-function ProgressRing({ pct, size = 56, stroke = 5, children }: { pct: number; size?: number; stroke?: number; children?: React.ReactNode }) {
-  const r = (size - stroke) / 2
-  const c = 2 * Math.PI * r
-  const dash = (Math.min(Math.max(pct, 0), 100) / 100) * c
-  return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-muted)" strokeWidth={stroke} />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke="var(--color-primary)"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={`${dash} ${c}`}
-          className="transition-all duration-500"
-        />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center">{children}</div>
-    </div>
-  )
-}
-
-// ── Goal health row ────────────────────────────────────────────────────────
 
 function formatLastOccurrence(lastAt: string | null): string {
   if (!lastAt) return 'no sessions yet'
@@ -248,10 +210,9 @@ function TimelineRow({
 export function PlanPreviewPage() {
   const qc = useQueryClient()
   const [current, setCurrent] = useState<Date>(() => sod(new Date()))
-  const [drawerOpen, setDrawerOpen] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingOccurrence, setEditingOccurrence] = useState<Occurrence | undefined>()
-  const [defaultActivity, setDefaultActivity] = useState<Activity | undefined>()
+  const [defaultActivity, setDefaultActivity] = useState<Occurrence['activity'] | undefined>()
   const [defaultStartAt, setDefaultStartAt] = useState<string | undefined>()
   const [defaultEndAt, setDefaultEndAt] = useState<string | undefined>()
   const [focusStartAt, setFocusStartAt] = useState(false)
@@ -334,23 +295,6 @@ export function PlanPreviewPage() {
   const pastEvents = isToday ? timedEvents.filter((e) => new Date(e.endAt ?? e.startAt!).getTime() < nowMs || e.status !== 'pending') : []
   const futureEvents = isToday ? timedEvents.filter((e) => !(new Date(e.endAt ?? e.startAt!).getTime() < nowMs || e.status !== 'pending')) : timedEvents
 
-  // Briefing stats.
-  const doneCount = timedEvents.filter((e) => e.status === 'done').length
-  const remainingCount = timedEvents.filter((e) => e.status === 'pending').length + overdueEvents.length
-  const totalTracked = doneCount + remainingCount
-  const completionPct = totalTracked > 0 ? (doneCount / totalTracked) * 100 : 0
-  const committedMin = timedEvents.filter((e) => e.status !== 'skipped').reduce((sum, e) => sum + occurrenceMinutes(e), 0)
-
-  const greeting = (() => {
-    const h = now.getHours()
-    if (!isToday) return current < effectiveToday ? 'Looking back' : 'Planning ahead'
-    if (h < 5) return 'Late night'
-    if (h < 12) return 'Good morning'
-    if (h < 17) return 'Good afternoon'
-    if (h < 22) return 'Good evening'
-    return 'Winding down'
-  })()
-
   // Sweep overdue → tomorrow (relative to the effective today).
   const sweepMutation = useMutation({
     mutationFn: async () => {
@@ -366,7 +310,6 @@ export function PlanPreviewPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
     onError: (err) => toastError(err, 'Could not move overdue items.'),
   })
@@ -396,25 +339,6 @@ export function PlanPreviewPage() {
     setScheduleMode(false)
     setModalOpen(true)
   }
-  function openFromActivity(activity: Activity, timing?: ActivityTiming) {
-    setEditingOccurrence(undefined)
-    setDefaultActivity(activity)
-    setFocusStartAt(true)
-    setScheduleMode(false)
-    if (timing?.startTime) {
-      const [h, m] = timing.startTime.split(':').map(Number)
-      const start = new Date(current)
-      start.setHours(h, m, 0, 0)
-      const z = (n: number) => String(n).padStart(2, '0')
-      const fmt = (d: Date) => `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`
-      setDefaultStartAt(fmt(start))
-      setDefaultEndAt(timing.durationMinutes ? fmt(new Date(start.getTime() + timing.durationMinutes * 60000)) : undefined)
-    } else {
-      setDefaultStartAt(undefined)
-      setDefaultEndAt(undefined)
-    }
-    setModalOpen(true)
-  }
   function closeModal() {
     setModalOpen(false)
     setEditingOccurrence(undefined)
@@ -426,25 +350,9 @@ export function PlanPreviewPage() {
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      <RecommendationPanel
-        date={dateStr}
-        today={formatDateInput(effectiveToday)}
-        onOccurrenceClick={openSchedule}
-        onActivityClick={openFromActivity}
-        mobileOpen={drawerOpen}
-        onMobileClose={() => setDrawerOpen(false)}
-      />
-
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         {/* Header */}
         <header className="flex h-[57px] shrink-0 items-center gap-2 border-b border-border px-4 md:gap-3 md:px-6">
-          <button
-            onClick={() => setDrawerOpen(true)}
-            className="md:hidden flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            aria-label="Open suggestions"
-          >
-            <Menu className="h-4 w-4" strokeWidth={2} />
-          </button>
           <div className="flex items-center gap-0.5">
             <button onClick={prev} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
               <ChevronLeft className="h-4 w-4" strokeWidth={2} />
@@ -489,42 +397,14 @@ export function PlanPreviewPage() {
               </div>
             ) : (
               <>
-                {/* Briefing hero */}
-                <section className="mb-6 rounded-xl border border-border bg-gradient-to-br from-card to-muted/40 p-5">
-                  <div className="flex items-center gap-4">
-                    <ProgressRing pct={completionPct}>
-                      <div className="text-center leading-none">
-                        <span className="block text-sm font-semibold tabular-nums text-foreground">{Math.round(completionPct)}%</span>
-                      </div>
-                    </ProgressRing>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 text-muted-foreground">
-                        {now.getHours() < 17 ? <Sunrise className="h-3.5 w-3.5" strokeWidth={2} /> : <MoonStar className="h-3.5 w-3.5" strokeWidth={2} />}
-                        <span className="text-xs font-medium">{greeting}</span>
-                      </div>
-                      <p className="mt-0.5 truncate text-lg font-semibold text-foreground">
-                        {remainingCount === 0
-                          ? totalTracked > 0 ? 'All clear for the day' : 'Nothing on the books yet'
-                          : `${remainingCount} thing${remainingCount === 1 ? '' : 's'} left`}
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        <span><strong className="text-foreground tabular-nums">{doneCount}</strong> done</span>
-                        <span><strong className="text-foreground tabular-nums">{remainingCount}</strong> left</span>
-                        {committedMin > 0 && <span><strong className="text-foreground tabular-nums">{formatDuration(committedMin)}</strong> planned</span>}
-                        {overdueEvents.length > 0 && (
-                          <span className="text-destructive"><strong className="tabular-nums">{overdueEvents.length}</strong> overdue</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Focus goals */}
-                  {focusGoals.length > 0 && (
-                    <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {focusGoals.map((g) => <GoalHealthChip key={g.id} goal={g} />)}
-                    </div>
-                  )}
-                </section>
+                {/* Focus goals lead the day. The completion ring and done/left counts that used to
+                    sit above them scored the day rather than the goals, which is the planner reading
+                    this app is no longer for. */}
+                {focusGoals.length > 0 && (
+                  <section className="mb-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {focusGoals.map((g) => <GoalHealthChip key={g.id} goal={g} />)}
+                  </section>
+                )}
 
                 <div className="flex flex-col gap-6">
                 {/* Wrap-up / sweep */}

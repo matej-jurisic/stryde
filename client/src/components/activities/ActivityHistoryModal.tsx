@@ -6,29 +6,8 @@ import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { CategoryIcon } from '@/components/categories/categoryIcons'
-import { ActivityTypeIcon } from '@/components/activities/ActivityTypeIcon'
 import { occurrencesApi } from '@/lib/api'
-import type { Activity, Occurrence, Recommendation } from '@/lib/types'
-
-/**
- * The cadence figures the recommendation engine already computed for this activity. Passed in rather
- * than recomputed so this dialog and the suggestion that opened it can never quote different numbers;
- * null when the caller has no recommendation to hand (a floating occurrence, say), which only costs
- * the two tiles that need it.
- */
-export type RecommendationStats = Pick<
-  Recommendation,
-  'typicalStartTime' | 'typicalDurationMinutes' | 'medianGapDays' | 'patternCount'
->
-
-export function statsOf(rec: Recommendation): RecommendationStats {
-  return {
-    typicalStartTime: rec.typicalStartTime,
-    typicalDurationMinutes: rec.typicalDurationMinutes,
-    medianGapDays: rec.medianGapDays,
-    patternCount: rec.patternCount,
-  }
-}
+import type { Activity, Occurrence } from '@/lib/types'
 
 /** Rows in the strip, one per week. 8 is two months: enough to read a weekly rhythm without the grid
  *  dominating the dialog it sits in. */
@@ -39,22 +18,21 @@ const GOAL_TONE: Record<string, 'focus' | 'active' | 'bench' | 'neutral'> = {
 }
 
 /**
- * An activity's track record, reachable straight from a suggestion instead of via the activities page.
+ * An activity's track record: "have I been doing this, and when".
  *
- * Read-only: the question it answers is "have I been doing this, and when", so the only way out is to
- * the activity itself. Everything comes from the occurrence list the activity detail page already
- * loads, on the same cache key, so opening this warms that page and the other way round.
+ * Read-only, so the only way out is to the activity itself. Every figure is derived here from the
+ * activity's own occurrences - the list the detail page already loads, on the same cache key, so
+ * opening this warms that page and the other way round. Nothing is passed in, which is what lets any
+ * caller (a row menu, the detail page) open it with just an activity.
  */
 export function ActivityHistoryModal({
   open,
   activity,
-  stats,
   onClose,
 }: {
   open: boolean
   /** Null keeps the modal closed. */
   activity: Activity | null
-  stats?: RecommendationStats | null
   onClose: () => void
 }) {
   const navigate = useNavigate()
@@ -95,13 +73,9 @@ export function ActivityHistoryModal({
       */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="Last done" value={summary.lastDoneLabel} loading={loading} />
-        <Stat label="Cadence" value={cadenceLabel(stats, summary)} loading={loading} />
-        <Stat label="Usual time" value={stats?.typicalStartTime ?? null} loading={loading} />
-        <Stat
-          label="Usual length"
-          value={durationLabel(stats?.typicalDurationMinutes ?? null)}
-          loading={loading}
-        />
+        <Stat label="Cadence" value={cadenceLabel(summary)} loading={loading} />
+        <Stat label="Usual time" value={summary.usualStartTime} loading={loading} />
+        <Stat label="Usual length" value={durationLabel(summary.usualDurationMinutes)} loading={loading} />
       </div>
 
       <DayStrip occurrences={occurrences ?? []} loading={loading} />
@@ -124,7 +98,7 @@ export function ActivityHistoryModal({
             <RecentSkeleton />
           ) : summary.recent.length === 0 ? (
             <p className="flex h-full items-center justify-center px-3 text-center text-sm text-muted-foreground">
-              Nothing recorded yet. This suggestion is the first time round.
+              Nothing recorded yet.
             </p>
           ) : (
             <div className="divide-y divide-border">
@@ -137,16 +111,10 @@ export function ActivityHistoryModal({
   )
 }
 
-/** Type, category and goal, matching the meta line an activity row shows. */
+/** Category and goal, matching the meta line an activity row shows. */
 function MetaLine({ activity }: { activity: Activity }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
-      {activity.type && (
-        <span className="flex items-center gap-1.5">
-          <ActivityTypeIcon icon={activity.type.icon} className="h-3.5 w-3.5" />
-          {activity.type.name}
-        </span>
-      )}
       {activity.category && (
         <span className="flex items-center gap-1.5">
           <CategoryIcon icon={activity.category.icon} color={activity.category.color} size={12} strokeWidth={2} />
@@ -322,8 +290,12 @@ interface Summary {
   skipped: number
   pending: number
   lastDoneLabel: string | null
-  /** Days between the two most recent completions; the fallback when no engine stats came in. */
-  observedGapDays: number | null
+  /** Median days between consecutive completion days; null until there are two of them. */
+  medianGapDays: number | null
+  /** Most common quarter-hour start across timed completions, "HH:mm". */
+  usualStartTime: string | null
+  /** Median measured length across completions, falling back to a typed estimate. */
+  usualDurationMinutes: number | null
   recent: Occurrence[]
 }
 
@@ -350,23 +322,66 @@ function summarise(occurrences: Occurrence[]): Summary {
     })
     .slice(0, RECENT_LIMIT)
 
+  const completions = occurrences.filter((o) => o.status === 'done')
+
   return {
     done, skipped, pending,
     lastDoneLabel: doneDates.length > 0 ? relativeDayLabel(doneDates[0]) : null,
-    observedGapDays: doneDates.length >= 2 ? daysBetween(doneDates[1], doneDates[0]) : null,
+    medianGapDays: medianGap(doneDates),
+    usualStartTime: modeStartTime(completions),
+    usualDurationMinutes: median(completions.map(lengthOf).filter((m): m is number => m != null)),
     recent,
   }
 }
 
+function cadenceLabel(summary: Summary): string | null {
+  if (summary.medianGapDays == null) return null
+  return `Every ${Math.max(1, summary.medianGapDays)}d`
+}
+
 /**
- * The engine's median gap when the caller had a recommendation, and the gap between the last two
- * completions otherwise. Labelled differently, because one is a habit and the other is one interval.
+ * Median gap between consecutive completion *days*, not occurrences: two sessions on one day are one
+ * day's worth of the habit, and counting them separately would report a zero-day cadence.
  */
-function cadenceLabel(stats: RecommendationStats | null | undefined, summary: Summary): string | null {
-  if (stats?.medianGapDays != null) return `Every ${Math.max(1, Math.round(stats.medianGapDays))}d`
-  if (stats?.patternCount != null) return `${stats.patternCount}x lately`
-  if (summary.observedGapDays != null) return `${summary.observedGapDays}d last gap`
-  return null
+function medianGap(doneDatesDesc: Date[]): number | null {
+  const days = [...new Set(doneDatesDesc.map(dayKey))]
+    .map((k) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m, d).getTime() })
+    .sort((a, b) => a - b)
+  if (days.length < 2) return null
+  return median(days.slice(1).map((t, i) => Math.round((t - days[i]) / 86400000)))
+}
+
+/** Most common start rounded to a quarter hour. An all-day row is anchored at midnight, not a time. */
+function modeStartTime(completions: Occurrence[]): string | null {
+  const counts = new Map<string, number>()
+  for (const o of completions) {
+    if (!o.startAt || o.isAllDay) continue
+    const d = new Date(o.startAt)
+    const rounded = new Date(d)
+    rounded.setMinutes(Math.round(d.getMinutes() / 15) * 15, 0, 0)
+    const key = hhmm(rounded)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  if (counts.size === 0) return null
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0]
+}
+
+/** Measured span when both ends exist, else the typed estimate. An all-day row has no span. */
+function lengthOf(o: Occurrence): number | null {
+  if (o.startAt && o.endAt && !o.isAllDay) {
+    const mins = Math.round((new Date(o.endAt).getTime() - new Date(o.startAt).getTime()) / 60000)
+    if (mins > 0) return mins
+  }
+  return o.durationMinutes && o.durationMinutes > 0 ? o.durationMinutes : null
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0
+    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+    : sorted[mid]
 }
 
 function durationLabel(mins: number | null): string | null {

@@ -130,59 +130,7 @@ public class InsightsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_largest_gaps_are_untracked_stretches_of_tracked_days()
-    {
-        var userId = await CreateUserAsync();
-        var run = await AddActivityAsync(userId, "run");
-        await AddOccurrenceAsync(userId, run, At(6, 9), At(6, 10));
-        await AddOccurrenceAsync(userId, run, At(6, 12), At(6, 14));
-
-        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
-
-        // Untracked days contribute no gaps; the tracked day yields 14:00-24:00, 00:00-09:00, 10:00-12:00.
-        Assert.Equal(3, insights.LargestGaps.Count);
-        Assert.All(insights.LargestGaps, g => Assert.Equal("2026-07-06", g.Day));
-        Assert.Equal(("14:00", "00:00", 600), (insights.LargestGaps[0].Start, insights.LargestGaps[0].End, insights.LargestGaps[0].Minutes));
-        Assert.Equal(("00:00", "09:00", 540), (insights.LargestGaps[1].Start, insights.LargestGaps[1].End, insights.LargestGaps[1].Minutes));
-        Assert.Equal(("10:00", "12:00", 120), (insights.LargestGaps[2].Start, insights.LargestGaps[2].End, insights.LargestGaps[2].Minutes));
-    }
-
-    [Fact]
-    public async Task GetAsync_overnight_occurrence_covers_the_next_morning()
-    {
-        var userId = await CreateUserAsync();
-        var sleep = await AddActivityAsync(userId, "sleep");
-        var run = await AddActivityAsync(userId, "run");
-        await AddOccurrenceAsync(userId, sleep, At(5, 23), At(6, 7)); // 23:00 -> 07:00 next day
-        await AddOccurrenceAsync(userId, run, At(6, 9), At(6, 10));
-
-        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
-
-        var day6Gaps = insights.LargestGaps.Where(g => g.Day == "2026-07-06").ToList();
-        Assert.Equal(2, day6Gaps.Count);
-        Assert.Contains(day6Gaps, g => g is { Start: "07:00", End: "09:00", Minutes: 120 });
-        Assert.Contains(day6Gaps, g => g is { Start: "10:00", End: "00:00", Minutes: 840 });
-    }
-
-    [Fact]
-    public async Task GetAsync_unused_blocks_merge_hours_empty_on_most_tracked_days()
-    {
-        var userId = await CreateUserAsync();
-        var busy = await AddActivityAsync(userId, "busy");
-        foreach (var day in new[] { 5, 6 })
-        {
-            await AddOccurrenceAsync(userId, busy, At(day, 0), At(day, 14));
-            await AddOccurrenceAsync(userId, busy, At(day, 16), At(day + 1, 0));
-        }
-
-        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
-
-        var block = Assert.Single(insights.UnusedBlocks);
-        Assert.Equal(("14:00", "16:00", 2, 2), (block.Start, block.End, block.EmptyDays, block.Days));
-    }
-
-    [Fact]
-    public async Task GetAsync_unaccounted_stats_exclude_today()
+    public async Task GetAsync_counts_today()
     {
         var userId = await CreateUserAsync();
         var run = await AddActivityAsync(userId, "run");
@@ -190,37 +138,10 @@ public class InsightsServiceTests : IDisposable
 
         var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
 
-        Assert.Null(insights.AvgUnaccountedMinutesPerDay);
-        Assert.Empty(insights.LargestGaps);
-        Assert.Empty(insights.UnusedBlocks);
-        Assert.Single(insights.Activities); // activity/category breakdown still includes today
-    }
-
-    [Fact]
-    public async Task GetAsync_prev_average_uses_previous_window_only()
-    {
-        var userId = await CreateUserAsync();
-        var run = await AddActivityAsync(userId, "run");
-        await AddOccurrenceAsync(userId, run, At(6, 9), At(6, 10));                                                // current window: 60 min
-        await AddOccurrenceAsync(userId, run, new DateTimeOffset(2026, 6, 28, 9, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 6, 28, 12, 0, 0, TimeSpan.Zero));                                             // previous window: 180 min
-
-        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
-
-        Assert.Equal(1440 - 60, insights.AvgUnaccountedMinutesPerDay);
-        Assert.Equal(1440 - 180, insights.PrevAvgUnaccountedMinutesPerDay);
-    }
-
-    [Fact]
-    public async Task GetAsync_prev_average_null_when_previous_window_empty()
-    {
-        var userId = await CreateUserAsync();
-        var run = await AddActivityAsync(userId, "run");
-        await AddOccurrenceAsync(userId, run, At(6, 9), At(6, 10));
-
-        var insights = await _ctx.InsightsService.GetAsync(userId, 7, Now);
-
-        Assert.Null(insights.PrevAvgUnaccountedMinutesPerDay);
+        // Nothing here is averaged over days, so a day in progress does not distort anything and
+        // today counts like any other.
+        Assert.Single(insights.Activities);
+        Assert.Equal(60, insights.Activities[0].TimeMinutes);
     }
 
     [Fact]
@@ -246,67 +167,4 @@ public class InsightsServiceTests : IDisposable
     }
 
     // Now (2026-07-07) is a Tuesday; Mondays in the lookback window include Jun 22, Jun 29, Jul 6.
-
-    [Fact]
-    public async Task GetEmptyProfileAsync_weekday_profile_marks_majority_empty_slots()
-    {
-        var userId = await CreateUserAsync();
-        var work = await AddActivityAsync(userId, "work");
-        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 22, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 22, 17, 0, 0, TimeSpan.Zero));
-        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 29, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 29, 17, 0, 0, TimeSpan.Zero));
-        await AddOccurrenceAsync(userId, work, At(6, 9), At(6, 17));
-
-        var profile = await _ctx.InsightsService.GetEmptyProfileAsync(userId, Now);
-
-        var monday = profile.Ranges.Where(r => r.Weekday == 1).OrderBy(r => r.StartMinute).ToList();
-        Assert.Equal(2, monday.Count);
-        Assert.Equal((0, 540), (monday[0].StartMinute, monday[0].EndMinute));
-        Assert.Equal((1020, 1440), (monday[1].StartMinute, monday[1].EndMinute));
-    }
-
-    [Fact]
-    public async Task GetEmptyProfileAsync_thin_weekday_falls_back_to_all_days_profile()
-    {
-        var userId = await CreateUserAsync();
-        var work = await AddActivityAsync(userId, "work");
-        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 22, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 22, 17, 0, 0, TimeSpan.Zero));
-        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 29, 9, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 6, 29, 17, 0, 0, TimeSpan.Zero));
-        await AddOccurrenceAsync(userId, work, At(6, 9), At(6, 17));
-        // A single fully busy Tuesday: below the 3-sample minimum, so Tuesday uses the all-days profile.
-        await AddOccurrenceAsync(userId, work, new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
-
-        var profile = await _ctx.InsightsService.GetEmptyProfileAsync(userId, Now);
-
-        var tuesday = profile.Ranges.Where(r => r.Weekday == 2).OrderBy(r => r.StartMinute).ToList();
-        Assert.Equal(2, tuesday.Count);
-        Assert.Equal((0, 540), (tuesday[0].StartMinute, tuesday[0].EndMinute));
-        Assert.Equal((1020, 1440), (tuesday[1].StartMinute, tuesday[1].EndMinute));
-    }
-
-    [Fact]
-    public async Task GetEmptyProfileAsync_excludes_today()
-    {
-        var userId = await CreateUserAsync();
-        var run = await AddActivityAsync(userId, "run");
-        await AddOccurrenceAsync(userId, run, At(7, 9), At(7, 10)); // today only
-
-        var profile = await _ctx.InsightsService.GetEmptyProfileAsync(userId, Now);
-
-        Assert.Empty(profile.Ranges);
-    }
-
-    [Fact]
-    public async Task GetEmptyProfileAsync_overnight_interval_covers_both_days()
-    {
-        var userId = await CreateUserAsync();
-        var sleep = await AddActivityAsync(userId, "sleep");
-        await AddOccurrenceAsync(userId, sleep, At(5, 23), At(6, 7)); // Sun 23:00 -> Mon 07:00
-
-        var profile = await _ctx.InsightsService.GetEmptyProfileAsync(userId, Now);
-
-        // Two tracked days, each a 1-sample weekday, so every weekday uses the all-days profile:
-        // free only where both days were empty, 07:00-23:00.
-        Assert.Equal(7, profile.Ranges.Count);
-        Assert.All(profile.Ranges, r => Assert.Equal((420, 1380), (r.StartMinute, r.EndMinute)));
-    }
 }

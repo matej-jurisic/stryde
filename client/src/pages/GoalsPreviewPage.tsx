@@ -262,7 +262,6 @@ function GoalCard({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: G
       setConfirmDelete(false)
       qc.invalidateQueries({ queryKey: ['goals'] })
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
     onError: (err) => toastError(err, 'Could not delete the goal.'),
   })
@@ -273,7 +272,6 @@ function GoalCard({ goal, onView, onEdit, onAddCheckpoint, onEditCheckpoint }: G
       setStatusError('')
       qc.invalidateQueries({ queryKey: ['goals'] })
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
     onError: (err) => setStatusError(err instanceof ApiError ? err.message : 'Something went wrong.'),
   })

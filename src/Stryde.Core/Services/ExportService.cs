@@ -6,7 +6,7 @@ using Stryde.Core.Entities;
 
 namespace Stryde.Core.Services;
 
-public class ExportService(StrydeDbContext db, ActivityTypeService activityTypes)
+public class ExportService(StrydeDbContext db)
 {
     public async Task<Result<ExportDto>> GetAsync(Guid userId)
     {
@@ -22,7 +22,6 @@ public class ExportService(StrydeDbContext db, ActivityTypeService activityTypes
             .Include(a => a.Subtasks)
             .Include(a => a.Category)
             .Include(a => a.Goal)
-            .Include(a => a.Type)
             .Where(a => a.UserId == userId)
             .ToListAsync();
         var occurrences = await db.Occurrences
@@ -35,7 +34,6 @@ public class ExportService(StrydeDbContext db, ActivityTypeService activityTypes
             DateTimeOffset.UtcNow,
             UserDto.FromEntity(user),
             UserSettingsDto.FromEntity(settings, user.Timezone),
-            await activityTypes.ListAsync(userId),
             categories.OrderBy(c => c.CreatedAt).Select(CategoryDto.FromEntity).ToList(),
             goals.OrderBy(g => g.CreatedAt).Select(g => GoalDto.FromEntity(g)).ToList(),
             activities.OrderBy(a => a.CreatedAt).Select(ActivityDto.FromEntity).ToList(),

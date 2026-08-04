@@ -1,10 +1,29 @@
 # Stryde — Product Spec
 
-Personal operations app built around three primitives: **Activities**, **Goals**, and the **Daily
-Plan**. Single user in practice; the schema, auth layer, and every query are scoped by `UserId`.
+A brain space for goals, deadlines and motivation. Built around three primitives: **Goals**,
+**Activities**, and **Occurrences**. Single user in practice; the schema, auth layer, and every query
+are scoped by `UserId`.
 
 This document describes what the app does today. Visual rules live in `design.md`; code navigation
 and conventions live in `CLAUDE.md`.
+
+## What Stryde is not
+
+Stryde does not ask you to log your life. There is no suggestion engine, no scheduling model, and no
+stat that divides by the length of a day - so **sleep, work and commuting do not belong in it** unless
+you want them there for your own reasons. Nothing computes a wrong answer because they are missing.
+
+This is a hard product boundary, and the test for any new feature is:
+
+> Does this still produce a correct answer if the user logs only the things they care about?
+
+A feature that needs a complete calendar to be right - free-slot placement, "unaccounted" time,
+inferred availability, anything that reads meaning into an empty hour - fails that test and does not
+belong here, however useful it looks. Everything that ships today passes it: totals sum what was
+logged, cadence looks only at one activity's own completions, and checkpoint progress is entered by
+hand.
+
+The calendar is a **visualization and a fast way to add things**, not a planner and not a log.
 
 ---
 
@@ -39,7 +58,7 @@ password of at least 8.
 - On mount the app calls `/api/auth/refresh` to restore a session; failure routes to `/login`.
 - Every route except `/api/auth/*` requires a valid access token. The user id is read from the `sub`
   claim.
-- Registration captures the browser's timezone and **seeds three activity types** (see below).
+- Registration captures the browser's timezone.
 
 ---
 
@@ -72,20 +91,16 @@ time. Activities are managed at `/activities`.
 | Title | Required, max 255 characters |
 | Goal | Optional, one goal |
 | Category | Optional |
-| Type | Optional, one user-created scheduling preset. No type is the unconstrained profile. |
 | Kind | `activity` or `event`. Internal, never shown. |
-| Exclude from suggestions | Boolean. When set, the activity never appears in recommendations or as a calendar ghost. |
 | Subtasks | Ordered checklist template, copied onto every new occurrence. |
-| Changes | State values doing it puts the world into, each with an optional duration. |
-| Only suggest when | State values a state must hold for the activity to be suggested. |
 
-Deleting an activity cascades to its occurrences. Deleting a goal, category, or type set-nulls the
-link and leaves the activity alive.
+Deleting an activity cascades to its occurrences. Deleting a goal or category set-nulls the link and
+leaves the activity alive.
 
 ### Kinds: activity vs event
 
 - **`activity`** — a reusable definition. It owns many occurrences and is what `/api/activities`
-  lists, what the suggestion engine ranks, and what the activity picker offers.
+  lists and what the activity picker offers.
 - **`event`** — a one-off. `POST /api/occurrences/event` creates a backing activity row and its
   single occurrence together; `PUT /api/occurrences/{id}/event` edits both (the event's title *is*
   the activity's title); deleting the occurrence deletes the backing row. Events are excluded from
@@ -103,181 +118,6 @@ Two levels, deliberately separate:
   an occurrence update (id present = keep and rename, id absent = create, missing = delete, whole
   field omitted = leave untouched).
 
-### Activity types
-
-A type declares what an activity *is* in terms the engine can act on. It is the only user-supplied
-input to suggestion behaviour besides the mute switch, and exists mainly to give the engine something
-to work with before an activity has any completed history.
-
-**A type is a row the user owns.** Every field is editable, and a type can be created, renamed,
-re-iconed, or deleted like a category. An activity has at most one type, or none. Types hold
-**nothing but scheduling numbers**: no type refers to another type, and conditions belong to States.
-
-**No type is the unconstrained profile**, not a missing value: placed 08:00-21:00, no block floor, no
-cap, no cooldown, a 7-day cadence prior. That is why there is no built-in row standing for "general".
-
-| Field | Meaning |
-|---|---|
-| Window (start, end) | Where a suggestion with no habitual time of its own is placed. The start is a preference: with no room inside the window, placement falls back to an opening *earlier* than it. The end is hard - nothing is ever placed past it. |
-| Min block | Contiguous free time the activity needs regardless of its median duration. The only setting that can make an activity ineligible. 0-480 minutes, 0 = none. |
-| Max/day | Ceiling on suggestions of the type for the target day, counted against what is already scheduled or done that day as well as what has been suggested. 0-24, 0 = unlimited. **Per type**: one shared counter. |
-| Cadence prior | Assumed gap between completions until history supplies a real median. Drives ranking for an activity with one completion or none. Above 0, up to 365 days. |
-| Cooldown | How far through its own rhythm an activity must be before it is offered again, as a fraction of its own gap between completions (0.5 = halfway to due). 0-1. **Per activity**: one session silences that activity alone, which is what makes a two-sided split alternate. |
-| Name, icon | Name required; icon is a lucide component name from a curated 23-icon picker. |
-
-Validation: name required, window start strictly before window end (placement walks candidate starts
-forward, so a window wrapping past midnight would match nothing), and the numeric bounds above.
-
-Cadence prior and cooldown are edited as **worded dropdowns**, since both are fractions of an
-activity's own history rather than clock values:
-
-| Cadence prior | | Cooldown | |
-|---|---|---|---|
-| Daily | 1d | As soon as it's due | 0 |
-| Every few days | 2.5d | Once you're halfway to due | 0.5 |
-| Weekly | 7d | Only when fully due | 1.0 |
-| Every couple of weeks | 14d | | |
-
-Nothing may be seeded at a value those options cannot express, or a built-in would be unreachable by
-hand. New users get three ordinary rows:
-
-| Seeded name | Window | Min block | Cadence prior | Max/day | Cooldown |
-|---|---|---|---|---|---|
-| General | 08:00-21:00 | - | 7d | - | - |
-| Training | 15:00-21:00 | 45 min | 2.5d | 2 | 0.5 |
-| Deep work | 09:00-17:00 | 90 min | 2.5d | 2 | - |
-
-Training caps at 2 rather than 1 because spacing is the cooldown's job: a cap of 1 would stop a run
-and a lift being suggested on the same day even when both are due. The engine reads type rows per
-request, so editing a type changes suggestions everywhere at once, and the hint copy under the type
-picker is generated from the row rather than written by hand.
-
-### States
-
-Some activities only make sense when the world is a certain way. A commute home is not a habit with
-a rhythm of its own: it exists because you went in, and it is nonsense on a day you did not.
-
-A **State** is a user-defined dimension of context with an ordered list of possible **values**, one
-of which is the default. Managed at `/activities/states`.
-
-| Field | Notes |
-|---|---|
-| Name | Required. `Location`, `Tired`. |
-| Values | Ordered by creation. Each has a name and a default flag. How long a value holds is not set here but on the activities that cause it. |
-
-Each activity then declares two optional things, both from the activity modal:
-
-- **Changes** — the state values doing it puts the world into, each with an optional **duration**.
-  At most one value per state, enforced structurally by the `(ActivityId, StateId)` key and checked
-  in the service so the error reads in domain terms.
-- **Only suggest when** — the values a state must hold. Values listed for one state are **ORed**;
-  the groups for different states are **ANDed**.
-
-The commute case is then data rather than code:
-
-```
-State "Location", values: Home (default), Work
-Activity "Commute in"    changes Location -> Work,  only when Location is Home
-Activity "Commute home"  changes Location -> Home,  only when Location is Work
-Activity "Run"           type Training,             only when Location is Home
-State "Tired", values: No (default), Yes
-Activity "Leg day"       changes Tired -> Yes for 10 hours
-Activity "Hike"          changes Tired -> Yes for 2 days
-Activity "Run"           also only when Tired is No
-```
-
-#### How a state's value is derived
-
-**Nothing is stored.** A state's value at an instant is read off the schedule: whatever the most
-recent state-setting occurrence at or before that instant put it to, unless that value has since
-expired, in which case the state is back to its default. That is what stops the two drifting apart -
-move a commute and the state moves with it.
-
-- **A setter takes effect at its occurrence's end** (or its start, for a due pin with no end), and a
-  duration runs from there. You are at work once the inbound commute *finishes*, and tired once the
-  workout is over. The natural setter is a *transition*; an office block is a consequence of one.
-- **Only occurrences on the calendar set state:** `pending` or `done`, with a real start. Pending
-  counts because it is intent. **Skipped ones do not** - skipping is an explicit decision not to,
-  the same reason skipped time frees up. **Suggestions never set state**, so the engine cannot
-  bootstrap a day out of its own guesses. **All-day planned occurrences do not either** - a setter
-  needs an instant, and "sometime on Thursday" is not one.
-- **Ties break on effective time then creation**, so two setters on the same minute have a stable
-  answer.
-- **Lookback is unbounded**, and free: the engine already loads the user's whole occurrence table.
-- A state with no default and nothing set yet satisfies no requirement.
-
-#### Durations
-
-A change may declare how long the value it sets holds before decaying back to the default. This is
-what lets a state change back **on its own**, with nothing scheduled to undo it: a workout leaves you
-tired for a day, and no phantom "recovered" activity is needed. A change with no duration holds until
-something else changes it, which is what `Location` wants.
-
-**The duration belongs to the cause, not to the value.** "Tired" has no lifetime of its own: a run
-leaves you tired for ten hours and a hike for two days, so the number sits on the activity's change
-and two activities can hold one value for different lengths. It is entered in the activity modal in
-minutes, hours, or days.
-
-- Expiry always returns the state to its **default**. A value that ought to decay to some *third*
-  value is a sign the state is modelled wrong.
-- **A change to the default value cannot carry a duration** - it would decay to itself. Rejected on
-  write. If the default later moves onto a value some activity sets *with* a duration, that duration
-  goes inert (and returns if the default moves off again).
-- **A later setter that changes the value replaces the pending expiry**, since the departure the old
-  one was counting down is over.
-- **A later setter that re-sets the value already in force takes whichever expiry is further out.** A
-  second session extends the tiredness rather than being cut short by the first one's decay. Null
-  ("indefinitely") wins that comparison.
-- Durations cross the day boundary freely. 1-43200 minutes (30 days); past that a "temporary" value
-  is just the state's normal value.
-
-#### Reading a state at an instant
-
-Because a state is a reading of the schedule, any instant can be asked about. **Clicking empty space
-on the calendar grid** opens a read-only dialog for that quarter-hour: every state, the value it holds
-then, and why - the occurrence that set it and when, plus when the value ends and what it becomes.
-
-- Answers for a **future** instant exactly as for a past one. The grid already shows what is planned;
-  this says what that plan implies about the world.
-- A value the state simply defaults to names no cause, and neither does one it decayed back to: an
-  expiry is nothing anybody scheduled.
-- Nothing here is editable. A wrong reading is wrong on the calendar or in some activity's **Changes**,
-  and that is where it gets fixed.
-- With no states defined the click does nothing, rather than opening an empty dialog.
-
-#### What requirements do to suggestions
-
-Requirements are **suggestion-only**. Nothing here ever blocks scheduling something by hand.
-
-- **The gate.** An activity whose requirements are never satisfied anywhere on the target day is
-  dropped from every tier, however overdue it is. This is the only filter keyed off the day's
-  *contents* rather than the activity's own history, and the only one that can silence an activity
-  that is genuinely due.
-- **The mask.** Where requirements *are* satisfied, those stretches are intersected with the day's
-  free slots, and every placement rule chooses within the result. The mask is hard and the window
-  stays soft: a habitual start time still beats a type's window, but neither steps outside the mask.
-  An activity permitted somewhere on the day but with no room inside the mask gets **no slot** and
-  surfaces without a time.
-- Nothing about a state is consulted for an activity with no requirements, which is nearly all of
-  them. A user with no states costs one cheap query.
-
-Flushness falls out for free: the mask for a commute home opens when the inbound leg ends and runs to
-end of day, but the office block occupies its own span, so free-slot carving puts the first candidate
-right after work finishes.
-
-**Model each direction as its own activity** ("Commute in", "Commute home"). One activity emitting
-two suggestions would break the dedupe set, the per-activity cooldown, and the already-scheduled
-exclusion, all of which assume one suggestion per activity. Separate legs also give each a habitual
-time that means something: a single commute activity has a *bimodal* start-time history. Because each
-leg requires the state the other sets, the pairing falls out of the data - the return leg cannot be
-offered until the outbound one is on the calendar.
-
-**Invariants.** Exactly one default per state; the first value created is forced to be it. Clearing
-the default flag without naming a replacement is refused. Deleting a value an activity still sets or
-requires returns **409**. Deleting the default promotes the oldest survivor. Deleting a whole state
-cascades to its values, effects, and requirements: the activity survives and stops being gated. Every
-value write returns the whole parent state, since an invariant can move the default onto a sibling.
-
 ---
 
 ## Occurrences
@@ -289,40 +129,41 @@ value write returns the whole parent state, since an invariant can move the defa
 | Start datetime | Absent for floating; window start when `IsPlanned`. |
 | End datetime | Window end when `IsPlanned`; deadline or span end otherwise. Must be after start. |
 | Is all day | Marks a date-only occurrence. |
-| Is planned | Marks a flexible/windowed occurrence (dashed on the calendar, never overdue). May be set on a floating occurrence, which routes it to the suggestion panel. |
+| Is planned | Marks a flexible/windowed occurrence (dashed on the calendar, never overdue). May be set on a floating occurrence. |
 | Duration minutes | Effort estimate, valid on any occurrence type. On a planned occurrence with both window bounds it may not exceed the window length. |
 | Status | `pending`, `done`, `skipped`. Marking done clears `IsPlanned`. |
 | Subtasks | Per-occurrence checklist with `IsDone`, seeded from the activity's template. |
 
 `effectiveTitle` on the DTO is `title ?? activity.title`. The DTO also carries the full activity
-(with its category, goal, type, and state links), which is why occurrence lists are invalidated after
-an activity write. Legacy `windowStart`/`windowEnd`/`windowDurationMinutes` columns remain on the row
+(with its category and goal), which is why occurrence lists are invalidated after an activity write. Legacy `windowStart`/`windowEnd`/`windowDurationMinutes` columns remain on the row
 and are honoured by range filtering; nothing in the UI writes them.
 
 ### Scheduling states
 
-**Scheduled** — a start datetime and `IsPlanned = false`. Participates in overdue detection, blocks
-time for the engine, and is drawn as a solid calendar block.
+**Scheduled** — a start datetime and `IsPlanned = false`. Participates in overdue detection and is
+drawn as a solid calendar block.
 
 **Due pin** — a start with no end. A deadline rather than a commitment to a span: the grid draws it
-30 minutes tall and pins it in the calendar's sticky Due row, but it never removes time from the day.
+30 minutes tall and pins it in the calendar's sticky Due row.
 
 **Planned** — `IsPlanned = true`. `StartAt`/`EndAt` act as window bounds when both are present;
 `EndAt` alone is a soft due date; `IsAllDay` marks a flexible all-day task. Drawn as a dashed,
 diagonally striped block spanning the window, grouped under "Planned" in list views, and never
 overdue - the flag says the time is flexible, not that a commitment is missing.
 
-**Floating** — no start, no end, not all-day. `IsPlanned` splits where it surfaces:
+**Floating** — no start, no end, not all-day. This is the "keep it somewhere" state, and the reason
+the app can hold an intention without turning it into an appointment. `IsPlanned` splits where it
+surfaces: a planned floating occurrence is already committed to and only needs a time, an unplanned
+one is not yet.
 
-- **Planned floating** appears in the suggestion panel's "Floating" section (desktop sidebar and
-  mobile drawer), above the ranked tiers, since it is already committed to and only needs a time.
-- **Unplanned floating** appears in the Daily Plan's "Floating" group, on every day, since it has no
-  day of its own.
+The calendar's FLOAT row shows both, planned first, and either can be dragged into the grid to give
+it a time. The Daily Plan lists unplanned floating occurrences in its "Floating" group on every day,
+since they have no day of their own. On the Categories page a planned floating occurrence groups
+under "Planned" and an unplanned one under "Floating". Floating occurrences are never overdue. The
+`floating=true` list filter also drops occurrences whose activity is on a benched goal.
 
-The calendar's FLOAT row shows both, planned first. On the Categories page a planned floating
-occurrence groups under "Planned" and an unplanned one under "Floating". Floating occurrences are
-never overdue. The `floating=true` list filter also drops occurrences whose activity is on a benched
-goal.
+**All-day planned** is the other holding state: a date with no time, for something that belongs to a
+day without belonging to an hour of it.
 
 ### Overdue
 
@@ -353,8 +194,7 @@ create it. `activityId` on the update request is optional: omitting it leaves th
 valid between activity-kind activities, and enforced on both ends - an event occurrence cannot be
 moved onto an activity, and nothing can be created on or moved onto an event's backing row (that
 would give it two occurrences, and deleting either would cascade both away). The main use is
-correcting history in bulk after splitting one activity into several, which is exactly what modelling
-a commute as two directional legs requires.
+correcting history in bulk after splitting one activity into several.
 
 **Edit activity from a block.** The occurrence detail modal opens the parent activity's editor
 directly, shown only for activity-kind rows.
@@ -393,11 +233,10 @@ A sustained intention with measurable progress.
 
 ### Status
 
-- **Focus** — weighted highest in suggestions (tier 1) and shown on the Daily Plan.
-- **Active** — suggested, one tier down.
-- **Bench** — deprioritised. Its activities are hidden from suggestions and from the calendar's
-  float row.
-- **Closed** — archived. Not suggested; shown dimmed in a Closed section.
+- **Focus** — what you are actually working on. Shown at the top of the Daily Plan.
+- **Active** — live, but not the current focus.
+- **Bench** — deprioritised. Its activities are hidden from the calendar's float row.
+- **Closed** — archived. Shown dimmed in a Closed section.
 
 The number of simultaneous Focus goals is a user setting and a **hard boundary**: promoting a goal
 past the limit returns 409 with a message naming it. Goals are listed grouped Focus → Active → Bench
@@ -429,174 +268,35 @@ huge=8, and 0 when there are no checkpoints. It is computed client-side from the
 
 ---
 
-## Recommendations
-
-`GET /api/recommendations?date=YYYY-MM-DD` (date optional, defaults to the user's current day)
-answers: *what should I add to this day's schedule?* Every tier returns **activities**, never
-occurrences.
-
-1. Activities on **Focus** goals
-2. Activities on **Active** goals
-3. Activities with a **weekday pattern**: at least 2 completions on the target weekday within the
-   last 6 weeks, sorted by frequency descending
-
-An activity appears at most once, in its highest tier. Dropped from all tiers:
-
-- Activities already **scheduled or done** on the target day - doing something counts for at least as
-  much as planning it. A skipped occurrence does not exclude, matching how skipped time frees up.
-- Activities on **Bench** or **Closed** goals.
-- Activities flagged **exclude from suggestions**.
-- Activities whose **state requirements** are satisfied nowhere on the target day.
-- Activities inside their type's **cooldown** (skipped when there is no completed history, since that
-  figure comes from the creation date and says nothing about rest).
-- Activities that **fit no free gap**: the gap must hold whichever is larger, the median duration or
-  the type's min block. With neither, the activity is always included.
-
-**All-day planned occurrences are invisible to the engine.** `IsPlanned` says the time is flexible
-and all-day says there is no time, so together they mean only "sometime that day". Such an occurrence
-does not hold its day, does not count toward a type's `Max/day`, does not block time, and does not
-set state - the user can rearrange these between days without churning what any day suggests. The
-other two combinations still count for all four: **all-day without `IsPlanned`** is a firm date
-commitment, and **planned with times** is a window.
-
-A *completed* all-day occurrence still feeds cadence - it says the activity was done that day, and
-dropping that would make something you actually did look overdue - but it cannot feed the clock: local
-midnight is not a habitual start time and an exclusive end date is not a span. It contributes to
-`daysSinceLast` and `medianGapDays` only. A hand-typed `DurationMinutes` still counts, being an
-estimate of effort rather than a reading off the calendar.
-
-### Ranking
-
-Tiers 1 and 2 rank by **overdueness relative to the activity's own rhythm**: days since last
-completion divided by the median gap between completion days. An activity completed today scores ~0
-and sinks (natural cooldown); one past its usual gap floats up. A single completion has no derivable
-gap, so the type's cadence prior stands in. An activity with **no completions at all** is measured
-from its creation date against the same prior - one added today has not had a chance to be due, one
-added three weeks ago with a daily cadence plainly has - clamped to 3.0, since none of it is evidence
-and an ancient untouched activity would otherwise outrank everything with a real rhythm. An activity
-whose habitual start time falls in occupied or past time is halved. Tier 3 keeps its frequency sort.
-
-**Type caps** apply in rank order and before placement, so a capped-out activity does not consume a
-slot on its way to being dropped. The count is seeded with what the day already holds, scheduled or
-done: completing the day's two deep work blocks must not invite a third.
-
-### Timing hints and reasons
-
-Stats come from completed history in the **last 90 days**; older habits age out of both timing hints
-and cadence.
-
-- `typicalDurationMinutes` — median duration (span when both timestamps exist, else the typed
-  estimate).
-- `typicalStartTime` — most common start, rounded to 15 minutes, in the user's timezone, computed
-  over timed completions only.
-- `daysSinceLast`, `medianGapDays`, `patternCount` — the raw "why" signals. The server ships numbers
-  only; the panel composes the sentence ("6d since last, usually every 2d" / "Usually on Tuesdays,
-  3x lately"). An activity with no history carries no signals and shows no reason line.
-
-Scheduling from a suggestion pre-fills the modal with the start time and a computed end.
-
-### Free slots
-
-For today, gaps run from now to end of day; for a future day, the whole day; for a past day, slot
-computation is skipped entirely and every suggestion has a null slot. Gaps are carved out by
-occurrences holding a real span (both a start and an end) on that day:
-
-- **Pending and done occurrences block.** Done time was spent and the block is still drawn.
-- **Skipped occurrences do not block** - the time frees up.
-- **Due pins do not block** - a deadline is not a commitment to a span.
-- **Floating occurrences do not block** - they have no time to hold.
-- **All-day planned occurrences do not block** - a date is not a span. This matters most for a
-  multi-day one, whose `EndAt` is an exclusive end *date*: read as a span it would swallow its first
-  day whole.
-
-### Placement
-
-`suggestedStartAt` is the activity's slot on the target day, on the quarter hour. Placement is
-**stateful and runs in rank order**, so the highest-ranked activity picks first and each suggestion
-consumes the room it takes - without that, every suggestion answers the same question against the
-same empty day and they all land on the first gap that fits.
-
-- **State requirements mask the day before any other rule runs.** Every candidate is drawn from the
-  free slots intersected with the permitted stretches.
-- **At most two suggestions may cover the same instant.** Two ghosts side by side read as "pick one";
-  more than that is unreadable.
-- **Habit-anchored activities** (those with a habitual start time) take it when it still fits,
-  ignoring their type's window - observed behaviour beats a declared preference. When it is taken
-  they take the free opening *nearest* the habit, ties breaking earlier.
-- **Displacement is bounded to 2 hours.** Past that the activity gets no slot. An 08:00 gym session
-  offered at 19:00 is the same activity in name only. This bounds the *slot*, not the recommendation:
-  an occupied habitual time is a downrank, not a disqualification.
-- **Unhabituated activities** take the first opening inside their type's window; with no room there,
-  the first opening at or after 08:00 local (the day boundary is usually the small hours) but **never
-  past the window end**. A day with room left only after the window closes yields no slot.
-- An activity with no completion history is sized at 30 minutes, matching the span the calendar draws
-  for it.
-
-The slot is null on past days, when nothing fits, when a habit-anchored activity is displaced too
-far, and when state requirements leave no room. The recommendation still surfaces, without a time.
-
-### Where suggestions appear
-
-- **Suggestions panel** — a 320px desktop column on the Daily Plan and Calendar pages, and a mobile
-  drawer. Planned floating occurrences first, then the ranked tiers ("Focus Goals", "Active Goals",
-  "Based on Your Habits") with counts. Each row shows title, effort or timing hint, reason line, and
-  goal badge. When a slot exists the action is a `+ HH:mm` pill that creates the occurrence at that
-  time with no modal, deriving `endAt` from the median duration; otherwise it opens the modal. The
-  panel targets the viewed day, and the header names it ("today", "tomorrow", "Tue, Jul 21").
-- **Calendar ghosts** — a header toggle (persisted in `localStorage`) draws each visible day's top
-  suggestions as dotted blocks at their slot for the length of their median duration, fetched per
-  visible day so a week view shows placement across the whole week. The count per day is the
-  `Calendar suggestions` setting (1-12, default 6), a ceiling rather than the main throttle since
-  placement already spreads suggestions and caps overlap at two. Clicking a ghost opens the modal
-  pre-filled rather than creating anything.
-
-### Activity history dialog
-
-Every suggestion can answer "have I actually been doing this" without leaving the day being planned:
-a panel row has a history icon, and a calendar ghost opens the same dialog on right-click or a hold
-(plain click stays scheduling, which is the common case). It is read-only. It shows last done,
-cadence, usual time and usual length, an eight-week grid of one cell per day laid out as a calendar
-(weekday columns, week rows), and the ten most
-recent occurrences with their status, in a box that scrolls rather than growing the dialog. The cadence figures are the ones the engine already computed
-for that recommendation, so the dialog and the row's reason line can never disagree; opened from a
-floating occurrence, which has no recommendation behind it, those two tiles fall back to the gap
-between the last two completions or read `Unknown`. `Open activity` leads to the full detail page.
-
 ---
 
 ## Views
 
 | Route | Purpose |
 |---|---|
-| `/plan` | Daily Plan: the execution view for one day. Index route. |
-| `/calendar` | Day / 3-day / week grid. The primary scheduling surface. |
+| `/plan` | Daily Plan: one day's agenda. Index route. |
+| `/calendar` | Day / 3-day / week grid. Visualization, and the fastest way to add something. |
 | `/categories` | Occurrence lists per category, plus "Active" and "No category". |
 | `/goals`, `/goals/:id` | Goal list with progress, and per-goal detail with notes and checkpoints. |
 | `/activities`, `/activities/:id` | Activity list and detail (subtasks, occurrence history). |
-| `/activities/types` | Activity type admin. |
-| `/activities/states` | State admin. |
-| `/insights` | Time and unaccounted-time stats. |
+| `/insights` | Totals over what was logged. |
 | `/settings` | Preferences, data export, sign out. |
 
-`/plan-old` and `/goals-old` keep the previous Plan and Goals layouts routed. `/inbox` redirects to
-`/categories`. The three activity routes are one screen in three tabs; their static segments outrank
-`/activities/:id`. Types and states live there rather than in Settings because they are user
-vocabulary, not app preferences.
+`/inbox` redirects to `/categories`. `/activities`'s static segment outranks `/activities/:id`.
 
 Navigation: a 240px desktop sidebar (Daily Plan, Calendar, Goals, Activities, Insights, then the
 category list with inline add/edit/delete, and Settings pinned at the bottom); on mobile a 5-slot
 bottom bar (Plan, Categories, Calendar, Goals) plus a "More" sheet holding Activities, Insights, and
-Settings. Nav items are not `end`-matched, so drilling into a goal, activity, or tab keeps the parent
-item lit.
+Settings. Nav items are not `end`-matched, so drilling into a goal or activity keeps the parent item
+lit.
 
 ### Daily Plan
 
-The execution view: what to do now, as opposed to the calendar's "where does this go in time".
+One day, read as a list. There is no score for the day: no completion ring and no done/left counts,
+because those rate how much of a day was executed, which is the planner reading this app is not for.
 
-- **Briefing hero** — completion ring for the day, time-of-day greeting, "N things left", and counts
-  for done, left, planned minutes, and overdue.
-- **Focus goals** — one chip per focus goal: title, last-session recency, and either its milestone
-  percentage or its ongoing occurrence bar.
+- **Focus goals** — one chip per focus goal at the top of the page: title, last-session recency, and
+  either its milestone percentage or its ongoing occurrence bar. Goals lead the day, not metrics.
 - **Overdue** — on today's view only, every overdue occurrence regardless of the day it was
   scheduled for, with its date, above the agenda and not in it. One button moves the whole set to
   tomorrow, preserving each clock time.
@@ -605,29 +305,44 @@ The execution view: what to do now, as opposed to the calendar's "where does thi
   a one-tap done checkbox, a skip action, and an action menu.
 - **Planned** and **Floating** sections below the agenda.
 - Day navigation (prev / next / today / date picker) using the same boundary semantics as the
-  calendar, and the suggestions panel in the middle column (a drawer on mobile).
+  calendar.
 
 ### Calendar
 
 Day, 3-day, and week views (choice persisted), with prev/next, jump-to-today, and a date picker.
 
-- Scheduled occurrences as solid blocks, planned ones dashed and striped, suggestion ghosts dotted.
-  All of them are packed in one pass, so an overlap renders side by side with real events keeping the
-  leftmost columns; every block in a cluster of transitively-overlapping spans shares one width.
+The calendar is a **picture of what you have decided**, not a plan the app made and not a record it
+expects you to complete. Empty grid means nothing in particular.
+
+- Scheduled occurrences as solid blocks, planned ones dashed and striped. They are packed in one
+  pass, so an overlap renders side by side; every block in a cluster of transitively-overlapping
+  spans shares one width.
 - A sticky header with an **all-day row** and a **FLOAT row**; occurrences can be dragged between
-  those rows, from a row into the grid (which schedules them), and between day columns.
-- Drag-to-create on empty grid, drag-to-move and resize on existing blocks, snapping to 15 minutes.
+  those rows, from a row into the grid (which gives them a time), and between day columns.
+- **Clicking (or tapping) empty grid creates** a 30-minute occurrence at that quarter hour, pre-filled
+  in the create modal. Dragging still sets an exact span, and a long press does it on touch - but the
+  cheapest gesture now does the most common thing, which is the calendar's whole job here.
+- Drag-to-move and resize on existing blocks, snapping to 15 minutes. Clicking a block opens the
+  occurrence detail modal. A dragged block is held inside its day **by its end, not by the pointer**:
+  it stops when its bottom edge reaches midnight, however deep into the block it was grabbed. So an
+  occurrence cannot be dragged across midnight - the model and the grid both still handle ones that
+  do, they are just made in the edit modal.
 - A sticky **Due** row keeps due pins and overdue items visible while scrolling.
-- Adjustable slot height (zoom controls and pinch, persisted) and a **likely-free overlay**: a
-  hatched background on today and future columns marking the hours that usually stay empty on that
-  weekday.
-- Clicking a block opens the occurrence detail modal; clicking a ghost opens a pre-filled create
-  modal. Clicking (or tapping) **empty** grid opens the state snapshot for that quarter-hour - see
-  States → Reading a state at an instant. Creating still takes a drag, or a long press on touch, so
-  the cheaper gesture answers rather than writes.
+- Adjustable slot height (zoom controls and pinch, persisted).
+- **Compact mode** (toolbar toggle, persisted) elides each day's empty stretches into labelled bands
+  a few pixels tall, leaving the day's actual content at the same scale it always had. A stretch is
+  collapsed when it is at least 45 minutes long *and* would have been at least half again the band's
+  own height, so the threshold tracks the zoom and a band never costs more grid than it saves.
+  Occupied ranges keep a quarter hour of breathing room either side and snap out to the quarter hour.
+  In a multi-day view **every column collapses its own emptiness**, so hours do not line up across
+  columns - two days with nothing in common have nothing to align on, and a shared scale could only
+  collapse what every visible day agreed was empty. The current time always stays visible.
+- **Any drag restores the full 0-24 grid** for the length of the gesture, so moving, resizing,
+  creating and dropping in from the header rows all address real times. The grid re-collapses on
+  release. Whatever was under the pointer holds its position across both switches, and across zoom.
 - On touch only a **deliberate tap** counts: short, still, on a grid that is not moving and was not
   gliding when the finger landed. A scrolling finger looks like a tap at several points - stopping
-  momentum, resting before a flick - and none of those may open anything.
+  momentum, resting before a flick - and none of those may create anything.
 
 ### Categories
 
@@ -638,28 +353,26 @@ Floating → Completed/Skipped, with overdue winning over the day grouping.
 
 ### Activities
 
-Title search, an All / Suggested / Muted filter, and a grouping toggle over **Goal / Type / Category
-/ States / None** (persisted in `localStorage`). The States grouping buckets activities whose "Only
-suggest when" requirement sets are identical, labelled the way the engine reads them ("Location: Home
-or Work, Tired: No"), and is offered only once a state has values. Sections collapse and carry
-counts; rows sort by title within a section.
+One flat list: title search and a grouping toggle over **Goal / Category / None** (persisted in
+`localStorage`). Sections collapse and carry counts; rows sort by title within a section.
 
-Each row leads with its type tile, then title and a meta line dropping whatever the section header
-already says, a mute bulb (optimistic, so the list does not reshuffle while flipping several), and an
-action menu. **Multi-select mode** turns the tiles into checkboxes and the row actions into a bottom
-bar: mute, unmute, assign, delete, with per-section select-all. Bulk assign sets goal, category, and
-type across the selection, each field defaulting to "keep current"; it fans out over the single-item
-PUT, resending unchanged fields.
+Each row leads with a tile in its **category's colour and icon** - the same colour that draws its
+occurrences everywhere else - then title and a meta line dropping whatever the section header already
+says, then an action menu (history, edit, delete). **Multi-select mode** turns the tiles into
+checkboxes and the row actions into a bottom bar: assign, delete, with per-section select-all. Bulk
+assign sets goal and category across the selection, each field defaulting to "keep current"; it fans
+out over the single-item PUT, resending unchanged fields.
 
-The **types** tab is an accordion per type over the full CRUD, with the four numeric knobs 4-across
-and the two worded dropdowns side by side. The **states** tab is an accordion per state with an
-inline value list, a star marking the default, and an add row that shares the list's columns.
+**Activity history** opens read-only from a row's action menu: last done, cadence, usual time, usual
+length, an eight-week grid of one cell per day laid out as a calendar, and the ten most recent
+occurrences. Every figure is derived in the client from that activity's own occurrences, so it stays
+correct however little else is logged.
 
 ---
 
 ## Insights
 
-Read-only stats over **done occurrences**, computed server-side (`GET /api/insights?period=N`, 7 or
+Read-only totals over **done occurrences**, computed server-side (`GET /api/insights?period=N`, 7 or
 30 days, the page defaults to 7) in the user's day context. Occurrences with no `StartAt` are
 excluded - they have no day to count on.
 
@@ -667,22 +380,12 @@ excluded - they have no day to count on.
 |---|---|
 | Time by activity | Per activity over the window: summed minutes and count, from occurrences with both timestamps and positive elapsed time. Sorted by time. Bars in the activity's category colour. |
 | Time by category | Same set grouped by the activity's category; uncategorized completions form a "No category" bucket. |
-| Avg unaccounted time | Per day: `1440 − sum(durations)` (duration = `EndAt − StartAt`, else `DurationMinutes`), clamped at 0, averaged over "tracked days" (days with at least one timed occurrence). Null when no such day exists. Also computed for the immediately preceding window of the same length, for the trend line. |
-| Largest gaps | Top 5 contiguous untracked stretches across tracked days. Busy intervals come from all completed timed occurrences (so an overnight one covers the next morning), clamped to each day's boundary-to-boundary span and merged before gaps are read off. Times are local clock strings. |
-| Unused blocks | Top 3 maximal runs of consecutive 1-hour slots (aligned to the day boundary) fully empty on a strict majority of tracked days, ranked by days-empty (the run's weakest slot) then length. |
 
-The unaccounted-time stats end on the day **before** today: today is still in progress, and its
-remaining hours would read as unaccounted. The previous window shifts back accordingly.
-
-**Likely-free profile** (`GET /api/insights/empty-profile`) powers the calendar overlay. Days here
-are midnight-to-midnight local calendar dates, not boundary days, because that is the grid the
-calendar renders. Over the last 8 full weeks (today excluded), a day is tracked when at least one
-completed timed occurrence overlaps it; per weekday, a 1-hour slot is likely free when it was empty
-on a strict majority of that weekday's tracked days. Weekdays with fewer than 3 tracked days fall
-back to the profile over all tracked days. Consecutive free slots merge into ranges, returned as
-minutes from local midnight with weekday 0 = Sunday. The client renders them on today and future
-columns only, and reads them as "your usual free time" rather than "missing data": unaccounted time
-is genuinely free time, since everything is assumed logged.
+Both are sums over what the user chose to log. **There is deliberately no stat whose denominator is
+the length of a day** - no unaccounted time, no gap analysis, no "usually free" profile. Those all
+answer "what is missing from the calendar", which is only a meaningful question if the calendar is
+supposed to be complete, and here it is not. Today counts like any other day, since nothing is
+averaged over days.
 
 ---
 
@@ -693,18 +396,15 @@ is genuinely free time, since everything is assumed logged.
 | Timezone | Captured from the browser on registration; editable here. |
 | Day start | The time the day rolls over. |
 | Max focus goals | Hard limit on simultaneous Focus goals, 1-20. |
-| Calendar suggestions | How many suggestion ghosts the calendar draws per day, 1-12, default 6. |
 | Theme | Light / dark / system. Client-side preference in `localStorage`, defaults to system. |
 | Server URL | Native shells only: where the app points its API calls. |
 | Export data | Downloads `stryde-export-<date>.json`. |
 | Account | Username and sign out. |
 
-Settings holds preferences only. Activity types and states are user vocabulary and live on the
-Activities page.
+Settings holds preferences only.
 
-**Data export** (`GET /api/export`) is a single JSON document: user, settings, activity types,
-categories, goals with checkpoints, activities with subtasks and state links, and flat occurrences
-(effective title, no nested activity). Good enough to hand to a person or an LLM for analysis; not a
+**Data export** (`GET /api/export`) is a single JSON document: user, settings, categories, goals with
+checkpoints, activities with subtasks, and flat occurrences (effective title, no nested activity). Good enough to hand to a person or an LLM for analysis; not a
 backup format, since there is no import path and the shape may change freely.
 
 ---
@@ -722,7 +422,6 @@ Unauthorized→401, Forbidden→403.
 | `/api/auth/me` | `GET` |
 | `/api/activities` | `GET` (`goalId`), `POST` |
 | `/api/activities/{id}` | `GET`, `PUT`, `DELETE` |
-| `/api/activities/{id}/recommendations` | `PATCH` (mute toggle only) |
 | `/api/activities/{id}/subtasks[/{subtaskId}]` | `POST`, `PUT`, `DELETE` |
 | `/api/occurrences` | `GET` (`status`, `startFrom`, `endBefore`, `floating`, `goalId`, `activityId`), `POST` |
 | `/api/occurrences/{id}` | `GET`, `PUT`, `DELETE` |
@@ -734,11 +433,6 @@ Unauthorized→401, Forbidden→403.
 | `/api/goals/{id}/status` | `POST` |
 | `/api/goals/{goalId}/checkpoints[/{id}[/status]]` | `GET`, `POST`, `PUT`, `DELETE` |
 | `/api/categories[/{id}]` | `GET`, `POST`, `PUT`, `DELETE` |
-| `/api/activity-types[/{id}]` | `GET`, `POST`, `PUT`, `DELETE` |
-| `/api/states[/{id}]` | `GET`, `POST`, `PUT`, `DELETE` |
-| `/api/states/snapshot` | `GET` (`at`, defaults to now) |
-| `/api/states/{stateId}/values[/{id}]` | `POST`, `PUT`, `DELETE` |
-| `/api/recommendations` | `GET` (`date`) |
 | `/api/insights`, `/api/insights/empty-profile` | `GET` (`period`) |
 | `/api/settings` | `GET`, `PUT` |
 | `/api/export` | `GET` |

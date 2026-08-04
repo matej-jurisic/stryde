@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
-import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityStateEffect, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile, State, StateSnapshot } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Category, Activity, ActivitySubtask, Occurrence, Insights } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -77,19 +77,11 @@ export const activitiesApi = {
     return request<Activity[]>(`/api/activities${q.size ? `?${q}` : ''}`)
   },
 
-  // Omitting the two state fields leaves them untouched; sending [] clears them. The bulk-assign
-  // path relies on that, since it resends everything it is not changing and knows nothing about states.
-  create: (body: { title: string; categoryId?: string | null; goalId?: string | null; activityTypeId?: string | null; setsStateValues?: ActivityStateEffect[]; requiredStateValueIds?: string[] }) =>
+  create: (body: { title: string; categoryId?: string | null; goalId?: string | null }) =>
     request<Activity>('/api/activities', { method: 'POST', body: JSON.stringify(body) }),
 
-  update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null; excludeFromRecommendations?: boolean; activityTypeId?: string | null; setsStateValues?: ActivityStateEffect[]; requiredStateValueIds?: string[] }) =>
+  update: (id: string, body: { title: string; categoryId?: string | null; goalId?: string | null }) =>
     request<Activity>(`/api/activities/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-
-  setRecommendations: (id: string, excludeFromRecommendations: boolean) =>
-    request<Activity>(`/api/activities/${id}/recommendations`, {
-      method: 'PATCH',
-      body: JSON.stringify({ excludeFromRecommendations }),
-    }),
 
   delete: (id: string) => request<void>(`/api/activities/${id}`, { method: 'DELETE' }),
 }
@@ -196,28 +188,8 @@ export const checkpointsApi = {
 
 export const settingsApi = {
   get: () => request<UserSettings>('/api/settings'),
-  update: (body: { maxFocusGoals: number; dayBoundaryTime: string; timezone: string; maxCalendarSuggestions: number }) =>
+  update: (body: { maxFocusGoals: number; dayBoundaryTime: string; timezone: string }) =>
     request<UserSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
-}
-
-export interface ActivityTypeBody {
-  name: string
-  icon?: string | null
-  windowStart: string
-  windowEnd: string
-  minBlockMinutes: number
-  maxPerDay: number
-  cadencePriorDays: number
-  minDueFraction: number
-}
-
-export const activityTypesApi = {
-  list: () => request<ActivityType[]>('/api/activity-types'),
-  create: (body: ActivityTypeBody) =>
-    request<ActivityType>('/api/activity-types', { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: string, body: ActivityTypeBody) =>
-    request<ActivityType>(`/api/activity-types/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  delete: (id: string) => request<void>(`/api/activity-types/${id}`, { method: 'DELETE' }),
 }
 
 export const categoriesApi = {
@@ -229,41 +201,8 @@ export const categoriesApi = {
   delete: (id: string) => request<void>(`/api/categories/${id}`, { method: 'DELETE' }),
 }
 
-export const statesApi = {
-  list: () => request<State[]>('/api/states'),
-  /** `at` is an instant (ISO, UTC): what every state held then, and what put it there. */
-  snapshot: (at: string) => request<StateSnapshot>(`/api/states/snapshot?at=${encodeURIComponent(at)}`),
-  create: (body: { name: string }) =>
-    request<State>('/api/states', { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: string, body: { name: string }) =>
-    request<State>(`/api/states/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  delete: (id: string) => request<void>(`/api/states/${id}`, { method: 'DELETE' }),
-}
-
-/**
- * Every write returns the whole parent state, so the cache is replaced rather than patched: adding a
- * default moves the flag off a sibling, and deleting one can promote another.
- */
-export const stateValuesApi = {
-  create: (stateId: string, body: { name: string; isDefault?: boolean }) =>
-    request<State>(`/api/states/${stateId}/values`, { method: 'POST', body: JSON.stringify(body) }),
-  update: (stateId: string, id: string, body: { name: string; isDefault?: boolean }) =>
-    request<State>(`/api/states/${stateId}/values/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  delete: (stateId: string, id: string) =>
-    request<State>(`/api/states/${stateId}/values/${id}`, { method: 'DELETE' }),
-}
-
-export const recommendationsApi = {
-  list: (date?: string) => {
-    const q = new URLSearchParams()
-    if (date) q.set('date', date)
-    return request<Recommendation[]>(`/api/recommendations${q.size ? `?${q}` : ''}`)
-  },
-}
-
 export const insightsApi = {
   get: (period: number = 30) => request<Insights>(`/api/insights?period=${period}`),
-  emptyProfile: () => request<InsightsEmptyProfile>('/api/insights/empty-profile'),
 }
 
 // Full data snapshot for external analysis; shape mirrors ExportDto and is not pinned in types.ts.

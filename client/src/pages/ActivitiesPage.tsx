@@ -4,8 +4,6 @@ import { useNavigate } from "react-router-dom";
 import {
   Plus,
   Layers,
-  Lightbulb,
-  LightbulbOff,
   Search,
   X,
   ChevronDown,
@@ -16,31 +14,18 @@ import {
 import { activitiesApi, goalsApi, categoriesApi } from "@/lib/api";
 import { toastError } from "@/store/toasts";
 import type { Activity } from "@/lib/types";
-import { NO_TYPE_LABEL } from "@/lib/activityTypes";
-import { useActivityTypes } from "@/lib/useActivityTypes";
-import { useStates, describeRequirements } from "@/lib/useStates";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { ActivityModal } from "@/components/activities/ActivityModal";
 import { ActivityListRow } from "@/components/activities/ActivityListRow";
-import { ActivitiesTabs } from "@/components/activities/ActivitiesTabs";
+import { ActivityHistoryModal } from "@/components/activities/ActivityHistoryModal";
 import { BulkAssignModal } from "@/components/activities/BulkAssignModal";
 
-type SuggestFilter = "all" | "suggested" | "muted";
-
-const FILTERS: { value: SuggestFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "suggested", label: "Suggested" },
-  { value: "muted", label: "Muted" },
-];
-
-type GroupBy = "goal" | "type" | "category" | "states" | "none";
+type GroupBy = "goal" | "category" | "none";
 
 const GROUPS: { value: GroupBy; label: string }[] = [
   { value: "goal", label: "Goal" },
-  { value: "type", label: "Type" },
   { value: "category", label: "Category" },
-  { value: "states", label: "States" },
   { value: "none", label: "None" },
 ];
 
@@ -65,8 +50,8 @@ export function ActivitiesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Activity | undefined>();
   const [deleting, setDeleting] = useState<Activity | null>(null);
-  const [filter, setFilter] = useState<SuggestFilter>("all");
-  const [groupBy, setGroupBy] = useState<GroupBy>(storedGroupBy);
+  const [historyFor, setHistoryFor] = useState<Activity | null>(null);
+  const [group, setGroup] = useState<GroupBy>(storedGroupBy);
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -91,74 +76,17 @@ export function ActivitiesPage() {
     queryFn: () => categoriesApi.list(),
   });
 
-  // Seeds the type grouping's buckets, so sections keep the user's own type order rather than
-  // appearing in whatever order the activities happen to arrive in.
-  const activityTypes = useActivityTypes();
-
-  // Names the requirement sets the states grouping buckets by, and decides whether that grouping is
-  // offered at all: with no values defined, nothing can require one.
-  const { states } = useStates();
-  const hasStates = states.some((s) => s.values.length > 0);
-  const groupOptions = hasStates
-    ? GROUPS
-    : GROUPS.filter((g) => g.value !== "states");
-  // A stored "states" preference outlives the last state being deleted, so fall back for this render
-  // rather than persisting over a choice the user may get back.
-  const group: GroupBy =
-    groupBy === "states" && !hasStates ? "goal" : groupBy;
-
-  // Optimistic so the list stays put while toggling several activities in a row.
-  const suggestionsMutation = useMutation({
-    mutationFn: ({ id, exclude }: { id: string; exclude: boolean }) =>
-      activitiesApi.setRecommendations(id, exclude),
-    onMutate: async ({ id, exclude }) => {
-      await qc.cancelQueries({ queryKey: ["activities"] });
-      const previous = qc.getQueryData<Activity[]>(["activities"]);
-      qc.setQueryData<Activity[]>(["activities"], (old) =>
-        old?.map((a) =>
-          a.id === id ? { ...a, excludeFromRecommendations: exclude } : a,
-        ),
-      );
-      return { previous };
-    },
-    onError: (err, _vars, ctx) => {
-      if (ctx?.previous) qc.setQueryData(["activities"], ctx.previous);
-      toastError(err, "Could not update suggestions for this activity.");
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["activities"] });
-      qc.invalidateQueries({ queryKey: ["recommendations"] });
-    },
-  });
-
   const deleteMutation = useMutation({
     mutationFn: (id: string) => activitiesApi.delete(id),
     onSuccess: () => {
       setDeleting(null);
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["events"] });
-      qc.invalidateQueries({ queryKey: ["recommendations"] });
     },
     onError: (err) => toastError(err, "Could not delete the activity."),
   });
 
-  // No bulk endpoints exist; these fan out over the single-item routes.
-  const bulkSuggestionsMutation = useMutation({
-    mutationFn: (exclude: boolean) =>
-      Promise.all(
-        Array.from(selected).map((id) =>
-          activitiesApi.setRecommendations(id, exclude),
-        ),
-      ),
-    onSuccess: () => {
-      setSelected(new Set());
-      qc.invalidateQueries({ queryKey: ["activities"] });
-      qc.invalidateQueries({ queryKey: ["recommendations"] });
-    },
-    onError: (err) =>
-      toastError(err, "Could not update suggestions for the selected activities."),
-  });
-
+  // No bulk endpoint exists; this fans out over the single-item route.
   const bulkDeleteMutation = useMutation({
     mutationFn: () =>
       Promise.all(Array.from(selected).map((id) => activitiesApi.delete(id))),
@@ -168,7 +96,6 @@ export function ActivitiesPage() {
       setSelecting(false);
       qc.invalidateQueries({ queryKey: ["activities"] });
       qc.invalidateQueries({ queryKey: ["events"] });
-      qc.invalidateQueries({ queryKey: ["recommendations"] });
     },
     onError: (err) => toastError(err, "Could not delete the selected activities."),
   });
@@ -184,7 +111,7 @@ export function ActivitiesPage() {
   }
 
   function chooseGroupBy(value: GroupBy) {
-    setGroupBy(value);
+    setGroup(value);
     localStorage.setItem(GROUP_KEY, value);
   }
 
@@ -211,31 +138,17 @@ export function ActivitiesPage() {
     setSelected(new Set());
   }
 
-  const mutedCount = activities.filter(
-    (a) => a.excludeFromRecommendations,
-  ).length;
-  const counts: Record<SuggestFilter, number> = {
-    all: activities.length,
-    suggested: activities.length - mutedCount,
-    muted: mutedCount,
-  };
-
   const query = search.trim().toLowerCase();
 
   // Search spans the row's visible text, so typing a category or goal narrows the list too.
   const visible = useMemo(() => {
-    return activities.filter((a) => {
-      if (filter === "muted" && !a.excludeFromRecommendations) return false;
-      if (filter === "suggested" && a.excludeFromRecommendations) return false;
-      if (!query) return true;
-      return [
-        a.title,
-        a.category?.name,
-        a.goal?.title,
-        a.type?.name,
-      ].some((field) => field?.toLowerCase().includes(query));
-    });
-  }, [activities, filter, query]);
+    if (!query) return activities;
+    return activities.filter((a) =>
+      [a.title, a.category?.name, a.goal?.title].some((field) =>
+        field?.toLowerCase().includes(query),
+      ),
+    );
+  }, [activities, query]);
 
   // Grouping is keyed by attribute so a new grouping dimension is one entry, not a new branch.
   // Buckets are seeded in canonical order so sections do not reshuffle as the filter changes,
@@ -249,52 +162,22 @@ export function ActivitiesPage() {
     }
 
     const buckets = new Map<string, { label: string; items: Activity[] }>();
-    // Every grouping now has a real catch-all: "no type" is a bucket like the others, because it
-    // is a choice the user can make rather than an absent value.
-    const noneLabel =
-      group === "goal"
-        ? "No goal"
-        : group === "category"
-          ? "No category"
-          : group === "states"
-            ? "Any state"
-            : NO_TYPE_LABEL;
+    const noneLabel = group === "goal" ? "No goal" : "No category";
 
-    // Seeding only applies where a canonical order exists. A requirement set is not a list the user
-    // keeps anywhere, it is whatever combinations the activities happen to name, so the states
-    // grouping discovers its buckets and sorts them by label below.
     if (group === "goal") {
       for (const g of goals.filter((g) => g.status !== "closed"))
         buckets.set(g.id, { label: g.title, items: [] });
-    } else if (group === "category") {
+    } else {
       for (const c of categories) buckets.set(c.id, { label: c.name, items: [] });
-    } else if (group === "type") {
-      for (const t of activityTypes ?? []) buckets.set(t.id, { label: t.name, items: [] });
     }
     buckets.set(NONE_BUCKET, { label: noneLabel, items: [] });
 
     for (const a of visible) {
-      // Sorted so two activities requiring the same values land in one bucket whatever order the
-      // ids came back in: the group is the set, not the list.
-      const requirements =
-        group === "states" ? [...a.requiredStateValueIds].sort() : [];
       const key =
-        group === "goal"
-          ? (a.goalId ?? NONE_BUCKET)
-          : group === "category"
-            ? (a.categoryId ?? NONE_BUCKET)
-            : group === "states"
-              ? (requirements.length > 0 ? requirements.join("|") : NONE_BUCKET)
-              : (a.activityTypeId ?? NONE_BUCKET);
+        group === "goal" ? (a.goalId ?? NONE_BUCKET) : (a.categoryId ?? NONE_BUCKET);
       if (!buckets.has(key)) {
         const label =
-          group === "goal"
-            ? (goalMap.get(key)?.title ?? noneLabel)
-            : group === "type"
-              ? (a.type?.name ?? noneLabel)
-              : group === "states"
-                ? (describeRequirements(states, requirements) || noneLabel)
-                : noneLabel;
+          group === "goal" ? (goalMap.get(key)?.title ?? noneLabel) : noneLabel;
         buckets.set(key, { label, items: [] });
       }
       buckets.get(key)!.items.push(a);
@@ -308,11 +191,9 @@ export function ActivitiesPage() {
         items: [...b.items].sort((a, b2) => a.title.localeCompare(b2.title)),
       }));
 
-    if (group === "states") filled.sort((a, b) => a.label.localeCompare(b.label));
-
     const catchAll = filled.filter((s) => s.key === NONE_BUCKET);
     return [...filled.filter((s) => s.key !== NONE_BUCKET), ...catchAll];
-  }, [group, visible, goals, categories, activityTypes, goalMap, states]);
+  }, [group, visible, goals, categories, goalMap]);
 
   const selectedActivities = activities.filter((a) => selected.has(a.id));
   const allVisibleSelected =
@@ -354,9 +235,7 @@ export function ActivitiesPage() {
         }
       />
 
-      <ActivitiesTabs />
-
-      {/* Toolbar sits outside the scroll area so search and filters stay reachable. */}
+      {/* Toolbar sits outside the scroll area so search and grouping stay reachable. */}
       {!isLoading && activities.length > 0 && (
         <div className="shrink-0 border-b border-border px-4 py-3 md:px-6">
           <div className="mx-auto flex max-w-2xl flex-col gap-2.5">
@@ -383,36 +262,19 @@ export function ActivitiesPage() {
               )}
             </div>
 
-            {/* Filter pills left, grouping right: one row on desktop, two on a phone. */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {FILTERS.map(({ value, label }) => (
-                  <button
-                    key={value}
-                    onClick={() => setFilter(value)}
-                    aria-pressed={filter === value}
-                    className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                      filter === value
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {label}
-                    <span className="opacity-60">{counts[value]}</span>
-                  </button>
-                ))}
-              </div>
-
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <div className="flex overflow-hidden rounded-md border border-border">
                 <span className="hidden items-center border-r border-border px-2.5 text-xs text-muted-foreground sm:flex">
                   Group
                 </span>
-                {groupOptions.map(({ value, label }) => (
+                {GROUPS.map(({ value, label }) => (
                   <button
                     key={value}
                     onClick={() => chooseGroupBy(value)}
                     aria-pressed={group === value}
-                    className={`border-l border-border px-2.5 py-1.5 text-xs font-medium transition-colors first:border-l-0 sm:first:border-l ${
+                    // The "Group" label already draws the seam before the first button,
+                    // so it keeps border-l-0 at every width or the two stack into 2px.
+                    className={`border-l border-border px-2.5 py-1.5 text-xs font-medium transition-colors first:border-l-0 ${
                       group === value
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:bg-muted"
@@ -451,19 +313,9 @@ export function ActivitiesPage() {
             </div>
           ) : sections.length === 0 ? (
             <div className="flex flex-col items-center gap-1 py-12 text-center">
-              <p className="text-sm text-foreground">
-                {query
-                  ? "No matches"
-                  : filter === "muted"
-                    ? "No muted activities"
-                    : "Every activity is muted"}
-              </p>
+              <p className="text-sm text-foreground">No matches</p>
               <p className="text-xs text-muted-foreground">
-                {query
-                  ? `Nothing matches "${search.trim()}".`
-                  : filter === "muted"
-                    ? "All of your activities can show up in suggestions."
-                    : "Nothing can be suggested right now. Unmute an activity to bring suggestions back."}
+                Nothing matches "{search.trim()}".
               </p>
             </div>
           ) : (
@@ -528,15 +380,9 @@ export function ActivitiesPage() {
                               onOpen={() => navigate(`/activities/${a.id}`)}
                               onEdit={() => openEdit(a)}
                               onDelete={() => setDeleting(a)}
-                              onToggleSuggestions={() =>
-                                suggestionsMutation.mutate({
-                                  id: a.id,
-                                  exclude: !a.excludeFromRecommendations,
-                                })
-                              }
+                              onHistory={() => setHistoryFor(a)}
                               hideGoal={group === "goal"}
                               hideCategory={group === "category"}
-                              hideType={group === "type"}
                             />
                           ))}
                         </ul>
@@ -569,27 +415,9 @@ export function ActivitiesPage() {
 
             <div className="ml-auto flex items-center gap-1">
               <button
-                onClick={() => bulkSuggestionsMutation.mutate(false)}
-                disabled={selected.size === 0 || bulkSuggestionsMutation.isPending}
-                title="Allow suggestions"
-                className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-              >
-                <Lightbulb className="h-3.5 w-3.5" strokeWidth={2} />
-                <span className="hidden sm:inline">Unmute</span>
-              </button>
-              <button
-                onClick={() => bulkSuggestionsMutation.mutate(true)}
-                disabled={selected.size === 0 || bulkSuggestionsMutation.isPending}
-                title="Stop suggesting"
-                className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-              >
-                <LightbulbOff className="h-3.5 w-3.5" strokeWidth={2} />
-                <span className="hidden sm:inline">Mute</span>
-              </button>
-              <button
                 onClick={() => setAssignOpen(true)}
                 disabled={selected.size === 0}
-                title="Set goal, category or type"
+                title="Set goal or category"
                 className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
               >
                 <Tags className="h-3.5 w-3.5" strokeWidth={2} />
@@ -608,6 +436,12 @@ export function ActivitiesPage() {
           </div>
         </div>
       )}
+
+      <ActivityHistoryModal
+        open={historyFor !== null}
+        activity={historyFor}
+        onClose={() => setHistoryFor(null)}
+      />
 
       <ActivityModal
         key={editing?.id ?? "new"}

@@ -61,7 +61,6 @@ export function OccurrenceListRow({ occurrence, timeText, onEdit, onSchedule }: 
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
   })
 
@@ -73,7 +72,6 @@ export function OccurrenceListRow({ occurrence, timeText, onEdit, onSchedule }: 
         old ? old.filter((o) => o.id !== occurrence.id) : old,
       )
       qc.invalidateQueries({ queryKey: ['events'] })
-      qc.invalidateQueries({ queryKey: ['recommendations'] })
     },
     onError: (err) => toastError(err, 'Could not delete the occurrence.'),
   })

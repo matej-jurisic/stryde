@@ -35,31 +35,6 @@ public static class Validators
         }
     }
 
-    /// <summary>Thirty days. Past this a "temporary" value is just the state's normal value.</summary>
-    public const int MaxStateDurationMinutes = 43200;
-
-    /// <summary>
-    /// Checks how long an <see cref="Entities.ActivityStateEffect"/> holds its value for.
-    /// <para>
-    /// A duration means "then go back to the default", so an effect that sets the default value
-    /// cannot have one: it would decay to itself.
-    /// </para>
-    /// </summary>
-    public static Error? ValidateStateDuration(int? durationMinutes, bool setsDefaultValue)
-    {
-        if (durationMinutes is not { } d) return null;
-
-        if (d < 1 || d > MaxStateDurationMinutes)
-            return new Error(ErrorType.Validation,
-                $"Duration must be between 1 and {MaxStateDurationMinutes} minutes.");
-
-        if (setsDefaultValue)
-            return new Error(ErrorType.Validation,
-                "A change to a state's default value cannot expire.");
-
-        return null;
-    }
-
     public static Error? ValidateDateRange(DateTimeOffset? startAt, DateTimeOffset? endAt)
     {
         if (startAt.HasValue && endAt.HasValue && endAt <= startAt)
