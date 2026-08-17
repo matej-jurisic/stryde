@@ -225,6 +225,139 @@ public class CaptureServiceTests : IDisposable
         Assert.Null(result.Value.EndAt);
     }
 
+    /// <summary>Marks the activity done on <paramref name="days"/>, each running start → end.</summary>
+    private async Task AddHistoryAsync(
+        Guid userId, Guid activityId, TimeOnly start, TimeOnly end, params DateOnly[] days)
+    {
+        foreach (var day in days)
+            _ctx.Db.Occurrences.Add(new Occurrence
+            {
+                UserId = userId,
+                ActivityId = activityId,
+                Status = EventStatus.done,
+                StartAt = new DateTimeOffset(day.ToDateTime(start), TimeSpan.Zero),
+                EndAt = new DateTimeOffset(day.ToDateTime(end), TimeSpan.Zero),
+            });
+        await _ctx.Db.SaveChangesAsync();
+    }
+
+    private static DateOnly DaysAgo(int n) => DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-n));
+
+    [Fact]
+    public async Task ParseAsync_fills_a_timeless_note_from_the_activitys_habitual_hours()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddHistoryAsync(userId, work.Id, new(9, 30), new(17, 0),
+            DaysAgo(1), DaysAgo(2), DaysAgo(3), DaysAgo(4));
+
+        _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18");
+        var result = await _ctx.CaptureService.ParseAsync(userId, "work tomorrow");
+
+        // Months of 09:30-17:00 beat "no time given", so this is a scheduled block, not an all-dayer.
+        Assert.False(result.Value!.IsAllDay);
+        Assert.Equal(new DateTime(2026, 8, 18, 9, 30, 0), result.Value.StartAt!.Value.DateTime);
+        Assert.Equal(new DateTime(2026, 8, 18, 17, 0, 0), result.Value.EndAt!.Value.DateTime);
+    }
+
+    [Fact]
+    public async Task ParseAsync_prefers_the_habit_over_the_models_all_day_guess()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddHistoryAsync(userId, work.Id, new(9, 30), new(17, 0),
+            DaysAgo(1), DaysAgo(2), DaysAgo(3), DaysAgo(4));
+
+        // A model reading "work tomorrow" may well call it an all-day thing. One line of text does
+        // not outrank the record of what actually happens.
+        _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18", allDay: true);
+        var result = await _ctx.CaptureService.ParseAsync(userId, "work tomorrow");
+
+        Assert.False(result.Value!.IsAllDay);
+        Assert.Equal(new DateTime(2026, 8, 18, 9, 30, 0), result.Value.StartAt!.Value.DateTime);
+    }
+
+    [Fact]
+    public async Task ParseAsync_keeps_an_explicit_time_over_the_habit()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddHistoryAsync(userId, work.Id, new(9, 30), new(17, 0),
+            DaysAgo(1), DaysAgo(2), DaysAgo(3), DaysAgo(4));
+
+        _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18", startTime: "07:00");
+        var result = await _ctx.CaptureService.ParseAsync(userId, "work tomorrow, in at 7");
+
+        Assert.Equal(new DateTime(2026, 8, 18, 7, 0, 0), result.Value!.StartAt!.Value.DateTime);
+    }
+
+    [Fact]
+    public async Task ParseAsync_stays_date_only_when_one_completion_is_all_there_is()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddHistoryAsync(userId, work.Id, new(9, 30), new(17, 0), DaysAgo(1));
+
+        _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18");
+        var result = await _ctx.CaptureService.ParseAsync(userId, "work tomorrow");
+
+        // A habit has to be earned. One session is not a routine, and a confident wrong time is
+        // worse than no time - the same bar the recommendation engine sets.
+        Assert.True(result.Value!.IsAllDay);
+    }
+
+    [Fact]
+    public async Task ParseAsync_stays_date_only_when_the_history_is_itself_all_day()
+    {
+        var userId = await CreateUserAsync();
+        var leave = await AddActivityAsync(userId, "Annual leave");
+        foreach (var day in new[] { DaysAgo(1), DaysAgo(2), DaysAgo(3) })
+            _ctx.Db.Occurrences.Add(new Occurrence
+            {
+                UserId = userId,
+                ActivityId = leave.Id,
+                Status = EventStatus.done,
+                IsAllDay = true,
+                StartAt = new DateTimeOffset(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
+            });
+        await _ctx.Db.SaveChangesAsync();
+
+        _ctx.Llm.Content = Reply(title: "Annual leave", activity: "Annual leave", date: "2026-08-18");
+        var result = await _ctx.CaptureService.ParseAsync(userId, "annual leave tomorrow");
+
+        // No exception needed for these: an all-day completion is excluded from the start-time
+        // clustering, so there is no habitual hour to find and the draft stays date-only.
+        Assert.True(result.Value!.IsAllDay);
+    }
+
+    [Fact]
+    public async Task ParseAsync_does_not_borrow_another_activitys_hours()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddHistoryAsync(userId, work.Id, new(9, 30), new(17, 0),
+            DaysAgo(1), DaysAgo(2), DaysAgo(3), DaysAgo(4));
+        await AddActivityAsync(userId, "Haircut");
+
+        _ctx.Llm.Content = Reply(title: "Haircut", activity: "Haircut", date: "2026-08-18");
+        var result = await _ctx.CaptureService.ParseAsync(userId, "haircut tomorrow");
+
+        Assert.True(result.Value!.IsAllDay);
+    }
+
+    [Fact]
+    public async Task ParseAsync_stays_date_only_for_an_unmatched_note()
+    {
+        var userId = await CreateUserAsync();
+        _ctx.Llm.Content = Reply(title: "Dentist", date: "2026-08-18");
+
+        var result = await _ctx.CaptureService.ParseAsync(userId, "dentist tomorrow");
+
+        // Nothing matched, so there is no history to read - and no query should have been attempted.
+        Assert.Null(result.Value!.ActivityId);
+        Assert.True(result.Value.IsAllDay);
+    }
+
     [Fact]
     public async Task ParseAsync_ignores_a_nonsense_date()
     {

@@ -831,7 +831,7 @@ moving target the user re-points by hand - a different box, a different tag pull
 
 | Setting | Notes |
 |---|---|
-| Enable assistant | Master switch. Off, nothing calls out. |
+| Enabled | Master switch. Off, nothing calls out. |
 | Server address | Root of the Ollama server, e.g. `http://ollama:11434`. Must be a full http(s) URL. |
 | Model | The tag as Ollama knows it, e.g. `gemma3:27b`. |
 | Timeout | Seconds to wait, 5-900, default 180. A large model on a CPU answers in minutes. |
@@ -875,16 +875,25 @@ Rules applied to the reply, none of which trust it:
   reusable thing to log again.
 - **A note with no day floats.** Guessing today is a confident wrong answer, and "sometime" is a
   real answer in this app.
-- **A day named with no clock time is date-only**, whichever way the model said so.
+- **A day named with no clock time is filled in from the activity's own hours.** "work tomorrow"
+  becomes 09:30-17:00 because that is what Work has been, using the same habitual start time and
+  median duration the recommendation engine places a suggestion at - so capture and suggestions can
+  never disagree about the user's routine. Observed behaviour outranks the model's `allDay` flag,
+  which is one line of text against months of evidence. Falls back to date-only when there is no
+  habit to read: no match, no completions, or too few to clear the engine's support and share
+  thresholds. Activities that genuinely are all-day need no special case - all-day completions are
+  excluded from start-time clustering, so they have no habitual hour to find.
 - Nonsense dates, out-of-range durations and over-long titles are dropped rather than rejected: a
   draft missing a field is still worth reviewing.
 
 Drafted subtasks are created in a second pass after the occurrence exists, since neither create
 endpoint takes them.
 
-**The call's cost is shown, not logged**: model, wall clock, model-load time, and tokens in and out,
-with the raw reply one click away. Local inference is slow enough that hiding the number would read
-as a hang, and these are the figures that decide where else an assistant feature can live.
+**The call's cost is shown, not logged**: wall clock, model-load time, and tokens in and out, along
+the bottom edge of the dialog, with the raw reply one click away. Local inference is slow enough that
+hiding the number would read as a hang, and these are the figures that decide where else an assistant
+feature can live - but they are diagnostics, so they sit beside the buttons rather than between the
+draft and the decision about it.
 
 ---
 

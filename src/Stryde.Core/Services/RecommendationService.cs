@@ -11,7 +11,7 @@ public class RecommendationService(
     StrydeDbContext db, UserSettingsService settings, ActivityTypeService activityTypes, StateService states)
 {
     /// <summary>Completed history older than this feeds neither timing hints nor cadence.</summary>
-    private const int HistoryWindowDays = 90;
+    public const int HistoryWindowDays = 90;
 
     /// <summary>Tier 3 weekday-pattern window.</summary>
     private const int PatternWindowDays = 42;
@@ -696,10 +696,16 @@ public class RecommendationService(
     }
 
     /// <summary>Per-activity stats derived from windowed completed occurrences (all have StartAt).</summary>
-    private sealed record ActivityStats(
+    public sealed record ActivityStats(
         int? DurationMinutes, string? StartTime, int? StartMinutes, DateOnly LastDoneDay, double? MedianGapDays);
 
-    private static ActivityStats ComputeStats(List<Occurrence> completed, DayContext ctx)
+    /// <summary>
+    /// Public because quick capture reads it too: a note that names a day but no time is filled in
+    /// from the activity's habitual start, and that has to be the same figure this engine places a
+    /// suggestion at. Two implementations would let the app contradict itself about the user's own
+    /// routine. Requires a non-empty list - the caller decides what "no history" means.
+    /// </summary>
+    public static ActivityStats ComputeStats(List<Occurrence> completed, DayContext ctx)
     {
         // An all-day completion records *which day*, not when or for how long. Its StartAt is local
         // midnight and its EndAt, when set, is an exclusive end date - so it feeds the day-based

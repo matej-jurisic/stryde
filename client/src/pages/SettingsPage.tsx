@@ -252,10 +252,7 @@ export function SettingsPage() {
               )}
 
               <SettingSection label="Assistant">
-                <SettingRow
-                  label="Enable assistant"
-                  hint="Lets the app send text to a local model you run yourself. Nothing leaves your network."
-                >
+                <SettingRow label="Enabled">
                   <input
                     type="checkbox"
                     checked={form.llmEnabled}
@@ -264,7 +261,8 @@ export function SettingsPage() {
                   />
                 </SettingRow>
 
-                <SettingRow label="Server address" hint="Root of the Ollama server, without a path.">
+                {/* The placeholders carry the format, so these rows need no hint of their own. */}
+                <SettingRow label="Server address">
                   <input
                     type="url"
                     placeholder="http://ollama:11434"
@@ -274,7 +272,7 @@ export function SettingsPage() {
                   />
                 </SettingRow>
 
-                <SettingRow label="Model" hint="The tag as Ollama knows it.">
+                <SettingRow label="Model">
                   <input
                     type="text"
                     placeholder="gemma3:27b"
@@ -284,10 +282,7 @@ export function SettingsPage() {
                   />
                 </SettingRow>
 
-                <SettingRow
-                  label="Timeout"
-                  hint="Seconds to wait for an answer. A large model on a CPU can take minutes."
-                >
+                <SettingRow label="Timeout (seconds)">
                   <input
                     type="number"
                     min={5}
@@ -298,10 +293,9 @@ export function SettingsPage() {
                   />
                 </SettingRow>
 
-                <SettingRow
-                  label="Disable thinking"
-                  hint="Reasoning models write out their thinking before answering, which at local speeds is pure waiting. Leave off unless your model has a thinking mode: models without one reject the request."
-                >
+                {/* The one hint worth keeping: ticking this on a model without a thinking mode does
+                    not slow things down, it fails every call outright. */}
+                <SettingRow label="Disable thinking" hint="Reasoning models only. Others reject it.">
                   <input
                     type="checkbox"
                     checked={form.llmNoThink}

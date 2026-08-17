@@ -142,8 +142,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
   const [form, setForm] = useState<FormState>(() => ({
     activityId: draft?.activityId ?? source?.activityId ?? defaultActivity?.id ?? '',
     // Only an event carries the drafted title. When the note resolved to an existing activity, that
-    // activity's own name is the title, and pushing the model's wording into the override field
-    // would rename every row for no reason the user asked for.
+    // activity's own name is the title and the override field stays empty.
     title: draftKind === 'event' ? draft!.title
       : draftKind === 'activity' ? ''
       : isEventKind ? (source?.activity.title ?? '') : (occurrence?.title ?? duplicateFrom?.title ?? ''),

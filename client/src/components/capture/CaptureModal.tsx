@@ -7,12 +7,6 @@ import { EventModal } from '@/components/events/EventModal'
 import { llmApi, ApiError } from '@/lib/api'
 import type { CaptureDraft } from '@/lib/types'
 
-const EXAMPLES = [
-  'gym tomorrow at 7, warmup then legs',
-  'dentist friday 14:30, takes an hour',
-  'read for 30 minutes tonight',
-]
-
 function formatWhen(draft: CaptureDraft): string {
   if (!draft.startAt) return 'No date - floating'
 
@@ -92,6 +86,21 @@ export function CaptureModal({ open, onClose }: { open: boolean; onClose: () => 
         title="Quick capture"
         footer={
           <>
+            {/* The cost of the call belongs at the edge of the dialog, not in the reading order
+                between the draft and the buttons that act on it. */}
+            {draft && (
+              <button
+                type="button"
+                onClick={() => setShowRaw((v) => !v)}
+                title={draft.diagnostics.model}
+                className="mr-auto self-center text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+              >
+                {formatDuration(draft.diagnostics.totalMs)}
+                {draft.diagnostics.loadMs > 0 && ` (${formatDuration(draft.diagnostics.loadMs)} loading)`}
+                {' - '}
+                {draft.diagnostics.promptTokens} in, {draft.diagnostics.outputTokens} out
+              </button>
+            )}
             <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>
               Close
             </Button>
@@ -104,39 +113,22 @@ export function CaptureModal({ open, onClose }: { open: boolean; onClose: () => 
               </>
             ) : (
               <Button onClick={submit} loading={mutation.isPending} disabled={!text.trim()}>
-                {mutation.isPending ? `Reading... ${elapsed}s` : 'Read it'}
+                {mutation.isPending ? `Capturing... ${elapsed}s` : 'Capture'}
               </Button>
             )}
           </>
         }
       >
-        <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-foreground">Note</label>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit() }}
-            placeholder={EXAMPLES[0]}
-            rows={3}
-            autoFocus
-            disabled={mutation.isPending}
-            className="resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
-          />
-          {!draft && !mutation.isPending && (
-            <div className="flex flex-wrap gap-1.5">
-              {EXAMPLES.map((e) => (
-                <button
-                  key={e}
-                  type="button"
-                  onClick={() => setText(e)}
-                  className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-                >
-                  {e}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit() }}
+          placeholder="gym tomorrow at 7, warmup then legs"
+          rows={3}
+          autoFocus
+          disabled={mutation.isPending}
+          className="resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+        />
 
         {mutation.isPending && (
           <p className="rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground">
@@ -181,35 +173,22 @@ export function CaptureModal({ open, onClose }: { open: boolean; onClose: () => 
               </dl>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs text-muted-foreground">
-                {draft.diagnostics.model} answered in {formatDuration(draft.diagnostics.totalMs)}
-                {draft.diagnostics.loadMs > 0 && ` (${formatDuration(draft.diagnostics.loadMs)} loading the model)`}
-                {' - '}
-                {draft.diagnostics.promptTokens} in, {draft.diagnostics.outputTokens} out.
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowRaw((v) => !v)}
-                className="self-start text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-              >
-                {showRaw ? 'Hide raw reply' : 'Show raw reply'}
-              </button>
-              {showRaw && (
-                <pre className="max-h-40 overflow-auto rounded-lg border border-border bg-background p-2 text-[11px] leading-relaxed text-muted-foreground">
-                  {draft.diagnostics.rawJson}
-                </pre>
-              )}
-            </div>
+            {showRaw && (
+              <pre className="max-h-40 overflow-auto rounded-lg border border-border bg-background p-2 text-[11px] leading-relaxed text-muted-foreground">
+                {draft.diagnostics.rawJson}
+              </pre>
+            )}
           </div>
         )}
       </Modal>
 
-      {/* The draft is read once, by the editor's initial state, so a fresh parse needs a fresh mount. */}
+      {/* The draft is read once, by the editor's initial state, so a fresh parse needs a fresh mount.
+          `open` is threaded through rather than hardcoded: closing the editor closes this whole
+          interaction, and the editor's own close button is what reports that. */}
       {draft && accepted && (
         <EventModal
           key={draft.diagnostics.rawJson}
-          open
+          open={open}
           onClose={onClose}
           draft={draft}
         />

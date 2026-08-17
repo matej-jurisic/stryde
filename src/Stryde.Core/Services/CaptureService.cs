@@ -146,7 +146,8 @@ public class CaptureService(
         var title = string.IsNullOrWhiteSpace(parsed.Title) ? text.Trim() : parsed.Title.Trim();
         if (title.Length > 255) title = title[..255];
 
-        var (startAt, endAt, isAllDay) = ResolveSchedule(parsed, ctx);
+        var habit = matched is null ? null : await HabitAsync(userId, matched.Id, ctx, ct);
+        var (startAt, endAt, isAllDay) = ResolveSchedule(parsed, ctx, habit);
 
         return Result<CaptureDraftDto>.Success(new CaptureDraftDto(
             title,
@@ -166,6 +167,29 @@ public class CaptureService(
     }
 
     /// <summary>
+    /// What the matched activity's own history says about when it happens and for how long. Null
+    /// when there is nothing to go on. Same window, same predicate and same maths the recommendation
+    /// engine uses, so a captured note and a suggested slot cannot disagree about the user's routine.
+    /// </summary>
+    private async Task<RecommendationService.ActivityStats?> HabitAsync(
+        Guid userId, Guid activityId, DayContext ctx, CancellationToken ct)
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-RecommendationService.HistoryWindowDays);
+
+        // The date window is applied in memory: SQLite cannot translate a DateTimeOffset range
+        // comparison, so the SQL side is limited to the null check.
+        var completed = (await db.Occurrences
+                .AsNoTracking()
+                .Where(o => o.UserId == userId && o.ActivityId == activityId
+                    && o.Status == EventStatus.done && o.StartAt != null)
+                .ToListAsync(ct))
+            .Where(o => o.StartAt!.Value >= cutoff)
+            .ToList();
+
+        return completed.Count == 0 ? null : RecommendationService.ComputeStats(completed, ctx);
+    }
+
+    /// <summary>
     /// Turns the model's local date and clock time into instants in the user's timezone.
     /// <para>
     /// A note with no date at all becomes a floating draft rather than one silently pinned to today:
@@ -174,23 +198,48 @@ public class CaptureService(
     /// </para>
     /// </summary>
     private static (DateTimeOffset? StartAt, DateTimeOffset? EndAt, bool IsAllDay) ResolveSchedule(
-        ModelDraft d, DayContext ctx)
+        ModelDraft d, DayContext ctx, RecommendationService.ActivityStats? habit)
     {
         if (!DateOnly.TryParseExact(d.Date, "yyyy-MM-dd", out var date)) return (null, null, false);
 
-        // A day named without a clock time is a date commitment, whatever the model put in `allDay`:
-        // the two ways of saying so are the same fact, and treating them differently would produce a
-        // midnight start time nobody wrote.
         var hasTime = TimeOnly.TryParseExact(d.StartTime, ["HH:mm", "H:mm"], out var time);
-        if (!hasTime) return (Local(date.ToDateTime(TimeOnly.MinValue), ctx), null, true);
+        if (!hasTime)
+        {
+            // "work tomorrow" names a day and nothing else, but the activity's own history usually
+            // knows the rest. Observed behaviour beats the model's guess here, including its `allDay`
+            // flag, which is one line of text against months of evidence - and the rule needs no
+            // exception for genuinely all-day activities, because ComputeStats ignores all-day
+            // completions when clustering, so those have no habitual start to find in the first place.
+            if (habit?.StartMinutes is { } mins)
+            {
+                var start = InstantForMinutes(date, mins, ctx);
+                return (start, habit.DurationMinutes is > 0 ? start.AddMinutes(habit.DurationMinutes.Value) : null, false);
+            }
+
+            // Nothing to go on: a day named without a clock time is a date commitment.
+            return (Local(date.ToDateTime(TimeOnly.MinValue), ctx), null, true);
+        }
+
         if (d.AllDay) return (Local(date.ToDateTime(TimeOnly.MinValue), ctx), null, true);
 
-        var start = Local(date.ToDateTime(time), ctx);
+        var startAt = Local(date.ToDateTime(time), ctx);
         var end = d.DurationMinutes is > 0 and <= 24 * 60
-            ? start.AddMinutes(d.DurationMinutes.Value)
+            ? startAt.AddMinutes(d.DurationMinutes.Value)
             : (DateTimeOffset?)null;
 
-        return (start, end, false);
+        return (startAt, end, false);
+    }
+
+    /// <summary>
+    /// Minutes from local midnight, placed on the given day. A time earlier than the day boundary
+    /// belongs to the next calendar date - the same rule the rest of the app buckets days by, so a
+    /// 01:00 habit on a 04:00 boundary lands where the user would look for it.
+    /// </summary>
+    private static DateTimeOffset InstantForMinutes(DateOnly day, int minutesFromMidnight, DayContext ctx)
+    {
+        var time = new TimeOnly(minutesFromMidnight / 60, minutesFromMidnight % 60);
+        var calendarDate = time < ctx.DayBoundary ? day.AddDays(1) : day;
+        return Local(calendarDate.ToDateTime(time), ctx);
     }
 
     private static DateTimeOffset Local(DateTime local, DayContext ctx) =>

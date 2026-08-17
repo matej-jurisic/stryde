@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Stryde.Core.Common;
 
 namespace Stryde.Core.Llm;
@@ -150,9 +151,15 @@ public sealed class OllamaLlmClient(HttpClient http) : ILlmClient
 
     private sealed record ChatMessage(string? Content);
 
+    // Ollama's counters are snake_case, which the Web defaults (camelCase, case-insensitive) do not
+    // match - left implicit they silently deserialize to zero and the UI reports a free call.
     private sealed record ChatResponse(
-        string? Model, ChatMessage? Message, long TotalDuration, long LoadDuration,
-        int PromptEvalCount, int EvalCount);
+        string? Model,
+        ChatMessage? Message,
+        [property: JsonPropertyName("total_duration")] long TotalDuration,
+        [property: JsonPropertyName("load_duration")] long LoadDuration,
+        [property: JsonPropertyName("prompt_eval_count")] int PromptEvalCount,
+        [property: JsonPropertyName("eval_count")] int EvalCount);
 
     private sealed record TagEntry(string Name);
 

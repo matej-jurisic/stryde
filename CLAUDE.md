@@ -107,6 +107,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   decision reads (suppression, type caps, free slots, state setters), so what is filtered out of it is
   invisible to the engine: skipped occurrences, and **all-day + planned** ones, which say only
   "sometime that day" (`IsAllDay` alone is a date commitment, `IsPlanned` alone a window - both count).
+  `ComputeStats` and `ActivityStats` are **public**: `CaptureService` reads them too, so the habitual
+  start time a note is filled in with is the one a suggestion would be placed at.
   `ComputeStats` separately ignores all-day rows for the habitual start time and span-derived duration:
   midnight is not a start time. The habitual start is the fullest ±20min cluster of observed starts,
   indexed **from the day boundary** so late-night and post-midnight sessions are neighbours, and it is
@@ -183,7 +185,11 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   clock time and this class builds the instants, since date maths is what it is worst at.
   Activity names match **exactly** (ignoring case/space) and nothing looser; a substring match would
   point an occurrence at the wrong activity and corrupt its cadence, habitual start and every
-  suggestion drawn from it. See `spec.md` → Assistant.
+  suggestion drawn from it.
+  A note that names a day but no time is filled in from the matched activity's habitual hours via
+  `RecommendationService.ComputeStats` — **called, not reimplemented**, so a captured note and a
+  suggested slot cannot quote different figures for the same routine. It beats the model's `allDay`
+  flag; date-only is the fallback when there is no habit to read. See `spec.md` → Assistant.
 - `Services/ExportService.cs` + `Services/ExportMarkdown.cs` — the export loads the whole account and
   renders it as **one Markdown document**, not JSON. It has no DTOs and no import path, so the writer
   is free to drop ids, name everything, and turn stored numbers into the sentences the UI uses. Any
@@ -304,8 +310,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `components/capture/CaptureModal.tsx` — natural-language capture: a note in, a `CaptureDraft` back,
   then handed to `EventModal` via its `draft` prop (read once by the initial state, so a fresh parse
   needs a fresh `key`). Nothing is saved here. The whole component assumes the answer is slow: the
-  wait gets a running seconds counter rather than a spinner, and the call's cost is shown afterwards
-  with the raw reply one click away. Its trigger on `PlanPreviewPage` is hidden unless
+  wait gets a running seconds counter rather than a spinner, and the call's cost goes in the modal
+  **footer** (and is itself the raw-reply toggle), not in the body between the draft and the buttons.
+  The editor is passed this modal's own `open`, not a literal - it calls back the same `onClose`, so
+  hardcoding it left an editor nothing could dismiss. Its trigger on `PlanPreviewPage` is hidden unless
   `settings.llmEnabled`.
 - `components/settings/SettingSection.tsx` — `SettingSection`/`SettingRow`/`SectionFooter`, the layout
   primitives `SettingsPage` is built from. Settings now holds preferences only.
