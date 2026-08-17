@@ -106,4 +106,102 @@ public class UserSettingsServiceTests : IDisposable
         Assert.Equal(home.StateId, group.StateId);
         Assert.Equal([home.Id, away.Id], group.Allowed);
     }
+
+    // ── assistant settings ─────────────────────────────────────────────────
+
+    private static UpdateUserSettingsRequest LlmRequest(
+        bool? enabled = null, string? baseUrl = null, string? model = null,
+        int? timeout = null, bool? noThink = null) =>
+        new(3, "00:00", "UTC", 6, null, enabled, baseUrl, model, timeout, noThink);
+
+    [Fact]
+    public async Task UpdateAsync_stores_the_assistant_configuration()
+    {
+        var userId = await CreateUserAsync();
+
+        var result = await _ctx.UserSettingsService.UpdateAsync(
+            userId, LlmRequest(true, "http://ollama:11434/", "gemma3:27b", 300, true));
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.Value!.LlmEnabled);
+        // The trailing slash is stripped on the way in, so paths are appended to a known shape.
+        Assert.Equal("http://ollama:11434", result.Value.LlmBaseUrl);
+        Assert.Equal("gemma3:27b", result.Value.LlmModel);
+        Assert.Equal(300, result.Value.LlmTimeoutSeconds);
+        Assert.True(result.Value.LlmNoThink);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_leaves_assistant_settings_alone_when_the_request_omits_them()
+    {
+        var userId = await CreateUserAsync();
+        await _ctx.UserSettingsService.UpdateAsync(userId, LlmRequest(true, "http://ollama:11434", "gemma3:27b"));
+
+        // A caller editing the day boundary knows nothing about the assistant and must not disable it.
+        var result = await _ctx.UserSettingsService.UpdateAsync(userId, Request());
+
+        Assert.True(result.Value!.LlmEnabled);
+        Assert.Equal("gemma3:27b", result.Value.LlmModel);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_clears_an_assistant_field_given_an_empty_string()
+    {
+        var userId = await CreateUserAsync();
+        await _ctx.UserSettingsService.UpdateAsync(userId, LlmRequest(true, "http://ollama:11434", "gemma3:27b"));
+
+        var result = await _ctx.UserSettingsService.UpdateAsync(userId, LlmRequest(enabled: false, model: ""));
+
+        Assert.Null(result.Value!.LlmModel);
+        Assert.Equal("http://ollama:11434", result.Value.LlmBaseUrl);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_rejects_enabling_the_assistant_with_nothing_to_call()
+    {
+        var userId = await CreateUserAsync();
+
+        var result = await _ctx.UserSettingsService.UpdateAsync(userId, LlmRequest(enabled: true));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ErrorType.Validation, result.Error!.Type);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_rejects_a_server_address_that_is_not_an_http_url()
+    {
+        var userId = await CreateUserAsync();
+
+        var result = await _ctx.UserSettingsService.UpdateAsync(userId, LlmRequest(baseUrl: "ollama:11434"));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ErrorType.Validation, result.Error!.Type);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_rejects_an_out_of_range_timeout()
+    {
+        var userId = await CreateUserAsync();
+
+        var result = await _ctx.UserSettingsService.UpdateAsync(userId, LlmRequest(timeout: 5000));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ErrorType.Validation, result.Error!.Type);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_does_not_half_apply_a_rejected_assistant_change()
+    {
+        var userId = await CreateUserAsync();
+        await _ctx.UserSettingsService.UpdateAsync(userId, LlmRequest(true, "http://ollama:11434", "gemma3:27b"));
+
+        // Clearing the model while still enabled is refused; the address must not have moved either.
+        var rejected = await _ctx.UserSettingsService.UpdateAsync(
+            userId, LlmRequest(model: "", baseUrl: "http://elsewhere:11434"));
+        Assert.False(rejected.IsSuccess);
+
+        var after = await _ctx.UserSettingsService.GetDtoAsync(userId);
+        Assert.Equal("http://ollama:11434", after.Value!.LlmBaseUrl);
+        Assert.Equal("gemma3:27b", after.Value.LlmModel);
+    }
 }

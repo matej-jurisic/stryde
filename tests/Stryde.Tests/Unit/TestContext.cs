@@ -21,6 +21,14 @@ public class TestContext : IDisposable
     public InsightsService InsightsService { get; }
     public StateService StateService { get; }
 
+    /// <summary>
+    /// The model the assistant talks to. Scripted rather than real: tests own what it replies, and
+    /// no test ever opens a socket.
+    /// </summary>
+    public FakeLlmClient Llm { get; } = new();
+
+    public CaptureService CaptureService { get; }
+
     public TestContext()
     {
         _connection = new SqliteConnection("Data Source=:memory:");
@@ -52,6 +60,17 @@ public class TestContext : IDisposable
         StateService = new StateService(Db);
         RecommendationService = new RecommendationService(Db, UserSettingsService, ActivityTypeService, StateService);
         InsightsService = new InsightsService(Db, UserSettingsService, StateService);
+        CaptureService = new CaptureService(Db, UserSettingsService, Llm);
+    }
+
+    /// <summary>Switches the assistant on for a user, so <see cref="CaptureService"/> gets past its gate.</summary>
+    public async Task EnableLlmAsync(Guid userId)
+    {
+        var settings = await UserSettingsService.GetOrCreateAsync(userId);
+        settings.LlmEnabled = true;
+        settings.LlmBaseUrl = "http://localhost:11434";
+        settings.LlmModel = "test-model";
+        await Db.SaveChangesAsync();
     }
 
     public void Dispose()

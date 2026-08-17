@@ -1,7 +1,7 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
 import type { SuggestionMode } from '@/store/suggestionMode'
-import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityStateEffect, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile, State, StateSnapshot } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityStateEffect, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile, State, StateSnapshot, CaptureDraft, LlmStatus } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -174,6 +174,10 @@ export const occurrencesApi = {
   setStatus: (id: string, status: import('./types').EventStatus) =>
     request<Occurrence>(`/api/occurrences/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
 
+  /** Adds one subtask to an existing occurrence. Rows order by creation, so call these in sequence. */
+  createSubtask: (id: string, title: string) =>
+    request<Occurrence>(`/api/occurrences/${id}/subtasks`, { method: 'POST', body: JSON.stringify({ title }) }),
+
   toggleSubtask: (id: string, subtaskId: string) =>
     request<Occurrence>(`/api/occurrences/${id}/subtasks/${subtaskId}/toggle`, { method: 'POST' }),
 
@@ -228,7 +232,20 @@ export const settingsApi = {
     timezone: string
     maxCalendarSuggestions: number
     unaccountedStateValueIds?: string[]
+    llmEnabled?: boolean
+    llmBaseUrl?: string | null
+    llmModel?: string | null
+    llmTimeoutSeconds?: number
+    llmNoThink?: boolean
   }) => request<UserSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),
+}
+
+export const llmApi = {
+  /** Reachability only, no generation. Answers in well under a second or not at all. */
+  status: () => request<LlmStatus>('/api/llm/status'),
+  /** Returns a draft to review. Slow by nature: this is a full completion on local hardware. */
+  capture: (text: string) =>
+    request<CaptureDraft>('/api/llm/capture', { method: 'POST', body: JSON.stringify({ text }) }),
 }
 
 export interface ActivityTypeBody {

@@ -80,6 +80,7 @@ app.MapStateEndpoints();
 app.MapActivityTypeEndpoints();
 app.MapInsightsEndpoints();
 app.MapExportEndpoints();
+app.MapLlmEndpoints();
 
 app.MapFallbackToFile("index.html");
 

@@ -4,7 +4,7 @@ import { Download, LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { SettingSection, SettingRow, SectionFooter, inputCls } from '@/components/settings/SettingSection'
-import { settingsApi, authApi, exportApi, ApiError } from '@/lib/api'
+import { settingsApi, authApi, exportApi, llmApi, ApiError } from '@/lib/api'
 import { toastError } from '@/store/toasts'
 import { useAuthStore } from '@/store/auth'
 import { getThemePref, setThemePref, type ThemePref } from '@/lib/theme'
@@ -30,7 +30,7 @@ const THEME_OPTIONS: { value: ThemePref; label: string; Icon: typeof Sun }[] = [
  * Which section's Save button was last used. Every section writes the same settings row through one
  * mutation, so this is only about putting "Changes saved." under the button that was pressed.
  */
-type SavedSection = 'planning' | 'insights'
+type SavedSection = 'planning' | 'insights' | 'assistant'
 
 // ── page ───────────────────────────────────────────────────────────────────
 
@@ -55,6 +55,11 @@ export function SettingsPage() {
     maxFocusGoals: 3,
     maxCalendarSuggestions: 6,
     unaccountedStateValueIds: [] as string[],
+    llmEnabled: false,
+    llmBaseUrl: '',
+    llmModel: '',
+    llmTimeoutSeconds: 180,
+    llmNoThink: false,
   })
   const [savedSection, setSavedSection] = useState<SavedSection | null>(null)
 
@@ -72,6 +77,11 @@ export function SettingsPage() {
         maxFocusGoals: settings.maxFocusGoals,
         maxCalendarSuggestions: settings.maxCalendarSuggestions,
         unaccountedStateValueIds: settings.unaccountedStateValueIds,
+        llmEnabled: settings.llmEnabled,
+        llmBaseUrl: settings.llmBaseUrl ?? '',
+        llmModel: settings.llmModel ?? '',
+        llmTimeoutSeconds: settings.llmTimeoutSeconds,
+        llmNoThink: settings.llmNoThink,
       })
     }
   }, [settings])
@@ -86,6 +96,26 @@ export function SettingsPage() {
       // The mask decides which hours the unaccounted-time stats look at, so every figure moves.
       qc.invalidateQueries({ queryKey: ['insights'] })
     },
+  })
+
+  // Reachability check. Reads the *saved* settings rather than the form, so a failure after editing
+  // the address means "save first" - which is why every edit above clears the last result.
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string; models: string[] } | null>(null)
+
+  const testMutation = useMutation({
+    mutationFn: llmApi.status,
+    onSuccess: (status) => setTestResult({
+      ok: status.modelAvailable,
+      message: status.modelAvailable
+        ? `Connected. "${status.model}" is ready.`
+        : `Connected, but "${status.model}" is not pulled on that server.`,
+      models: status.availableModels,
+    }),
+    onError: (err) => setTestResult({
+      ok: false,
+      message: err instanceof ApiError ? err.message : 'Could not reach the model server.',
+      models: [],
+    }),
   })
 
   function footerProps(section: SavedSection) {
@@ -220,6 +250,90 @@ export function SettingsPage() {
                   <SectionFooter {...footerProps('insights')} />
                 </SettingSection>
               )}
+
+              <SettingSection label="Assistant">
+                <SettingRow
+                  label="Enable assistant"
+                  hint="Lets the app send text to a local model you run yourself. Nothing leaves your network."
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.llmEnabled}
+                    onChange={(e) => edit({ llmEnabled: e.target.checked })}
+                    className="h-4 w-4 rounded border-input accent-primary"
+                  />
+                </SettingRow>
+
+                <SettingRow label="Server address" hint="Root of the Ollama server, without a path.">
+                  <input
+                    type="url"
+                    placeholder="http://ollama:11434"
+                    value={form.llmBaseUrl}
+                    onChange={(e) => { setTestResult(null); edit({ llmBaseUrl: e.target.value }) }}
+                    className={`${inputCls} w-52`}
+                  />
+                </SettingRow>
+
+                <SettingRow label="Model" hint="The tag as Ollama knows it.">
+                  <input
+                    type="text"
+                    placeholder="gemma3:27b"
+                    value={form.llmModel}
+                    onChange={(e) => { setTestResult(null); edit({ llmModel: e.target.value }) }}
+                    className={`${inputCls} w-52`}
+                  />
+                </SettingRow>
+
+                <SettingRow
+                  label="Timeout"
+                  hint="Seconds to wait for an answer. A large model on a CPU can take minutes."
+                >
+                  <input
+                    type="number"
+                    min={5}
+                    max={900}
+                    value={form.llmTimeoutSeconds}
+                    onChange={(e) => edit({ llmTimeoutSeconds: Number(e.target.value) })}
+                    className={`${inputCls} w-20 text-center`}
+                  />
+                </SettingRow>
+
+                <SettingRow
+                  label="Disable thinking"
+                  hint="Reasoning models write out their thinking before answering, which at local speeds is pure waiting. Leave off unless your model has a thinking mode: models without one reject the request."
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.llmNoThink}
+                    onChange={(e) => edit({ llmNoThink: e.target.checked })}
+                    className="h-4 w-4 rounded border-input accent-primary"
+                  />
+                </SettingRow>
+
+                {testResult && (
+                  <div className="px-4 py-3">
+                    <p className={`text-xs ${testResult.ok ? 'text-muted-foreground' : 'text-destructive'}`}>
+                      {testResult.message}
+                    </p>
+                    {testResult.models.length > 0 && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Available: {testResult.models.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <SectionFooter {...footerProps('assistant')}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testMutation.mutate()}
+                    loading={testMutation.isPending}
+                  >
+                    Test connection
+                  </Button>
+                </SectionFooter>
+              </SettingSection>
 
               <SettingSection label="Appearance">
                 <SettingRow label="Theme">

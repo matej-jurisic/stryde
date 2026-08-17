@@ -790,6 +790,7 @@ is genuinely free time, since everything is assumed logged.
 | Max focus goals | Hard limit on simultaneous Focus goals, 1-20. |
 | Calendar suggestions | How many suggestion ghosts the calendar draws per day, 1-12, default 6. |
 | Unaccounted time | State values that make time count towards the insights stats. Hidden until a state has values; empty means the whole day counts. See Insights → unaccounted-time mask. |
+| Assistant | Points the app at a local model. See Assistant below. |
 | Theme | Light / dark / system. Client-side preference in `localStorage`, defaults to system. |
 | Server URL | Native shells only: where the app points its API calls. |
 | Export data | Downloads `stryde-export-<date>.md`. |
@@ -819,11 +820,79 @@ It is prose, not a data format. There is no import path, so it optimises for rea
 
 ---
 
+## Assistant
+
+An optional layer over a model the user runs themselves, on their own network. Off by default, and
+an account that never switches it on never pays for any of it: no calls, no waiting, and no controls
+on screen.
+
+The server address and model are **settings, not deployment configuration**, because they are a
+moving target the user re-points by hand - a different box, a different tag pulled this week.
+
+| Setting | Notes |
+|---|---|
+| Enable assistant | Master switch. Off, nothing calls out. |
+| Server address | Root of the Ollama server, e.g. `http://ollama:11434`. Must be a full http(s) URL. |
+| Model | The tag as Ollama knows it, e.g. `gemma3:27b`. |
+| Timeout | Seconds to wait, 5-900, default 180. A large model on a CPU answers in minutes. |
+| Disable thinking | Sends `think: false`. Reasoning tokens are latency spent on output nobody reads. Off by default: a model with no thinking mode rejects the flag. |
+
+Turning the assistant on without a server address and a model is refused at save time. Every
+assistant field follows the same null-means-untouched contract as the unaccounted-time mask, so a
+write that does not mention them cannot switch the feature off; `""` clears one of the two strings.
+
+**Test connection** (`GET /api/llm/status`) lists what the server has pulled and says whether the
+configured model is among them. It generates nothing, so it answers immediately or not at all - which
+is the point: it separates "cannot reach the server" from "the model is slow".
+
+Anything the assistant cannot do is `Unavailable` → **503**, not an error. Unreachable server, model
+not pulled, timeout, unusable reply: all of them mean the feature is not there right now, and every
+caller is expected to carry on without it.
+
+### Quick capture
+
+`POST /api/llm/capture` takes one line of typed English and returns a **draft** - a filled-in
+occurrence form. It writes nothing. The client opens the draft in the ordinary editor, and the user
+creates it there, through the same validation and the same endpoints as a form filled in by hand.
+A wrong reading therefore costs a keystroke, never a bad calendar entry.
+
+The division of labour is deliberate:
+
+- **The model does language.** Which of the user's activities is meant, what the thing is called,
+  which steps were listed. It is handed the current date, the current time and up to 80 activity
+  titles, and asked for a plain local date (`YYYY-MM-DD`) and clock time (`HH:mm`).
+- **The app does arithmetic.** Timezone, day boundary and instant construction never reach the
+  prompt. Date maths is what a language model is worst at and what the app already knows how to do.
+
+Rules applied to the reply, none of which trust it:
+
+- **Activity names match exactly**, ignoring case and surrounding space, and nothing looser. A
+  substring match would attach "run" to "Run errands", and an occurrence pointed at the wrong
+  activity corrupts that activity's whole history - its cadence, its habitual start time, every
+  suggestion drawn from it. No match opens the draft as a new event instead. The prompt carries the
+  burden: it tells the model to copy a listed title character for character.
+- **Event-kind activities are not offered.** Their activity row backs one occurrence and is not a
+  reusable thing to log again.
+- **A note with no day floats.** Guessing today is a confident wrong answer, and "sometime" is a
+  real answer in this app.
+- **A day named with no clock time is date-only**, whichever way the model said so.
+- Nonsense dates, out-of-range durations and over-long titles are dropped rather than rejected: a
+  draft missing a field is still worth reviewing.
+
+Drafted subtasks are created in a second pass after the occurrence exists, since neither create
+endpoint takes them.
+
+**The call's cost is shown, not logged**: model, wall clock, model-load time, and tokens in and out,
+with the raw reply one click away. Local inference is slow enough that hiding the number would read
+as a hang, and these are the figures that decide where else an assistant feature can live.
+
+---
+
 ## API surface
 
 All routes require a bearer token except `/api/auth/*` and `/api/health`. Endpoints are thin: parse →
 service → `Result` → problem details, with Validation→400, NotFound→404, Conflict→409,
-Unauthorized→401, Forbidden→403.
+Unauthorized→401, Forbidden→403, Unavailable→503.
 
 | Route | Methods |
 |---|---|
@@ -851,4 +920,5 @@ Unauthorized→401, Forbidden→403.
 | `/api/recommendations` | `GET` (`date`, `chain`) |
 | `/api/insights`, `/api/insights/empty-profile` | `GET` (`period`) |
 | `/api/settings` | `GET`, `PUT` |
+| `/api/llm/status`, `/api/llm/capture` | `GET`, `POST` |
 | `/api/export` | `GET` |

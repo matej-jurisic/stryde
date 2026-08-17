@@ -8,7 +8,7 @@ import { Select } from '@/components/ui/Select'
 import { DateTimePicker } from '@/components/ui/DateTimePicker'
 import { occurrencesApi, activitiesApi, categoriesApi, goalsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
-import type { Activity, ActivityKind, Occurrence } from '@/lib/types'
+import type { Activity, ActivityKind, CaptureDraft, Occurrence } from '@/lib/types'
 
 // Draft subtask row: id present = existing subtask, absent = added in this edit session.
 interface DraftSubtask {
@@ -115,9 +115,16 @@ interface OccurrenceModalProps {
   defaultEndAt?: string
   defaultActivity?: Activity
   scheduleOnly?: boolean
+  /**
+   * A pre-filled form from the assistant. Read only by the initial state, so the modal must be
+   * remounted (a `key`) to pick up a new one - the same contract the other default* props follow.
+   * It is a starting point and nothing more: everything here is editable, and creation goes through
+   * the same validation and the same endpoints as a form filled in by hand.
+   */
+  draft?: CaptureDraft
 }
 
-export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, scheduleOnly }: OccurrenceModalProps) {
+export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, scheduleOnly, draft }: OccurrenceModalProps) {
   const qc = useQueryClient()
   const isEdit = Boolean(occurrence)
 
@@ -126,25 +133,39 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
   const dur = durationToHM(source?.durationMinutes ?? null)
   const isEventKind = source?.activity.kind === 'event'
 
-  const [kind, setKind] = useState<ActivityKind>(() => isEventKind ? 'event' : 'activity')
+  // A draft that matched an existing activity opens as an occurrence of it; one that matched nothing
+  // opens as a new event, which is the path that can invent a title.
+  const draftKind: ActivityKind | null = draft ? (draft.activityId ? 'activity' : 'event') : null
+
+  const [kind, setKind] = useState<ActivityKind>(() => draftKind ?? (isEventKind ? 'event' : 'activity'))
 
   const [form, setForm] = useState<FormState>(() => ({
-    activityId: source?.activityId ?? defaultActivity?.id ?? '',
-    title: isEventKind ? (source?.activity.title ?? '') : (occurrence?.title ?? duplicateFrom?.title ?? ''),
+    activityId: draft?.activityId ?? source?.activityId ?? defaultActivity?.id ?? '',
+    // Only an event carries the drafted title. When the note resolved to an existing activity, that
+    // activity's own name is the title, and pushing the model's wording into the override field
+    // would rename every row for no reason the user asked for.
+    title: draftKind === 'event' ? draft!.title
+      : draftKind === 'activity' ? ''
+      : isEventKind ? (source?.activity.title ?? '') : (occurrence?.title ?? duplicateFrom?.title ?? ''),
     categoryId: source?.activity.categoryId ?? '',
     goalId: source?.activity.goalId ?? '',
-    startAt: occurrence ? (toInputValue(occurrence.startAt) || (scheduleOnly ? todayLocal() : '')) : (duplicateFrom ? toInputValue(duplicateFrom.startAt) : (defaultStartAt ?? todayLocal())),
-    endAt: source?.isAllDay && source?.endAt
+    startAt: draft ? toInputValue(draft.startAt)
+      : occurrence ? (toInputValue(occurrence.startAt) || (scheduleOnly ? todayLocal() : ''))
+      : (duplicateFrom ? toInputValue(duplicateFrom.startAt) : (defaultStartAt ?? todayLocal())),
+    endAt: draft ? (draft.isAllDay ? '' : toInputValue(draft.endAt))
+      : source?.isAllDay && source?.endAt
       ? toAllDayEndInput(source.endAt)
       : (occurrence ? toInputValue(occurrence.endAt) : (duplicateFrom ? toInputValue(duplicateFrom.endAt) : (defaultEndAt ?? ''))),
-    durationHours: dur.h,
-    durationMins: dur.m,
+    durationHours: draft ? durationToHM(draft.durationMinutes).h : dur.h,
+    durationMins: draft ? durationToHM(draft.durationMinutes).m : dur.m,
   }))
 
   const [errors, setErrors] = useState<Errors>({})
-  const [isAllDay, setIsAllDay] = useState(() => source?.isAllDay ?? false)
+  const [isAllDay, setIsAllDay] = useState(() => draft?.isAllDay ?? source?.isAllDay ?? false)
   const [isPlanned, setIsPlanned] = useState(() => scheduleOnly ? false : (source?.isPlanned ?? false))
   const [timeMode, setTimeMode] = useState<TimeMode>(() => {
+    // A note that named no day leaves the draft floating rather than guessing today.
+    if (draft) return !draft.startAt ? 'floating' : draft.endAt ? 'scheduled' : 'due'
     if (scheduleOnly) {
       if (occurrence!.startAt && occurrence!.endAt) return 'scheduled'
       return 'due'
@@ -159,6 +180,8 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
 
   const [showAdvanced, setShowAdvanced] = useState(() => {
     if (isEdit || scheduleOnly) return true
+    // A drafted duration lives in this section, so hiding it would hide something the model filled in.
+    if (draft) return Boolean(draft.durationMinutes)
     if (!source) return false
     if (source.durationMinutes) return true
     if (source.title) return true
@@ -170,14 +193,19 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
   const [newActivityTitle, setNewActivityTitle] = useState('')
   const [newActivityCategoryId, setNewActivityCategoryId] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [subtasks, setSubtasks] = useState<DraftSubtask[]>(
-    () => (occurrence?.subtasks ?? []).map((s) => ({ id: s.id, title: s.title })),
-  )
+  // Drafted subtasks have no id: they are new rows either way, so they take the same shape as one
+  // typed into the list below.
+  const initialSubtasks = (): DraftSubtask[] =>
+    occurrence?.subtasks?.length
+      ? occurrence.subtasks.map((s) => ({ id: s.id, title: s.title }))
+      : (draft?.subtasks ?? []).map((title) => ({ title }))
+
+  const [subtasks, setSubtasks] = useState<DraftSubtask[]>(initialSubtasks)
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
 
   useEffect(() => {
     if (open) {
-      setSubtasks((occurrence?.subtasks ?? []).map((s) => ({ id: s.id, title: s.title })))
+      setSubtasks(initialSubtasks())
       setNewSubtaskTitle('')
     }
   }, [open, occurrence?.id])
@@ -217,7 +245,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
   })
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const durationMinutes = (form.durationHours || form.durationMins)
         ? (parseInt(form.durationHours || '0') * 60) + parseInt(form.durationMins || '0')
         : null
@@ -237,6 +265,7 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
           : undefined,
       }
 
+      let saved
       if (kind === 'event') {
         const eventPayload = {
           title: form.title.trim(),
@@ -244,19 +273,28 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
           goalId: form.goalId || null,
           ...schedulePayload,
         }
-        return isEdit
-          ? occurrencesApi.updateEvent(occurrence!.id, eventPayload)
-          : occurrencesApi.createEvent(eventPayload)
+        saved = isEdit
+          ? await occurrencesApi.updateEvent(occurrence!.id, eventPayload)
+          : await occurrencesApi.createEvent(eventPayload)
+      } else {
+        const occurrencePayload = {
+          activityId: form.activityId,
+          title: form.title.trim() || null,
+          ...schedulePayload,
+        }
+        saved = isEdit
+          ? await occurrencesApi.update(occurrence!.id, occurrencePayload)
+          : await occurrencesApi.create(occurrencePayload)
       }
 
-      const occurrencePayload = {
-        activityId: form.activityId,
-        title: form.title.trim() || null,
-        ...schedulePayload,
+      // Neither create endpoint takes subtasks, so a new occurrence that has any gets them in a
+      // second pass. Sequential, because the rows are ordered by creation time and the list the user
+      // just reviewed has an order worth keeping.
+      if (!isEdit && subtasks.length > 0) {
+        for (const s of subtasks) saved = await occurrencesApi.createSubtask(saved.id, s.title)
       }
-      return isEdit
-        ? occurrencesApi.update(occurrence!.id, occurrencePayload)
-        : occurrencesApi.create(occurrencePayload)
+
+      return saved
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events'] })
@@ -756,7 +794,8 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
         </div>
       )}
 
-      {isEdit && !scheduleOnly && (
+      {/* On create the list is empty unless a draft filled it, so this stays hidden as before. */}
+      {(isEdit || subtasks.length > 0) && !scheduleOnly && (
         <div className="flex flex-col gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Subtasks</span>
           {subtasks.length > 0 && (

@@ -60,6 +60,22 @@ public static class Validators
         return null;
     }
 
+    /// <summary>
+    /// The address of the user's own model server. Only the shape is checked: whether anything is
+    /// listening is a question for "Test connection", not for a save.
+    /// </summary>
+    public static Error? ValidateLlmBaseUrl(string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl)) return null;
+
+        if (!Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            return new Error(ErrorType.Validation,
+                "Server address must be a full http:// or https:// URL, e.g. http://ollama:11434.");
+
+        return null;
+    }
+
     public static Error? ValidateDateRange(DateTimeOffset? startAt, DateTimeOffset? endAt)
     {
         if (startAt.HasValue && endAt.HasValue && endAt <= startAt)

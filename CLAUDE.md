@@ -71,6 +71,9 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Enums/` — stored as strings (`HasConversion<string>`).
 - `Data/StrydeDbContext.cs` — DbSets + `OnModelCreating`. `Occurrence → Activity` cascade delete; `Activity → Category/Goal/ActivityType` set-null.
 - `Common/Result.cs` — `Result`/`Result<T>` + `Error(ErrorType, msg)`. **Expected failures = Results, not exceptions.**
+  `ErrorType.Unavailable` is for a dependency outside the app that did not answer - today only the
+  user's own model server. Neither a bug nor the user's mistake, so neither 500 nor 400: it maps to
+  **503**, and every caller is expected to carry on without the feature.
 - `Common/Validators.cs` — shared static validation rules.
 - `Common/ActivityProfiles.cs` — `ActivityProfile`, the scheduling numbers flattened off an
   `ActivityType` row so the engine never holds an entity, plus `Unconstrained` (what an activity with
@@ -163,6 +166,24 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   all three at once; a tracked day the mask empties is dropped rather than scored as zero. No mask
   (the default) skips the state machinery entirely. `GetEmptyProfileAsync` is separate and unmasked -
   it answers "when are you usually free" for the calendar overlay, on plain calendar days.
+- `Llm/` — the seam to a model the user runs themselves. `ILlmClient` (+ `LlmCompletion`, which
+  carries the server's own timing counters), `OllamaLlmClient` over Ollama's native `/api/chat`
+  (**not** the OpenAI-compatible route: the native one takes a raw JSON Schema in `format` and
+  returns those counters), and `LlmOptions`, resolved per call off the user's settings row rather
+  than injected - the address and model are settings, so the client is a stateless singleton over one
+  `HttpClient` with no BaseAddress, and per-call deadlines are linked tokens rather than
+  `HttpClient.Timeout`, which is instance-wide.
+  ⚠️ **Output tokens dominate the cost** of a local call - roughly 4-5x an input token on CPU
+  inference - so every call passes a JSON schema *and* a tight `maxOutputTokens`. An unconstrained
+  reply is minutes, not seconds. `think: false` is sent only when the user asks for it: a model with
+  no thinking mode rejects the field outright.
+- `Services/CaptureService.cs` — natural-language capture. Returns a `CaptureDraftDto` and **writes
+  nothing**: the client opens the draft in `EventModal` and the user creates it through the normal
+  endpoints. The model is given no timezone and no arithmetic - it returns a plain local date and
+  clock time and this class builds the instants, since date maths is what it is worst at.
+  Activity names match **exactly** (ignoring case/space) and nothing looser; a substring match would
+  point an occurrence at the wrong activity and corrupt its cadence, habitual start and every
+  suggestion drawn from it. See `spec.md` → Assistant.
 - `Services/ExportService.cs` + `Services/ExportMarkdown.cs` — the export loads the whole account and
   renders it as **one Markdown document**, not JSON. It has no DTOs and no import path, so the writer
   is free to drop ids, name everything, and turn stored numbers into the sentences the UI uses. Any
@@ -186,7 +207,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 - `Endpoints/*Endpoints.cs` — thin: parse → service → `result.ToProblem()`. Auth required on all routes except `/api/auth/*`.
   Key endpoint files: `ActivityEndpoints.cs` (`/api/activities`), `OccurrenceEndpoints.cs` (`/api/occurrences`),
   `SettingsEndpoints.cs` (`/api/settings`), `ActivityTypeEndpoints.cs` (`/api/activity-types`),
-  `StateEndpoints.cs` (`/api/states` + `/api/states/snapshot?at=` + `/api/states/{stateId}/values`).
+  `StateEndpoints.cs` (`/api/states` + `/api/states/snapshot?at=` + `/api/states/{stateId}/values`),
+  `LlmEndpoints.cs` (`/api/llm/status` + `/api/llm/capture`).
 - `Endpoints/ApiResults.cs` — `Error.ToProblem()` + `principal.GetUserId()` (reads `sub` claim).
 
 **Frontend (`client/src`)**
@@ -201,9 +223,12 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   rather than in Settings. Their static segments outrank `/activities/:id`.
 - `lib/api.ts` — `send` (bearer + one-shot 401 refresh) under `request<T>` for JSON and `requestText`
   for the Markdown export. Key namespaces: `activitiesApi`, `occurrencesApi`, `categoriesApi`, `goalsApi`, `checkpointsApi`, `insightsApi`, `statesApi` (incl. `snapshot(atIso)`)/`stateValuesApi`, `activityTypesApi`, `exportApi`.
+  Key namespaces also include `llmApi` (`status`, `capture`).
   On `activitiesApi.create`/`update`, **omitting** `setsStateValues`/`requiredStateValueIds` leaves them untouched
   and `[]` clears them — which is what lets `BulkAssignModal` resend everything else without knowing about states.
-  `settingsApi.update` follows the same contract for `unaccountedStateValueIds`.
+  `settingsApi.update` follows the same contract for `unaccountedStateValueIds` **and for every `llm*`
+  field**, so a caller editing the day boundary cannot switch the assistant off by not knowing it
+  exists; `""` clears `llmBaseUrl`/`llmModel`.
 - `lib/types.ts` — mirrors backend DTOs. Key types: `Activity` (has `activityTypeId` plus an embedded `type` summary), `Occurrence` (has `effectiveTitle`), `Recommendation` (flat; `activity` always present), `State`/`StateValue`, `StateSnapshot`/`StateSnapshotEntry`, `ActivityType`.
 - `lib/theme.ts` — light/dark/system preference (localStorage `stryde-theme`).
 - `store/auth.ts` — Zustand; access token in memory only.
@@ -276,12 +301,21 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   every gesture that becomes something else (drag, swipe, pinch, >15px move) disarms it; `pointercancel`
   deliberately does **not**. The mouse path stays on mouseup and is kept out of the click handler by
   `lastPointerTypeRef.current !== 'touch'`, since a touch arrives there again as a compatibility event.
+- `components/capture/CaptureModal.tsx` — natural-language capture: a note in, a `CaptureDraft` back,
+  then handed to `EventModal` via its `draft` prop (read once by the initial state, so a fresh parse
+  needs a fresh `key`). Nothing is saved here. The whole component assumes the answer is slow: the
+  wait gets a running seconds counter rather than a spinner, and the call's cost is shown afterwards
+  with the raw reply one click away. Its trigger on `PlanPreviewPage` is hidden unless
+  `settings.llmEnabled`.
 - `components/settings/SettingSection.tsx` — `SettingSection`/`SettingRow`/`SectionFooter`, the layout
   primitives `SettingsPage` is built from. Settings now holds preferences only.
 - `pages/SettingsPage.tsx` — one `form` object and one save mutation behind several sections; the
   mutation's variable is the section that pressed Save, which is all that decides where "Changes
   saved." appears. The **Insights** section is the unaccounted-time mask (a `StateValuePicker`, no
   `singlePerState`), hidden entirely until a state has values. Saving invalidates `['insights']` too.
+  The **Assistant** section is the local-model configuration plus a "Test connection" button, which
+  reads the *saved* settings (`llmApi.status`) rather than the form - so every edit to the address or
+  model clears the last result.
 - `components/activities/ActivitiesTabs.tsx` — the underline tab strip the three activity routes share.
   A new activity-side vocabulary is a tab here, not a nav slot.
 - `pages/ActivityTypesPage.tsx` — types admin: accordion per type over the full CRUD (name, icon,
@@ -296,6 +330,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
 
 **Tests**
 - `Unit/TestContext.cs` — in-memory SQLite + real services. Naming: `Method_scenario`.
+  `Llm` is a `FakeLlmClient` whose reply each test sets, so nothing opens a socket; `EnableLlmAsync`
+  gets a user past the assistant's gate.
 - `Integration/StrydeApiFactory.cs` + `HttpHelpers.cs` — `SetupUserAsync`, `LoginAsync`, `UseBearer`, `ReadAsync<T>`. Fresh factory per class (`IDisposable`).
   ⚠️ **JWT secret in tests:** use `builder.UseSetting("Jwt:Secret", testSecret)` in `ConfigureWebHost` — not `services.Configure<JwtOptions>()`, the eager read already happened.
 

@@ -340,11 +340,13 @@ public sealed record InsightsDto(
 /// </param>
 public sealed record UserSettingsDto(
     Guid UserId, int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions,
-    List<Guid> UnaccountedStateValueIds)
+    List<Guid> UnaccountedStateValueIds,
+    bool LlmEnabled, string? LlmBaseUrl, string? LlmModel, int LlmTimeoutSeconds, bool LlmNoThink)
 {
     public static UserSettingsDto FromEntity(UserSettings us, string timezone) => new(
         us.UserId, us.MaxFocusGoals, us.DayBoundaryTime.ToString("HH:mm"), timezone, us.MaxCalendarSuggestions,
-        us.UnaccountedRequirements.Select(r => r.StateValueId).ToList());
+        us.UnaccountedRequirements.Select(r => r.StateValueId).ToList(),
+        us.LlmEnabled, us.LlmBaseUrl, us.LlmModel, us.LlmTimeoutSeconds, us.LlmNoThink);
 }
 
 /// <param name="UnaccountedStateValueIds">
@@ -353,7 +355,42 @@ public sealed record UserSettingsDto(
 /// </param>
 public sealed record UpdateUserSettingsRequest(
     int MaxFocusGoals, string DayBoundaryTime, string Timezone, int MaxCalendarSuggestions,
-    List<Guid>? UnaccountedStateValueIds = null);
+    List<Guid>? UnaccountedStateValueIds = null,
+    // Every assistant field follows the same null-means-untouched contract as the mask above, so a
+    // caller editing the day boundary cannot switch the assistant off by not knowing it exists. For
+    // the two strings that leaves "" as the way to clear one.
+    bool? LlmEnabled = null, string? LlmBaseUrl = null, string? LlmModel = null,
+    int? LlmTimeoutSeconds = null, bool? LlmNoThink = null);
+
+// Assistant (local LLM)
+
+/// <summary>
+/// A filled-in occurrence form, not a saved row: the capture endpoint proposes and the user confirms
+/// in the ordinary editor. <see cref="ActivityId"/> null means the note matched no existing activity,
+/// so the draft opens as a new event.
+/// </summary>
+public sealed record CaptureDraftDto(
+    string Title,
+    Guid? ActivityId,
+    string? ActivityTitle,
+    DateTimeOffset? StartAt,
+    DateTimeOffset? EndAt,
+    bool IsAllDay,
+    int? DurationMinutes,
+    List<string> Subtasks,
+    CaptureDiagnosticsDto Diagnostics);
+
+/// <summary>
+/// What the call cost, shown in the UI rather than logged. Local inference is slow enough that
+/// hiding the number would read as the app having hung, and <see cref="RawJson"/> is what makes a
+/// disagreement between the model and the draft diagnosable without server access.
+/// </summary>
+public sealed record CaptureDiagnosticsDto(
+    string Model, long TotalMs, long LoadMs, int PromptTokens, int OutputTokens, string RawJson);
+
+public sealed record ParseCaptureRequest(string Text);
+
+public sealed record LlmStatusDto(string Model, bool ModelAvailable, List<string> AvailableModels);
 
 // Activity types
 /// <summary>

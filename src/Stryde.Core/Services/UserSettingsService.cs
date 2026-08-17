@@ -3,6 +3,7 @@ using Stryde.Core.Common;
 using Stryde.Core.Data;
 using Stryde.Core.Dtos;
 using Stryde.Core.Entities;
+using Stryde.Core.Llm;
 
 namespace Stryde.Core.Services;
 
@@ -86,8 +87,12 @@ public class UserSettingsService(StrydeDbContext db)
         if (!TimeOnly.TryParseExact(req.DayBoundaryTime, ["HH:mm", "H:mm"], out var boundary))
             return Result<UserSettingsDto>.Fail(new Error(ErrorType.Validation, "Day boundary time must be in HH:mm format."));
 
-        var err = Validators.ValidateTimezone(req.Timezone);
+        var err = Validators.ValidateTimezone(req.Timezone) ?? Validators.ValidateLlmBaseUrl(req.LlmBaseUrl);
         if (err is not null) return Result<UserSettingsDto>.Fail(err);
+
+        if (req.LlmTimeoutSeconds is { } timeout && timeout is < 5 or > LlmOptions.MaxTimeoutSeconds)
+            return Result<UserSettingsDto>.Fail(new Error(
+                ErrorType.Validation, $"Timeout must be between 5 and {LlmOptions.MaxTimeoutSeconds} seconds."));
 
         var user = await db.Users.FindAsync(userId);
         if (user is null) return Result<UserSettingsDto>.Fail(new Error(ErrorType.NotFound, "User not found."));
@@ -97,6 +102,29 @@ public class UserSettingsService(StrydeDbContext db)
         settings.DayBoundaryTime = boundary;
         settings.MaxCalendarSuggestions = req.MaxCalendarSuggestions;
         user.Timezone = req.Timezone;
+
+        // Merged into locals first, so the cross-field check below judges the row as it will be
+        // rather than whichever half of it this request happened to carry - and so a rejection
+        // leaves nothing half-applied on the tracked entity.
+        var llmEnabled = req.LlmEnabled ?? settings.LlmEnabled;
+        var llmBaseUrl = req.LlmBaseUrl is null
+            ? settings.LlmBaseUrl
+            : string.IsNullOrWhiteSpace(req.LlmBaseUrl) ? null : req.LlmBaseUrl.Trim().TrimEnd('/');
+        var llmModel = req.LlmModel is null
+            ? settings.LlmModel
+            : string.IsNullOrWhiteSpace(req.LlmModel) ? null : req.LlmModel.Trim();
+
+        // Caught here rather than left to the first call: switching the assistant on with nothing to
+        // call is a mistake made in this form, so it is answered in this form.
+        if (llmEnabled && (string.IsNullOrWhiteSpace(llmBaseUrl) || string.IsNullOrWhiteSpace(llmModel)))
+            return Result<UserSettingsDto>.Fail(new Error(
+                ErrorType.Validation, "Set a server address and a model before turning the assistant on."));
+
+        settings.LlmEnabled = llmEnabled;
+        settings.LlmBaseUrl = llmBaseUrl;
+        settings.LlmModel = llmModel;
+        settings.LlmTimeoutSeconds = req.LlmTimeoutSeconds ?? settings.LlmTimeoutSeconds;
+        settings.LlmNoThink = req.LlmNoThink ?? settings.LlmNoThink;
 
         var maskErr = await ApplyUnaccountedMaskAsync(settings, userId, req.UnaccountedStateValueIds);
         if (maskErr is not null) return Result<UserSettingsDto>.Fail(maskErr);

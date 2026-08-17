@@ -246,6 +246,47 @@ export interface UserSettings {
    * across states, exactly like an activity's requirements. Empty means the whole day counts.
    */
   unaccountedStateValueIds: string[]
+  /** Master switch for the assistant. Off, nothing calls out to a model at all. */
+  llmEnabled: boolean
+  /** Root of the Ollama server, e.g. "http://ollama:11434". */
+  llmBaseUrl: string | null
+  llmModel: string | null
+  llmTimeoutSeconds: number
+  /** Ask reasoning models not to think. Rejected outright by models that have no thinking mode. */
+  llmNoThink: boolean
+}
+
+/** What one model call cost, shown rather than logged: a local call is slow enough to need saying. */
+export interface CaptureDiagnostics {
+  model: string
+  totalMs: number
+  loadMs: number
+  promptTokens: number
+  outputTokens: number
+  rawJson: string
+}
+
+/**
+ * A filled-in occurrence form the assistant proposes. Nothing is saved server-side: this is handed to
+ * the normal editor, and the user creates it there. `activityId` null means the note matched no
+ * existing activity, so it opens as a new event.
+ */
+export interface CaptureDraft {
+  title: string
+  activityId: string | null
+  activityTitle: string | null
+  startAt: string | null
+  endAt: string | null
+  isAllDay: boolean
+  durationMinutes: number | null
+  subtasks: string[]
+  diagnostics: CaptureDiagnostics
+}
+
+export interface LlmStatus {
+  model: string
+  modelAvailable: boolean
+  availableModels: string[]
 }
 
 /**

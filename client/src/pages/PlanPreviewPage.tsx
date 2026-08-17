@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Menu, Plus, CalendarCheck, Sunrise, MoonStar, ArrowRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Menu, Plus, Sparkles, CalendarCheck, Sunrise, MoonStar, ArrowRight } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { occurrencesApi, goalsApi, settingsApi } from '@/lib/api'
 import { toastError } from '@/store/toasts'
@@ -7,6 +7,7 @@ import type { Activity, Checkpoint, CheckpointSize, Occurrence, Goal } from '@/l
 import type { ActivityTiming } from '@/components/recommendations/RecommendationStrip'
 import { OccurrenceBar } from '@/components/goals/OccurrenceBar'
 import { EventModal } from '@/components/events/EventModal'
+import { CaptureModal } from '@/components/capture/CaptureModal'
 import { OccurrenceListRow } from '@/components/events/OccurrenceListRow'
 import { RecommendationPanel } from '@/components/recommendations/RecommendationStrip'
 
@@ -250,6 +251,7 @@ export function PlanPreviewPage() {
   const [current, setCurrent] = useState<Date>(() => sod(new Date()))
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
+  const [captureOpen, setCaptureOpen] = useState(false)
   const [editingOccurrence, setEditingOccurrence] = useState<Occurrence | undefined>()
   const [defaultActivity, setDefaultActivity] = useState<Activity | undefined>()
   const [defaultStartAt, setDefaultStartAt] = useState<string | undefined>()
@@ -474,6 +476,18 @@ export function PlanPreviewPage() {
               onKeyDown={(e) => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault() }}
               className="hidden sm:block h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
             />
+            {/* Hidden until the assistant is configured: an button that can only ever report
+                "turned off" is worse than no button. */}
+            {settings?.llmEnabled && (
+              <button
+                onClick={() => setCaptureOpen(true)}
+                aria-label="Quick capture"
+                title="Quick capture"
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors"
+              >
+                <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            )}
             <button onClick={openCreate} className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-foreground hover:bg-muted transition-colors">
               <Plus className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
@@ -637,6 +651,8 @@ export function PlanPreviewPage() {
         focusStartAt={focusStartAt}
         scheduleOnly={scheduleMode}
       />
+
+      <CaptureModal open={captureOpen} onClose={() => setCaptureOpen(false)} />
     </div>
   )
 }

@@ -1,6 +1,11 @@
 namespace Stryde.Core.Common;
 
-public enum ErrorType { Validation, NotFound, Conflict, Unauthorized, Forbidden }
+/// <summary>
+/// <see cref="Unavailable"/> is for a dependency outside the app that did not answer - today only
+/// the user's own model server. It is not a bug and not the user's mistake, so it is neither a 500
+/// nor a 400: the caller is meant to shrug and carry on without the feature.
+/// </summary>
+public enum ErrorType { Validation, NotFound, Conflict, Unauthorized, Forbidden, Unavailable }
 
 public sealed record Error(ErrorType Type, string Message);
 

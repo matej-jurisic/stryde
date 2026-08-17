@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Stryde.Core.Auth;
 using Stryde.Core.Data;
+using Stryde.Core.Llm;
 using Stryde.Core.Services;
 
 namespace Stryde.Core;
@@ -31,6 +32,13 @@ public static class ServiceCollectionExtensions
         services.AddScoped<StateService>();
         services.AddScoped<InsightsService>();
         services.AddScoped<ExportService>();
+
+        // One HttpClient for the whole process, deliberately without a BaseAddress: the model
+        // server's address is a per-user setting that arrives with each call. Per-call deadlines are
+        // therefore linked cancellation tokens rather than HttpClient.Timeout, which is instance-wide.
+        services.AddSingleton(_ => new HttpClient());
+        services.AddSingleton<ILlmClient, OllamaLlmClient>();
+        services.AddScoped<CaptureService>();
 
         return services;
     }
