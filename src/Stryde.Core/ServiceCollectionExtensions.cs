@@ -36,7 +36,9 @@ public static class ServiceCollectionExtensions
         // One HttpClient for the whole process, deliberately without a BaseAddress: the model
         // server's address is a per-user setting that arrives with each call. Per-call deadlines are
         // therefore linked cancellation tokens rather than HttpClient.Timeout, which is instance-wide.
-        services.AddSingleton(_ => new HttpClient());
+        // The default 100s timeout would cut a slow local generation short before that token fires,
+        // so it is disabled here and the deadline is owned entirely by the caller.
+        services.AddSingleton(_ => new HttpClient { Timeout = Timeout.InfiniteTimeSpan });
         services.AddSingleton<ILlmClient, OllamaLlmClient>();
         services.AddScoped<CaptureService>();
 

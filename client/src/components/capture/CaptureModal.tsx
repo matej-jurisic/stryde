@@ -221,7 +221,7 @@ export function CaptureModal({ open, onClose }: { open: boolean; onClose: () => 
 
         {parseMutation.isPending && (
           <p className="rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground">
-            Waiting on your model. Local hardware takes a while: this is normal.
+            Waiting on your model.
           </p>
         )}
 

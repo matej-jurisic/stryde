@@ -245,7 +245,7 @@ export const llmApi = {
   status: () => request<LlmStatus>('/api/llm/status'),
   /**
    * Returns the drafts a note describes - one for most notes, one per shift for a pasted rota.
-   * Slow by nature: this is a full completion on local hardware.
+   * Slow by nature: this is a full completion on whatever server the user configured.
    */
   capture: (text: string) =>
     request<CaptureResult>('/api/llm/capture', { method: 'POST', body: JSON.stringify({ text }) }),
