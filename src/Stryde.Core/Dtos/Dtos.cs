@@ -399,7 +399,14 @@ public sealed record CaptureDraftDto(
 /// </summary>
 public sealed record CaptureResultDto(
     List<CaptureDraftDto> Drafts,
-    CaptureDiagnosticsDto Diagnostics);
+    CaptureDiagnosticsDto Diagnostics,
+    /// <summary>
+    /// Why there are no drafts, on a call that itself worked. Set means the model answered and the
+    /// answer was unusable - truncated, looping, or empty of anything to schedule - which is a
+    /// failure of language, not of the server, and so arrives with its cost and its raw reply intact
+    /// rather than as a bare sentence. Null on any run that produced drafts.
+    /// </summary>
+    string? Problem = null);
 
 /// <summary>
 /// What the call cost, shown in the UI rather than logged. Local inference is slow enough that

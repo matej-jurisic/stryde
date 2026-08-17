@@ -301,6 +301,13 @@ export interface CaptureDraft {
 export interface CaptureResult {
   drafts: CaptureDraft[]
   diagnostics: CaptureDiagnostics
+  /**
+   * Why there are no drafts, on a call that itself worked: the model answered and the answer was
+   * unusable. It arrives as a result rather than an error so the reply and the token counts come
+   * with it - which of truncation, repetition or a plain ignored schema it was is visible in the raw
+   * text and in nothing else.
+   */
+  problem: string | null
 }
 
 export interface LlmStatus {

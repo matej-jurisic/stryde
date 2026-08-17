@@ -182,12 +182,10 @@ public class CaptureService(
         }
 
         if (parsed?.Entries is null)
-            return Result<CaptureResultDto>.Fail(new Error(
-                ErrorType.Unavailable, "The model's reply was not usable. Try again, or try a different model."));
+            return Unusable(raw, "The model's reply was not usable. Try again, or try a different model.");
 
         if (parsed.Entries.Count == 0)
-            return Result<CaptureResultDto>.Fail(new Error(
-                ErrorType.Unavailable, "The model found nothing to schedule in that note. Try rewording it."));
+            return Unusable(raw, "The model found nothing to schedule in that note. Try rewording it.");
 
         // One activity can appear in several entries - a week of the same shift is the whole point of
         // the list form - and its history is the same history every time, so it is read once.
@@ -236,10 +234,23 @@ public class CaptureService(
         }
 
         return Result<CaptureResultDto>.Success(new CaptureResultDto(
-            await FlagDuplicatesAsync(userId, drafts, ctx, ct),
-            new CaptureDiagnosticsDto(
-                raw.Model, raw.TotalMs, raw.LoadMs, raw.PromptTokens, raw.OutputTokens, raw.Content)));
+            await FlagDuplicatesAsync(userId, drafts, ctx, ct), Diagnostics(raw)));
     }
+
+    /// <summary>
+    /// A call that ran but produced nothing to put on the calendar. Deliberately a
+    /// <em>result</em> rather than an <see cref="ErrorType.Unavailable"/> error, because the two
+    /// carry different things: an error carries one sentence, and one sentence is exactly what
+    /// cannot distinguish a truncated reply from a looping one from a model that ignored the schema.
+    /// The reply itself can - truncated JSON is recognisable on sight - and so can the token counts
+    /// beside it, which say whether the output budget was spent. Both are already paid for by the
+    /// time this returns, so withholding them buys nothing.
+    /// </summary>
+    private static Result<CaptureResultDto> Unusable(LlmCompletion raw, string problem) =>
+        Result<CaptureResultDto>.Success(new CaptureResultDto([], Diagnostics(raw), problem));
+
+    private static CaptureDiagnosticsDto Diagnostics(LlmCompletion raw) =>
+        new(raw.Model, raw.TotalMs, raw.LoadMs, raw.PromptTokens, raw.OutputTokens, raw.Content);
 
     /// <summary>
     /// Points a draft at the occurrence it would duplicate, when the same activity is already on the

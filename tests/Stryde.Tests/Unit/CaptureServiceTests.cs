@@ -125,10 +125,14 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync();
         _ctx.Llm.Content = "Sure! Here is your calendar entry:";
 
-        var result = await ParseOneAsync(userId, "gym tomorrow");
+        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow");
 
-        Assert.False(result.IsSuccess);
-        Assert.Equal(ErrorType.Unavailable, result.Error!.Type);
+        // No drafts, but the reply and what it cost survive: a bad answer is only diagnosable if the
+        // answer itself comes back with it.
+        Assert.True(result.IsSuccess);
+        Assert.Empty(result.Value!.Drafts);
+        Assert.NotNull(result.Value.Problem);
+        Assert.Equal("Sure! Here is your calendar entry:", result.Value.Diagnostics.RawJson);
     }
 
     // ── activity matching ──────────────────────────────────────────────────
@@ -611,8 +615,9 @@ public class CaptureServiceTests : IDisposable
 
         var result = await _ctx.CaptureService.ParseAsync(userId, "hmm");
 
-        Assert.False(result.IsSuccess);
-        Assert.Equal(ErrorType.Unavailable, result.Error!.Type);
+        Assert.True(result.IsSuccess);
+        Assert.Empty(result.Value!.Drafts);
+        Assert.NotNull(result.Value.Problem);
     }
 
     // ── what the calendar already has ──────────────────────────────────────
