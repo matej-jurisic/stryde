@@ -376,6 +376,12 @@ public sealed record CaptureDraftDto(
     DateTimeOffset? StartAt,
     DateTimeOffset? EndAt,
     bool IsAllDay,
+    /// <summary>
+    /// The note framed this as an intention rather than a fixture ("try to fit in a run tomorrow"),
+    /// so its times are a window to place it in. Read off the note only: nothing in the app's own
+    /// data says whether a thing is committed to, so there is no fallback the way there is for hours.
+    /// </summary>
+    bool IsPlanned,
     int? DurationMinutes,
     List<string> Subtasks,
     /// <summary>

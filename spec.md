@@ -866,11 +866,16 @@ must not turn one note into a hundred rows to review.
 The division of labour is deliberate:
 
 - **The model does language.** Which of the user's activities is meant, what the thing is called,
-  which steps were listed, and where one entry ends and the next begins. It is handed the current
-  date, the current time and up to 80 activity titles, and asked for a plain local date
-  (`YYYY-MM-DD`) and clock time (`HH:mm`) per entry.
+  which steps were listed, where one entry ends and the next begins, whether the note describes a
+  fixture or an intention. It is handed the current date, the current time and up to 80 activity
+  titles, and asked for a plain local date (`YYYY-MM-DD`) and clock time (`HH:mm`) per entry.
 - **The app does arithmetic.** Timezone, day boundary and instant construction never reach the
   prompt. Date maths is what a language model is worst at and what the app already knows how to do.
+- **A null is a handoff, not a failure**, and the prompt says so. The app fills a missing time or
+  length from the activity's own history, which is knowledge the model does not have and cannot
+  reconstruct: that this person has left for work at 08:00 for months, that the drive home takes an
+  hour. A guess would displace a fact, so the model is told to guess at nothing and spend its effort
+  on the language instead.
 
 Rules applied to the reply, none of which trust it:
 
@@ -896,6 +901,12 @@ Rules applied to the reply, none of which trust it:
   reusable thing to log again.
 - **A note with no day floats.** Guessing today is a confident wrong answer, and "sometime" is a
   real answer in this app.
+- **Entries in one note settle each other.** A planner note is terse and written for someone who
+  already knows the routine, so a time stated once often places more than the thing it is attached
+  to: "work 09:30 to 17:00 tomorrow, with the commutes" is three entries and only times the middle
+  one, but the commute home plainly starts at 17:00. Working that out is the model's job - it takes
+  the language to tell which entry hangs off which - and it holds only for times the note genuinely
+  fixes. A null is still the right answer for anything left open.
 - **A day named with no clock time is filled in from the activity's own hours.** "work tomorrow"
   becomes 09:30-17:00 because that is what Work has been, using the same habitual start time and
   median duration the recommendation engine places a suggestion at - so capture and suggestions can
@@ -904,6 +915,16 @@ Rules applied to the reply, none of which trust it:
   habit to read: no match, no completions, or too few to clear the engine's support and share
   thresholds. Activities that genuinely are all-day need no special case - all-day completions are
   excluded from start-time clustering, so they have no habitual hour to find.
+- **Planned comes from the note's framing**, and from nothing else. "Try to fit in a run tomorrow",
+  "sometime this afternoon", or the user saying planned outright, and the draft comes back planned -
+  a window to place the thing in rather than a commitment to the hour, never overdue. There is no
+  fallback the way there is for the hours: nothing in the app's own data says whether something is
+  committed to, so a note that simply states when a thing happens produces an ordinary occurrence.
+- **A start with no length gets the habitual duration**, whichever half the start came from. A note
+  times what it cares about and nothing else: "commute home at five" says when to leave, not how long
+  the drive takes, and the activity's history already knows. This is why an activity with scattered
+  start times is still useful - the median duration survives even when the habitual start is withheld.
+  A length the note states wins over both.
 - **An entry with no title of its own takes the name of the activity it matched**, and only falls
   back to the note text when it matched nothing. With several entries the note describes all of
   them, so it is a poor title for any one.

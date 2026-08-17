@@ -167,7 +167,8 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
 
   const [errors, setErrors] = useState<Errors>({})
   const [isAllDay, setIsAllDay] = useState(() => draft?.isAllDay ?? source?.isAllDay ?? false)
-  const [isPlanned, setIsPlanned] = useState(() => scheduleOnly ? false : (source?.isPlanned ?? false))
+  const [isPlanned, setIsPlanned] = useState(() =>
+    scheduleOnly ? false : (draft?.isPlanned ?? source?.isPlanned ?? false))
   const [timeMode, setTimeMode] = useState<TimeMode>(() => {
     // A note that named no day leaves the draft floating rather than guessing today.
     if (draft) return !draft.startAt ? 'floating' : draft.endAt ? 'scheduled' : 'due'

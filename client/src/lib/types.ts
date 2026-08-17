@@ -278,6 +278,12 @@ export interface CaptureDraft {
   startAt: string | null
   endAt: string | null
   isAllDay: boolean
+  /**
+   * The note framed this as an intention rather than a fixture, so its times are a window. Read off
+   * the note alone: unlike the hours, nothing in the app's data can say whether a thing is committed
+   * to.
+   */
+  isPlanned: boolean
   durationMinutes: number | null
   subtasks: string[]
   /**

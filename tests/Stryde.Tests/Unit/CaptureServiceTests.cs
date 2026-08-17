@@ -41,15 +41,15 @@ public class CaptureServiceTests : IDisposable
     /// <summary>One entry, wrapped in the reply envelope the schema asks for.</summary>
     private static string Reply(
         string title = "Gym", string? activity = null, string? date = null, string? startTime = null,
-        int? duration = null, bool allDay = false, string subtasks = "[]") =>
-        Entries(Entry(title, activity, date, startTime, duration, allDay, subtasks));
+        int? duration = null, bool allDay = false, bool planned = false, string subtasks = "[]") =>
+        Entries(Entry(title, activity, date, startTime, duration, allDay, planned, subtasks));
 
     private static string Entries(params string[] entries) =>
         $$"""{ "entries": [{{string.Join(",", entries)}}] }""";
 
     private static string Entry(
         string title = "Gym", string? activity = null, string? date = null, string? startTime = null,
-        int? duration = null, bool allDay = false, string subtasks = "[]") =>
+        int? duration = null, bool allDay = false, bool planned = false, string subtasks = "[]") =>
         $$"""
         {
           "title": {{Json(title)}},
@@ -58,6 +58,7 @@ public class CaptureServiceTests : IDisposable
           "startTime": {{Json(startTime)}},
           "durationMinutes": {{(duration?.ToString() ?? "null")}},
           "allDay": {{(allDay ? "true" : "false")}},
+          "planned": {{(planned ? "true" : "false")}},
           "subtasks": {{subtasks}}
         }
         """;
@@ -311,6 +312,72 @@ public class CaptureServiceTests : IDisposable
         var result = await ParseOneAsync(userId, "work tomorrow, in at 7");
 
         Assert.Equal(new DateTime(2026, 8, 18, 7, 0, 0), result.Value!.StartAt!.Value.DateTime);
+    }
+
+    [Fact]
+    public async Task ParseAsync_carries_the_planned_flag_through()
+    {
+        var userId = await CreateUserAsync();
+        _ctx.Llm.Content = Reply(title: "Workout", date: "2026-08-17", startTime: "21:00", planned: true);
+
+        var result = await ParseOneAsync(userId, "add a planned workout for 21:00 today");
+
+        // Planned is the note's own framing and nothing else can supply it: unlike the hours, the
+        // app's data cannot say whether a thing is committed to.
+        Assert.True(result.Value!.IsPlanned);
+        Assert.Equal(new DateTime(2026, 8, 17, 21, 0, 0), result.Value.StartAt!.Value.DateTime);
+    }
+
+    [Fact]
+    public async Task ParseAsync_leaves_an_ordinary_entry_unplanned()
+    {
+        var userId = await CreateUserAsync();
+        _ctx.Llm.Content = Reply(title: "Dentist", date: "2026-08-18", startTime: "09:00");
+
+        var result = await ParseOneAsync(userId, "dentist tomorrow at 9");
+
+        Assert.False(result.Value!.IsPlanned);
+    }
+
+    [Fact]
+    public async Task ParseAsync_fills_a_timed_note_from_the_activitys_habitual_duration()
+    {
+        var userId = await CreateUserAsync();
+        var commute = await AddActivityAsync(userId, "Work -> Home commute");
+        // Scattered starts, consistent length: the evening commute leaves whenever the day ends but
+        // always takes an hour, so there is a habitual duration to read and no habitual start.
+        await AddHistoryAsync(userId, commute.Id, new(16, 30), new(17, 30), DaysAgo(1));
+        await AddHistoryAsync(userId, commute.Id, new(17, 5), new(18, 5), DaysAgo(2));
+        await AddHistoryAsync(userId, commute.Id, new(17, 40), new(18, 40), DaysAgo(3));
+        await AddHistoryAsync(userId, commute.Id, new(18, 20), new(19, 20), DaysAgo(4));
+
+        _ctx.Llm.Content = Reply(
+            title: "Work -> Home commute", activity: "Work -> Home commute",
+            date: "2026-08-18", startTime: "17:00");
+        var result = await ParseOneAsync(userId, "work 9:30 to 17:00 tomorrow, with the commutes");
+
+        // The note times the start and says nothing about the drive; how long it takes is the
+        // activity's own business.
+        Assert.Equal(new DateTime(2026, 8, 18, 17, 0, 0), result.Value!.StartAt!.Value.DateTime);
+        Assert.Equal(new DateTime(2026, 8, 18, 18, 0, 0), result.Value.EndAt!.Value.DateTime);
+        Assert.False(result.Value.IsAllDay);
+    }
+
+    [Fact]
+    public async Task ParseAsync_keeps_an_explicit_duration_over_the_habitual_one()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddHistoryAsync(userId, work.Id, new(9, 30), new(17, 0),
+            DaysAgo(1), DaysAgo(2), DaysAgo(3), DaysAgo(4));
+
+        // No start time given, so the habit places it - but a stated length is a fact about this
+        // occurrence, not a guess, and outranks the usual 7.5 hours.
+        _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18", duration: 180);
+        var result = await ParseOneAsync(userId, "work a half day tomorrow, 3 hours");
+
+        Assert.Equal(new DateTime(2026, 8, 18, 9, 30, 0), result.Value!.StartAt!.Value.DateTime);
+        Assert.Equal(new DateTime(2026, 8, 18, 12, 30, 0), result.Value.EndAt!.Value.DateTime);
     }
 
     [Fact]

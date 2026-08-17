@@ -7,7 +7,16 @@ import { EventModal } from '@/components/events/EventModal'
 import { llmApi, occurrencesApi, ApiError } from '@/lib/api'
 import type { CaptureDraft, CaptureResult } from '@/lib/types'
 
+/**
+ * When the draft says it happens. Planned is part of that answer rather than a separate fact: it is
+ * what turns the times from a commitment into a window to fit the thing into.
+ */
 function formatWhen(draft: CaptureDraft): string {
+  const when = formatSpan(draft)
+  return draft.isPlanned ? `${when}, planned` : when
+}
+
+function formatSpan(draft: CaptureDraft): string {
   if (!draft.startAt) return 'No date - floating'
 
   const start = new Date(draft.startAt)
@@ -37,7 +46,7 @@ async function createFromDraft(draft: CaptureDraft) {
     startAt: draft.startAt,
     endAt: draft.endAt,
     isAllDay: draft.isAllDay,
-    isPlanned: false,
+    isPlanned: draft.isPlanned,
     durationMinutes: draft.durationMinutes,
   }
 

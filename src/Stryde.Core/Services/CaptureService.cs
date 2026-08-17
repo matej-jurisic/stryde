@@ -75,9 +75,10 @@ public class CaptureService(
               "startTime":       { "type": ["string", "null"] },
               "durationMinutes": { "type": ["integer", "null"] },
               "allDay":          { "type": "boolean" },
+              "planned":         { "type": "boolean" },
               "subtasks":        { "type": "array", "items": { "type": "string" } }
             },
-            "required": ["title", "activity", "date", "startTime", "durationMinutes", "allDay", "subtasks"]
+            "required": ["title", "activity", "date", "startTime", "durationMinutes", "allDay", "planned", "subtasks"]
           }
         }
       },
@@ -86,31 +87,48 @@ public class CaptureService(
     """;
 
     private const string SystemPrompt = """
-    You turn one note from a personal planner into calendar entries.
+    You are reading one note from someone's personal planner and working out the day it describes.
     Reply with JSON only, matching the schema. No prose, no explanation.
 
-    entries: one object per thing that goes on the calendar. Most notes describe exactly one, and
-    then the array holds one entry. A note that lists several things, or the same thing on several
-    days, gets one entry for each - never merge two days into one entry. Never add an entry the note
-    does not ask for.
+    Read it the way the person who wrote it would. Planner notes are terse and written for someone
+    who already knows the routine, so what goes on the calendar is usually more than what is spelled
+    out: "work tomorrow, with the commutes" is three things, a pasted rota is one per shift, and one
+    line can carry a day, a time and a place at once. Work out what the day actually looks like, then
+    write one entry per thing on it. Never merge two days into one entry, and never add something the
+    note does not ask for.
 
-    Each entry:
-    - title: what the user is doing, in their own words, capitalised. Never put a date or a time in it.
-    - activity: if the entry clearly refers to one of the listed activities, copy that title EXACTLY,
-      character for character. Otherwise null. Never invent a title here and never edit one.
-      Match on meaning, not spelling: the note may be written in a different language than the
-      activity titles, or abbreviate them.
-      Choose per entry, and choose the most specific activity the entry supports. When two listed
-      titles describe the same thing at different levels of detail, a qualifier in the entry - a
-      place, a variant, a note in brackets - decides between them, even when it sits after the time
-      or in another language. Only fall back to the plainer title when the entry carries no such
-      qualifier. Two lines of the same list often name different activities.
-    - date: YYYY-MM-DD. Resolve "tomorrow", "friday", "next week" against the current date given
-      below. Null when the note names no day at all.
-    - startTime: HH:mm, 24 hour. Null when the note gives no clock time. Words like "morning" or
-      "after work" are not clock times: leave it null.
-    - durationMinutes: only when the note says how long it takes. Null otherwise.
-    - allDay: true only when the thing occupies a whole named day rather than a slot in it.
+    The entries of a note belong to the same day and settle each other. A time stated for one thing
+    often places another: something that runs up to it, something that starts when it finishes, two
+    things listed in the order they happen. Reason it through and use what the note fixes.
+
+    Leave a field null when the note genuinely leaves it open. A null is not a failure here, it is a
+    handoff: the app fills a missing time or length in from that activity's own history, and it knows
+    things you cannot see - that this person has left for work at 08:00 for months, that the drive
+    home takes an hour. A guess of yours displaces a fact of theirs, so guess at nothing. The app
+    also handles timezones, day boundaries and turning your date and time into real instants. Spend
+    your effort on the language instead: which activity is meant, what to call it, what steps were
+    listed, which times the note really fixes.
+
+    Fields:
+    - title: what the person is doing, in their own words, capitalised. Never a date or a time in it.
+    - activity: the listed activity this entry refers to, copied EXACTLY, character for character.
+      Null when none of them fits. Never invent a title here and never edit one.
+      Match on meaning rather than spelling: the note is often written in another language than the
+      titles, or abbreviates them. Choose per entry - consecutive lines of one list routinely name
+      different activities - and choose the most specific activity the entry supports. Where two
+      titles describe the same thing at different levels of detail, a qualifier in the entry decides
+      between them: a place, a variant, a note in brackets, wherever it sits and whatever language it
+      is in. The plainer title is for an entry that carries no such qualifier.
+    - date: YYYY-MM-DD. Resolve "tomorrow", "friday", "next week" against the current date below.
+    - startTime: HH:mm, 24 hour, whenever the note fixes one - stated outright, or settled by another
+      entry. Placement with nothing behind it is not a clock time: "morning", "after work" on a day
+      the note never times.
+    - durationMinutes: how long the note says it takes.
+    - allDay: true only for something that occupies a whole named day rather than a slot in it.
+    - planned: true when the note frames the thing as an intention rather than a fixture - "aim to",
+      "try to fit in", "sometime this afternoon", or the person calling it planned in as many words.
+      Any times then read as a window to fit it into rather than a commitment, so it is never late.
+      False for whatever simply happens at its time: a shift, an appointment, a class, a booking.
     - subtasks: the steps that entry lists, in the order given. Empty array when it lists none.
     """;
 
@@ -208,6 +226,7 @@ public class CaptureService(
                 startAt,
                 endAt,
                 isAllDay,
+                entry.Planned,
                 entry.DurationMinutes is > 0 and <= 24 * 60 ? entry.DurationMinutes : null,
                 (entry.Subtasks ?? [])
                     .Select(s => s.Trim())
@@ -304,6 +323,11 @@ public class CaptureService(
     /// "sometime" is a real answer in this app, and guessing a day here is the kind of confident
     /// wrong answer that is worse than no answer.
     /// </para>
+    /// <para>
+    /// How long a thing takes is the activity's own business, so a start with no length falls back to
+    /// the habitual duration whichever half the start came from. A note times what it cares about -
+    /// "commute home at five" says nothing about the drive - and the history already knows the rest.
+    /// </para>
     /// </summary>
     private static (DateTimeOffset? StartAt, DateTimeOffset? EndAt, bool IsAllDay) ResolveSchedule(
         ModelEntry d, DayContext ctx, RecommendationService.ActivityStats? habit)
@@ -321,7 +345,7 @@ public class CaptureService(
             if (habit?.StartMinutes is { } mins)
             {
                 var start = InstantForMinutes(date, mins, ctx);
-                return (start, habit.DurationMinutes is > 0 ? start.AddMinutes(habit.DurationMinutes.Value) : null, false);
+                return (start, EndAfter(start, d.DurationMinutes ?? habit.DurationMinutes), false);
             }
 
             // Nothing to go on: a day named without a clock time is a date commitment.
@@ -331,12 +355,15 @@ public class CaptureService(
         if (d.AllDay) return (Local(date.ToDateTime(TimeOnly.MinValue), ctx), null, true);
 
         var startAt = Local(date.ToDateTime(time), ctx);
-        var end = d.DurationMinutes is > 0 and <= 24 * 60
-            ? startAt.AddMinutes(d.DurationMinutes.Value)
-            : (DateTimeOffset?)null;
-
-        return (startAt, end, false);
+        return (startAt, EndAfter(startAt, d.DurationMinutes ?? habit?.DurationMinutes), false);
     }
+
+    /// <summary>
+    /// Where a span of <paramref name="minutes"/> ends, or null for an open-ended draft. An
+    /// implausible length is treated as no length: a wrong end is a block drawn across the day.
+    /// </summary>
+    private static DateTimeOffset? EndAfter(DateTimeOffset start, int? minutes) =>
+        minutes is > 0 and <= 24 * 60 ? start.AddMinutes(minutes.Value) : null;
 
     /// <summary>
     /// Minutes from local midnight, placed on the given day. A time earlier than the day boundary
@@ -387,6 +414,7 @@ public class CaptureService(
         string? StartTime,
         [property: JsonPropertyName("durationMinutes")] int? DurationMinutes,
         bool AllDay,
+        bool Planned,
         List<string>? Subtasks);
 
     /// <summary>Proves the server is reachable and says what it has, without generating anything.</summary>

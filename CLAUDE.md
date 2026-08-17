@@ -200,8 +200,21 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   A note that names a day but no time is filled in from the matched activity's habitual hours via
   `RecommendationService.ComputeStats` — **called, not reimplemented**, so a captured note and a
   suggested slot cannot quote different figures for the same routine. It beats the model's `allDay`
-  flag; date-only is the fallback when there is no habit to read. Habits are cached per activity
-  across the entries, so a pasted week of one shift costs one lookup. See `spec.md` → Assistant.
+  flag; date-only is the fallback when there is no habit to read. The habitual *duration* applies to
+  a model-supplied start too, not just a habit-supplied one: a note times what it cares about and
+  leaves the length to the activity, and the two halves of `ActivityStats` are independent - a
+  scattered start time is withheld while the median duration survives. Habits are cached per activity
+  across the entries, so a pasted week of one shift costs one lookup.
+  ⚠️ **The prompt states the division of labour rather than enumerating cases.** It tells the model
+  that a null is a *handoff* - the app fills hours it cannot know - so that leaving a field open is a
+  deliberate answer, and that entries in one note settle each other (the commute home starts when the
+  shift ends). Both are asks for reasoning, not rules to match on. Resist adding a case: a rule
+  phrased around the example that prompted it ("a leg that follows a shift...") handles that note and
+  nothing adjacent to it.
+  `Planned` is the model's read of framing - intention versus fixture - and the one draft field with
+  **no** fallback: the app's data cannot say whether a thing is committed to. It rides
+  `CaptureDraftDto.IsPlanned` through to `createFromDraft`, which used to hardcode `false`.
+  See `spec.md` → Assistant.
 - `Services/ExportService.cs` + `Services/ExportMarkdown.cs` — the export loads the whole account and
   renders it as **one Markdown document**, not JSON. It has no DTOs and no import path, so the writer
   is free to drop ids, name everything, and turn stored numbers into the sentences the UI uses. Any
