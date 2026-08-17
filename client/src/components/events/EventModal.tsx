@@ -122,9 +122,15 @@ interface OccurrenceModalProps {
    * the same validation and the same endpoints as a form filled in by hand.
    */
   draft?: CaptureDraft
+  /**
+   * Fired after a successful save, before `onClose`. `onClose` alone cannot tell a cancel from a
+   * create, which a caller holding a list of drafts needs to know: quick capture ticks off the one
+   * it just handed over.
+   */
+  onSaved?: (occurrence: Occurrence) => void
 }
 
-export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, scheduleOnly, draft }: OccurrenceModalProps) {
+export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStartAt, defaultStartAt, defaultEndAt, defaultActivity, scheduleOnly, draft, onSaved }: OccurrenceModalProps) {
   const qc = useQueryClient()
   const isEdit = Boolean(occurrence)
 
@@ -295,9 +301,10 @@ export function EventModal({ open, onClose, occurrence, duplicateFrom, focusStar
 
       return saved
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       qc.invalidateQueries({ queryKey: ['events'] })
       qc.invalidateQueries({ queryKey: ['recommendations'] })
+      onSaved?.(saved)
       onClose()
     },
   })

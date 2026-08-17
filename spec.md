@@ -851,16 +851,24 @@ caller is expected to carry on without it.
 
 ### Quick capture
 
-`POST /api/llm/capture` takes one line of typed English and returns a **draft** - a filled-in
-occurrence form. It writes nothing. The client opens the draft in the ordinary editor, and the user
-creates it there, through the same validation and the same endpoints as a form filled in by hand.
-A wrong reading therefore costs a keystroke, never a bad calendar entry.
+`POST /api/llm/capture` takes typed English and returns a **list of drafts** - filled-in occurrence
+forms. It writes nothing. The user ticks what they want and adds it from the capture dialog, or opens
+one in the ordinary editor first; either way creation goes through the same validation and the same
+endpoints as a form filled in by hand. A wrong reading therefore costs a keystroke, never a bad
+calendar entry.
+
+**A note is not one entry.** "Work and both commutes tomorrow" is three things on the calendar, and a
+pasted rota is one per shift, so the answer is always a list - a note about a single thing simply
+returns a list of one, and nothing downstream has a one-draft path. The note may be up to 4000
+characters, and at most **30 entries** come back from one: a model that has started repeating itself
+must not turn one note into a hundred rows to review.
 
 The division of labour is deliberate:
 
 - **The model does language.** Which of the user's activities is meant, what the thing is called,
-  which steps were listed. It is handed the current date, the current time and up to 80 activity
-  titles, and asked for a plain local date (`YYYY-MM-DD`) and clock time (`HH:mm`).
+  which steps were listed, and where one entry ends and the next begins. It is handed the current
+  date, the current time and up to 80 activity titles, and asked for a plain local date
+  (`YYYY-MM-DD`) and clock time (`HH:mm`) per entry.
 - **The app does arithmetic.** Timezone, day boundary and instant construction never reach the
   prompt. Date maths is what a language model is worst at and what the app already knows how to do.
 
@@ -883,17 +891,34 @@ Rules applied to the reply, none of which trust it:
   habit to read: no match, no completions, or too few to clear the engine's support and share
   thresholds. Activities that genuinely are all-day need no special case - all-day completions are
   excluded from start-time clustering, so they have no habitual hour to find.
+- **An entry with no title of its own takes the name of the activity it matched**, and only falls
+  back to the note text when it matched nothing. With several entries the note describes all of
+  them, so it is a poor title for any one.
 - Nonsense dates, out-of-range durations and over-long titles are dropped rather than rejected: a
   draft missing a field is still worth reviewing.
+- **A reply with no entries at all is `Unavailable`**, not an empty answer: there is nothing to show
+  and nothing to correct, so it is reported the way any other unusable reply is.
 
-Drafted subtasks are created in a second pass after the occurrence exists, since neither create
-endpoint takes them.
+An activity that appears in several entries has its history read once, so a pasted week of the same
+shift costs one lookup, not one per day.
+
+### Accepting drafts
+
+Each draft is a row in the capture dialog, ticked by default, with the count and an "untick anything
+you do not want" line above when there is more than one. **Add** creates the ticked ones in order and
+closes the dialog. The editor is still one click away per row, for the drafts that need a correction
+first - it is there for the exceptions, not as a tollgate every draft has to pass.
+
+A row that has been created is marked **Added** and cannot be ticked again, including when a run
+fails half way: what got through is real, so the retry only covers what is left. Drafted subtasks are
+created in a second pass after the occurrence exists, since neither create endpoint takes them.
 
 **The call's cost is shown, not logged**: wall clock, model-load time, and tokens in and out, along
 the bottom edge of the dialog, with the raw reply one click away. Local inference is slow enough that
 hiding the number would read as a hang, and these are the figures that decide where else an assistant
 feature can live - but they are diagnostics, so they sit beside the buttons rather than between the
-draft and the decision about it.
+drafts and the decision about them. They belong to the call, not to any one draft: one call, one
+cost, however many entries came out of it.
 
 ---
 

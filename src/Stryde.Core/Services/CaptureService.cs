@@ -11,9 +11,14 @@ using Stryde.Core.Llm;
 namespace Stryde.Core.Services;
 
 /// <summary>
-/// Turns a line of typed English into a <see cref="CaptureDraftDto"/> - a filled-in occurrence form,
-/// never a saved row. The model proposes and the user confirms in the normal editor, which is what
-/// makes a wrong answer cost a keystroke instead of a bad calendar entry.
+/// Turns typed English into <see cref="CaptureDraftDto"/>s - filled-in occurrence forms, never saved
+/// rows. The model proposes and the user confirms, which is what makes a wrong answer cost a
+/// keystroke instead of a bad calendar entry.
+/// <para>
+/// A note is not one entry. "work and both commutes", or a pasted week of shifts, is several things
+/// on the calendar, so the reply is always a <em>list</em> of drafts - a single-thing note simply
+/// returns a list of one. Nothing downstream has a one-draft path.
+/// </para>
 /// <para>
 /// The division of labour is deliberate. The model does language: which activity is meant, what the
 /// thing is called, which steps were listed. It is given no timezone, no day boundary and no
@@ -34,13 +39,22 @@ public class CaptureService(
     private const int MaxListedActivities = 80;
 
     /// <summary>
-    /// Output budget. The schema below tops out well under this even with several subtasks, and
-    /// output tokens are the dominant cost of a local call, so the ceiling is set close rather than
-    /// generously.
+    /// How many entries one note may produce. A pasted rota is the case this exists for; the cap is
+    /// what stops a model that has started repeating itself from turning one note into a hundred
+    /// rows to review.
     /// </summary>
-    private const int MaxOutputTokens = 400;
+    private const int MaxEntries = 30;
 
-    private const int MaxInputLength = 1000;
+    /// <summary>
+    /// Output budget. A ceiling, not a spend: constrained decoding stops at the closing brace, so a
+    /// one-entry note costs what it always did. It has to clear a full <see cref="MaxEntries"/>
+    /// reply, because a budget hit mid-array is truncated JSON - the whole note lost, not the tail
+    /// of it.
+    /// </summary>
+    private const int MaxOutputTokens = 2400;
+
+    /// <summary>Long enough to paste a week of shifts into, which is the point of the list form.</summary>
+    private const int MaxInputLength = 4000;
 
     /// <summary>
     /// Every field is required. Ollama's constrained decoding is markedly more reliable when the
@@ -50,25 +64,39 @@ public class CaptureService(
     {
       "type": "object",
       "properties": {
-        "title":           { "type": "string" },
-        "activity":        { "type": ["string", "null"] },
-        "date":            { "type": ["string", "null"] },
-        "startTime":       { "type": ["string", "null"] },
-        "durationMinutes": { "type": ["integer", "null"] },
-        "allDay":          { "type": "boolean" },
-        "subtasks":        { "type": "array", "items": { "type": "string" } }
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title":           { "type": "string" },
+              "activity":        { "type": ["string", "null"] },
+              "date":            { "type": ["string", "null"] },
+              "startTime":       { "type": ["string", "null"] },
+              "durationMinutes": { "type": ["integer", "null"] },
+              "allDay":          { "type": "boolean" },
+              "subtasks":        { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["title", "activity", "date", "startTime", "durationMinutes", "allDay", "subtasks"]
+          }
+        }
       },
-      "required": ["title", "activity", "date", "startTime", "durationMinutes", "allDay", "subtasks"]
+      "required": ["entries"]
     }
     """;
 
     private const string SystemPrompt = """
-    You turn one note from a personal planner into a calendar entry.
+    You turn one note from a personal planner into calendar entries.
     Reply with JSON only, matching the schema. No prose, no explanation.
 
-    Rules:
+    entries: one object per thing that goes on the calendar. Most notes describe exactly one, and
+    then the array holds one entry. A note that lists several things, or the same thing on several
+    days, gets one entry for each - never merge two days into one entry. Never add an entry the note
+    does not ask for.
+
+    Each entry:
     - title: what the user is doing, in their own words, capitalised. Never put a date or a time in it.
-    - activity: if the note clearly refers to one of the listed activities, copy that title EXACTLY,
+    - activity: if the entry clearly refers to one of the listed activities, copy that title EXACTLY,
       character for character. Otherwise null. Never invent a title here and never edit one.
     - date: YYYY-MM-DD. Resolve "tomorrow", "friday", "next week" against the current date given
       below. Null when the note names no day at all.
@@ -76,22 +104,22 @@ public class CaptureService(
       "after work" are not clock times: leave it null.
     - durationMinutes: only when the note says how long it takes. Null otherwise.
     - allDay: true only when the thing occupies a whole named day rather than a slot in it.
-    - subtasks: the steps the note lists, in the order given. Empty array when it lists none.
+    - subtasks: the steps that entry lists, in the order given. Empty array when it lists none.
     """;
 
-    public async Task<Result<CaptureDraftDto>> ParseAsync(
+    public async Task<Result<CaptureResultDto>> ParseAsync(
         Guid userId, string? text, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text))
-            return Result<CaptureDraftDto>.Fail(new Error(ErrorType.Validation, "Write something to capture."));
+            return Result<CaptureResultDto>.Fail(new Error(ErrorType.Validation, "Write something to capture."));
 
         if (text.Length > MaxInputLength)
-            return Result<CaptureDraftDto>.Fail(new Error(
+            return Result<CaptureResultDto>.Fail(new Error(
                 ErrorType.Validation, $"Keep the note under {MaxInputLength} characters."));
 
         var us = await settings.GetOrCreateAsync(userId);
         var options = LlmOptions.Resolve(us);
-        if (!options.IsSuccess) return Result<CaptureDraftDto>.Fail(options.Error!);
+        if (!options.IsSuccess) return Result<CaptureResultDto>.Fail(options.Error!);
 
         var ctx = await settings.GetDayContextAsync(userId);
         var nowLocal = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ctx.TimeZone);
@@ -114,54 +142,75 @@ public class CaptureService(
 
         var completion = await llm.CompleteAsync(
             options.Value!, SystemPrompt, prompt, ResponseSchema, MaxOutputTokens, ct);
-        if (!completion.IsSuccess) return Result<CaptureDraftDto>.Fail(completion.Error!);
+        if (!completion.IsSuccess) return Result<CaptureResultDto>.Fail(completion.Error!);
 
         var raw = completion.Value!;
 
-        ModelDraft? parsed;
+        ModelReply? parsed;
         try
         {
-            parsed = JsonSerializer.Deserialize<ModelDraft>(raw.Content, JsonOptions);
+            parsed = JsonSerializer.Deserialize<ModelReply>(raw.Content, JsonOptions);
         }
         catch (JsonException)
         {
             parsed = null;
         }
 
-        if (parsed is null)
-            return Result<CaptureDraftDto>.Fail(new Error(
+        if (parsed?.Entries is null)
+            return Result<CaptureResultDto>.Fail(new Error(
                 ErrorType.Unavailable, "The model's reply was not usable. Try again, or try a different model."));
 
-        // Titles are matched exactly, ignoring case and surrounding space, and nothing looser. A
-        // substring match would quietly attach "run" to "Run errands", and an occurrence pointed at
-        // the wrong activity corrupts that activity's whole history - its cadence, its habitual start
-        // time, every suggestion drawn from it. No match simply means the draft opens as a new event,
-        // which the user can redirect in one click. The prompt carries the burden instead: it tells
-        // the model to copy a listed title character for character.
-        var matched = string.IsNullOrWhiteSpace(parsed.Activity)
-            ? null
-            : activities.FirstOrDefault(a =>
-                string.Equals(a.Title.Trim(), parsed.Activity.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (parsed.Entries.Count == 0)
+            return Result<CaptureResultDto>.Fail(new Error(
+                ErrorType.Unavailable, "The model found nothing to schedule in that note. Try rewording it."));
 
-        var title = string.IsNullOrWhiteSpace(parsed.Title) ? text.Trim() : parsed.Title.Trim();
-        if (title.Length > 255) title = title[..255];
+        // One activity can appear in several entries - a week of the same shift is the whole point of
+        // the list form - and its history is the same history every time, so it is read once.
+        var habits = new Dictionary<Guid, RecommendationService.ActivityStats?>();
+        var drafts = new List<CaptureDraftDto>();
 
-        var habit = matched is null ? null : await HabitAsync(userId, matched.Id, ctx, ct);
-        var (startAt, endAt, isAllDay) = ResolveSchedule(parsed, ctx, habit);
+        foreach (var entry in parsed.Entries.Take(MaxEntries))
+        {
+            // Titles are matched exactly, ignoring case and surrounding space, and nothing looser. A
+            // substring match would quietly attach "run" to "Run errands", and an occurrence pointed
+            // at the wrong activity corrupts that activity's whole history - its cadence, its
+            // habitual start time, every suggestion drawn from it. No match simply means the draft
+            // opens as a new event, which the user can redirect in one click. The prompt carries the
+            // burden instead: it tells the model to copy a listed title character for character.
+            var matched = string.IsNullOrWhiteSpace(entry.Activity)
+                ? null
+                : activities.FirstOrDefault(a =>
+                    string.Equals(a.Title.Trim(), entry.Activity.Trim(), StringComparison.OrdinalIgnoreCase));
 
-        return Result<CaptureDraftDto>.Success(new CaptureDraftDto(
-            title,
-            matched?.Id,
-            matched?.Title,
-            startAt,
-            endAt,
-            isAllDay,
-            parsed.DurationMinutes is > 0 and <= 24 * 60 ? parsed.DurationMinutes : null,
-            (parsed.Subtasks ?? [])
-                .Select(s => s.Trim())
-                .Where(s => s.Length is > 0 and <= 255)
-                .Take(20)
-                .ToList(),
+            // The matched activity's own name comes before the note text: with several entries the
+            // note describes all of them, so it is a poor title for any one.
+            var title = !string.IsNullOrWhiteSpace(entry.Title) ? entry.Title.Trim()
+                : matched?.Title ?? text.Trim();
+            if (title.Length > 255) title = title[..255];
+
+            RecommendationService.ActivityStats? habit = null;
+            if (matched is not null && !habits.TryGetValue(matched.Id, out habit))
+                habits[matched.Id] = habit = await HabitAsync(userId, matched.Id, ctx, ct);
+
+            var (startAt, endAt, isAllDay) = ResolveSchedule(entry, ctx, habit);
+
+            drafts.Add(new CaptureDraftDto(
+                title,
+                matched?.Id,
+                matched?.Title,
+                startAt,
+                endAt,
+                isAllDay,
+                entry.DurationMinutes is > 0 and <= 24 * 60 ? entry.DurationMinutes : null,
+                (entry.Subtasks ?? [])
+                    .Select(s => s.Trim())
+                    .Where(s => s.Length is > 0 and <= 255)
+                    .Take(20)
+                    .ToList()));
+        }
+
+        return Result<CaptureResultDto>.Success(new CaptureResultDto(
+            drafts,
             new CaptureDiagnosticsDto(
                 raw.Model, raw.TotalMs, raw.LoadMs, raw.PromptTokens, raw.OutputTokens, raw.Content)));
     }
@@ -198,7 +247,7 @@ public class CaptureService(
     /// </para>
     /// </summary>
     private static (DateTimeOffset? StartAt, DateTimeOffset? EndAt, bool IsAllDay) ResolveSchedule(
-        ModelDraft d, DayContext ctx, RecommendationService.ActivityStats? habit)
+        ModelEntry d, DayContext ctx, RecommendationService.ActivityStats? habit)
     {
         if (!DateOnly.TryParseExact(d.Date, "yyyy-MM-dd", out var date)) return (null, null, false);
 
@@ -270,7 +319,9 @@ public class CaptureService(
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     /// <summary>The model's side of the contract, before any of it is trusted.</summary>
-    private sealed record ModelDraft(
+    private sealed record ModelReply(List<ModelEntry>? Entries);
+
+    private sealed record ModelEntry(
         string? Title,
         string? Activity,
         string? Date,

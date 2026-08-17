@@ -267,9 +267,9 @@ export interface CaptureDiagnostics {
 }
 
 /**
- * A filled-in occurrence form the assistant proposes. Nothing is saved server-side: this is handed to
- * the normal editor, and the user creates it there. `activityId` null means the note matched no
- * existing activity, so it opens as a new event.
+ * A filled-in occurrence form the assistant proposes. Nothing is saved server-side: the user accepts
+ * it, or opens it in the normal editor first. `activityId` null means the note matched no existing
+ * activity, so it becomes a new event.
  */
 export interface CaptureDraft {
   title: string
@@ -280,6 +280,14 @@ export interface CaptureDraft {
   isAllDay: boolean
   durationMinutes: number | null
   subtasks: string[]
+}
+
+/**
+ * One capture call's answer. A note about one thing gives one draft; a pasted rota gives one per
+ * shift, so this is always a list. The cost belongs to the call, not to any single draft.
+ */
+export interface CaptureResult {
+  drafts: CaptureDraft[]
   diagnostics: CaptureDiagnostics
 }
 

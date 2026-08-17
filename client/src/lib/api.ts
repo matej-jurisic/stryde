@@ -1,7 +1,7 @@
 import { useAuthStore } from '@/store/auth'
 import { getServerUrl, isNative, getNativeRefreshToken, setNativeRefreshToken } from './server-config'
 import type { SuggestionMode } from '@/store/suggestionMode'
-import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityStateEffect, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile, State, StateSnapshot, CaptureDraft, LlmStatus } from './types'
+import type { AuthResponse, User, Goal, GoalStatus, GoalKind, Checkpoint, CheckpointStatus, UserSettings, Recommendation, Category, Activity, ActivityStateEffect, ActivityType, ActivitySubtask, Occurrence, Insights, InsightsEmptyProfile, State, StateSnapshot, CaptureResult, LlmStatus } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -243,9 +243,12 @@ export const settingsApi = {
 export const llmApi = {
   /** Reachability only, no generation. Answers in well under a second or not at all. */
   status: () => request<LlmStatus>('/api/llm/status'),
-  /** Returns a draft to review. Slow by nature: this is a full completion on local hardware. */
+  /**
+   * Returns the drafts a note describes - one for most notes, one per shift for a pasted rota.
+   * Slow by nature: this is a full completion on local hardware.
+   */
   capture: (text: string) =>
-    request<CaptureDraft>('/api/llm/capture', { method: 'POST', body: JSON.stringify({ text }) }),
+    request<CaptureResult>('/api/llm/capture', { method: 'POST', body: JSON.stringify({ text }) }),
 }
 
 export interface ActivityTypeBody {

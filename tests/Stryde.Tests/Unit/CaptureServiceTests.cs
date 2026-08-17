@@ -1,4 +1,5 @@
 using Stryde.Core.Common;
+using Stryde.Core.Dtos;
 using Stryde.Core.Entities;
 using Stryde.Core.Enums;
 
@@ -37,7 +38,16 @@ public class CaptureServiceTests : IDisposable
         return activity;
     }
 
+    /// <summary>One entry, wrapped in the reply envelope the schema asks for.</summary>
     private static string Reply(
+        string title = "Gym", string? activity = null, string? date = null, string? startTime = null,
+        int? duration = null, bool allDay = false, string subtasks = "[]") =>
+        Entries(Entry(title, activity, date, startTime, duration, allDay, subtasks));
+
+    private static string Entries(params string[] entries) =>
+        $$"""{ "entries": [{{string.Join(",", entries)}}] }""";
+
+    private static string Entry(
         string title = "Gym", string? activity = null, string? date = null, string? startTime = null,
         int? duration = null, bool allDay = false, string subtasks = "[]") =>
         $$"""
@@ -54,6 +64,18 @@ public class CaptureServiceTests : IDisposable
 
     private static string Json(string? s) => s is null ? "null" : $"\"{s}\"";
 
+    /// <summary>
+    /// The single-entry case, which most of these tests are about. Asserts the reply produced exactly
+    /// one draft, so a test that means "one thing" cannot quietly pass on two.
+    /// </summary>
+    private async Task<Result<CaptureDraftDto>> ParseOneAsync(Guid userId, string note)
+    {
+        var result = await _ctx.CaptureService.ParseAsync(userId, note);
+        return result.IsSuccess
+            ? Result<CaptureDraftDto>.Success(Assert.Single(result.Value!.Drafts))
+            : Result<CaptureDraftDto>.Fail(result.Error!);
+    }
+
     // ── the gate ───────────────────────────────────────────────────────────
 
     [Fact]
@@ -64,7 +86,7 @@ public class CaptureServiceTests : IDisposable
         settings.LlmEnabled = false;
         await _ctx.Db.SaveChangesAsync();
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow");
+        var result = await ParseOneAsync(userId, "gym tomorrow");
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorType.Unavailable, result.Error!.Type);
@@ -77,7 +99,7 @@ public class CaptureServiceTests : IDisposable
     {
         var userId = await CreateUserAsync();
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "   ");
+        var result = await ParseOneAsync(userId, "   ");
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorType.Validation, result.Error!.Type);
@@ -90,7 +112,7 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync();
         _ctx.Llm.Failure = new Error(ErrorType.Unavailable, "Could not reach the model server.");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow");
+        var result = await ParseOneAsync(userId, "gym tomorrow");
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorType.Unavailable, result.Error!.Type);
@@ -102,7 +124,7 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync();
         _ctx.Llm.Content = "Sure! Here is your calendar entry:";
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow");
+        var result = await ParseOneAsync(userId, "gym tomorrow");
 
         Assert.False(result.IsSuccess);
         Assert.Equal(ErrorType.Unavailable, result.Error!.Type);
@@ -117,7 +139,7 @@ public class CaptureServiceTests : IDisposable
         var gym = await AddActivityAsync(userId, "Gym session");
         _ctx.Llm.Content = Reply(title: "Gym", activity: "Gym session", date: "2026-08-18", startTime: "07:00");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow at 7");
+        var result = await ParseOneAsync(userId, "gym tomorrow at 7");
 
         Assert.True(result.IsSuccess);
         Assert.Equal(gym.Id, result.Value!.ActivityId);
@@ -131,7 +153,7 @@ public class CaptureServiceTests : IDisposable
         var gym = await AddActivityAsync(userId, "Gym session");
         _ctx.Llm.Content = Reply(activity: "  gym SESSION ", date: "2026-08-18", startTime: "07:00");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow at 7");
+        var result = await ParseOneAsync(userId, "gym tomorrow at 7");
 
         Assert.Equal(gym.Id, result.Value!.ActivityId);
     }
@@ -146,7 +168,7 @@ public class CaptureServiceTests : IDisposable
         // event, which the user can redirect.
         _ctx.Llm.Content = Reply(title: "Run", activity: "Run", date: "2026-08-18", startTime: "07:00");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "run tomorrow at 7");
+        var result = await ParseOneAsync(userId, "run tomorrow at 7");
 
         Assert.Null(result.Value!.ActivityId);
         Assert.Equal("Run", result.Value.Title);
@@ -160,7 +182,7 @@ public class CaptureServiceTests : IDisposable
         await AddActivityAsync(otherId, "Gym session");
         _ctx.Llm.Content = Reply(activity: "Gym session", date: "2026-08-18", startTime: "07:00");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow at 7");
+        var result = await ParseOneAsync(userId, "gym tomorrow at 7");
 
         Assert.Null(result.Value!.ActivityId);
     }
@@ -172,7 +194,7 @@ public class CaptureServiceTests : IDisposable
         await AddActivityAsync(userId, "Dentist", ActivityKind.@event);
 
         _ctx.Llm.Content = Reply(activity: "Dentist", date: "2026-08-18", startTime: "07:00");
-        var result = await _ctx.CaptureService.ParseAsync(userId, "dentist tomorrow");
+        var result = await ParseOneAsync(userId, "dentist tomorrow");
 
         // An event's activity row belongs to one occurrence; it is not a reusable thing to log again.
         Assert.Null(result.Value!.ActivityId);
@@ -188,7 +210,7 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync("Europe/Zagreb");
         _ctx.Llm.Content = Reply(date: "2026-08-18", startTime: "07:00", duration: 90);
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow at 7 for an hour and a half");
+        var result = await ParseOneAsync(userId, "gym tomorrow at 7 for an hour and a half");
 
         var start = result.Value!.StartAt!.Value;
         Assert.Equal(new DateTime(2026, 8, 18, 7, 0, 0), start.DateTime);
@@ -204,7 +226,7 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync();
         _ctx.Llm.Content = Reply(title: "Read");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "read a bit at some point");
+        var result = await ParseOneAsync(userId, "read a bit at some point");
 
         // Guessing today here would be a confident wrong answer; floating is a real answer in this app.
         Assert.Null(result.Value!.StartAt);
@@ -218,7 +240,7 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync();
         _ctx.Llm.Content = Reply(title: "Move flat", date: "2026-08-20");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "moving flat on thursday");
+        var result = await ParseOneAsync(userId, "moving flat on thursday");
 
         Assert.True(result.Value!.IsAllDay);
         Assert.Equal(new DateTime(2026, 8, 20, 0, 0, 0), result.Value.StartAt!.Value.DateTime);
@@ -252,7 +274,7 @@ public class CaptureServiceTests : IDisposable
             DaysAgo(1), DaysAgo(2), DaysAgo(3), DaysAgo(4));
 
         _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18");
-        var result = await _ctx.CaptureService.ParseAsync(userId, "work tomorrow");
+        var result = await ParseOneAsync(userId, "work tomorrow");
 
         // Months of 09:30-17:00 beat "no time given", so this is a scheduled block, not an all-dayer.
         Assert.False(result.Value!.IsAllDay);
@@ -271,7 +293,7 @@ public class CaptureServiceTests : IDisposable
         // A model reading "work tomorrow" may well call it an all-day thing. One line of text does
         // not outrank the record of what actually happens.
         _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18", allDay: true);
-        var result = await _ctx.CaptureService.ParseAsync(userId, "work tomorrow");
+        var result = await ParseOneAsync(userId, "work tomorrow");
 
         Assert.False(result.Value!.IsAllDay);
         Assert.Equal(new DateTime(2026, 8, 18, 9, 30, 0), result.Value.StartAt!.Value.DateTime);
@@ -286,7 +308,7 @@ public class CaptureServiceTests : IDisposable
             DaysAgo(1), DaysAgo(2), DaysAgo(3), DaysAgo(4));
 
         _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18", startTime: "07:00");
-        var result = await _ctx.CaptureService.ParseAsync(userId, "work tomorrow, in at 7");
+        var result = await ParseOneAsync(userId, "work tomorrow, in at 7");
 
         Assert.Equal(new DateTime(2026, 8, 18, 7, 0, 0), result.Value!.StartAt!.Value.DateTime);
     }
@@ -299,7 +321,7 @@ public class CaptureServiceTests : IDisposable
         await AddHistoryAsync(userId, work.Id, new(9, 30), new(17, 0), DaysAgo(1));
 
         _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18");
-        var result = await _ctx.CaptureService.ParseAsync(userId, "work tomorrow");
+        var result = await ParseOneAsync(userId, "work tomorrow");
 
         // A habit has to be earned. One session is not a routine, and a confident wrong time is
         // worse than no time - the same bar the recommendation engine sets.
@@ -323,7 +345,7 @@ public class CaptureServiceTests : IDisposable
         await _ctx.Db.SaveChangesAsync();
 
         _ctx.Llm.Content = Reply(title: "Annual leave", activity: "Annual leave", date: "2026-08-18");
-        var result = await _ctx.CaptureService.ParseAsync(userId, "annual leave tomorrow");
+        var result = await ParseOneAsync(userId, "annual leave tomorrow");
 
         // No exception needed for these: an all-day completion is excluded from the start-time
         // clustering, so there is no habitual hour to find and the draft stays date-only.
@@ -340,7 +362,7 @@ public class CaptureServiceTests : IDisposable
         await AddActivityAsync(userId, "Haircut");
 
         _ctx.Llm.Content = Reply(title: "Haircut", activity: "Haircut", date: "2026-08-18");
-        var result = await _ctx.CaptureService.ParseAsync(userId, "haircut tomorrow");
+        var result = await ParseOneAsync(userId, "haircut tomorrow");
 
         Assert.True(result.Value!.IsAllDay);
     }
@@ -351,7 +373,7 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync();
         _ctx.Llm.Content = Reply(title: "Dentist", date: "2026-08-18");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "dentist tomorrow");
+        var result = await ParseOneAsync(userId, "dentist tomorrow");
 
         // Nothing matched, so there is no history to read - and no query should have been attempted.
         Assert.Null(result.Value!.ActivityId);
@@ -364,7 +386,7 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync();
         _ctx.Llm.Content = Reply(title: "Gym", date: "next tuesday", startTime: "07:00");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym next tuesday");
+        var result = await ParseOneAsync(userId, "gym next tuesday");
 
         Assert.Null(result.Value!.StartAt);
     }
@@ -375,7 +397,7 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync();
         _ctx.Llm.Content = Reply(date: "2026-08-18", startTime: "07:00", duration: 100000);
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow at 7");
+        var result = await ParseOneAsync(userId, "gym tomorrow at 7");
 
         Assert.Null(result.Value!.DurationMinutes);
         Assert.Null(result.Value.EndAt);
@@ -390,7 +412,7 @@ public class CaptureServiceTests : IDisposable
         _ctx.Llm.Content = Reply(date: "2026-08-18", startTime: "07:00",
             subtasks: """["Warmup", "Squats", "Deadlifts"]""");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow: warmup, squats, deadlifts");
+        var result = await ParseOneAsync(userId, "gym tomorrow: warmup, squats, deadlifts");
 
         Assert.Equal(["Warmup", "Squats", "Deadlifts"], result.Value!.Subtasks);
     }
@@ -401,7 +423,7 @@ public class CaptureServiceTests : IDisposable
         var userId = await CreateUserAsync();
         _ctx.Llm.Content = Reply(title: "   ");
 
-        var result = await _ctx.CaptureService.ParseAsync(userId, "something odd");
+        var result = await ParseOneAsync(userId, "something odd");
 
         Assert.Equal("something odd", result.Value!.Title);
     }
@@ -414,6 +436,7 @@ public class CaptureServiceTests : IDisposable
 
         var result = await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow at 7");
 
+        // One call, one cost, however many drafts came out of it.
         var d = result.Value!.Diagnostics;
         Assert.Equal("test-model", d.Model);
         Assert.Equal(1234, d.TotalMs);
@@ -429,12 +452,100 @@ public class CaptureServiceTests : IDisposable
         await AddActivityAsync(userId, "Gym session");
         _ctx.Llm.Content = Reply();
 
-        await _ctx.CaptureService.ParseAsync(userId, "gym tomorrow");
+        await ParseOneAsync(userId, "gym tomorrow");
 
         // Relative dates are the model's job, so it has to be told what "today" is.
         Assert.Contains(DateTime.UtcNow.ToString("yyyy-MM-dd"), _ctx.Llm.LastUserPrompt);
         Assert.Contains("Gym session", _ctx.Llm.LastUserPrompt);
         Assert.Contains("gym tomorrow", _ctx.Llm.LastUserPrompt);
+    }
+
+    // ── several entries ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ParseAsync_returns_one_draft_per_entry()
+    {
+        var userId = await CreateUserAsync();
+        _ctx.Llm.Content = Entries(
+            Entry(title: "Commute in", date: "2026-08-18", startTime: "08:00", duration: 40),
+            Entry(title: "Work", date: "2026-08-18", startTime: "09:00", duration: 480),
+            Entry(title: "Commute home", date: "2026-08-18", startTime: "17:30", duration: 40));
+
+        var result = await _ctx.CaptureService.ParseAsync(userId, "work tomorrow plus both commutes");
+
+        Assert.Equal(3, result.Value!.Drafts.Count);
+        // Order is the model's, which is the order the note listed them in.
+        Assert.Equal(["Commute in", "Work", "Commute home"], result.Value.Drafts.Select(d => d.Title));
+        Assert.Equal(new DateTime(2026, 8, 18, 17, 30, 0), result.Value.Drafts[2].StartAt!.Value.DateTime);
+    }
+
+    [Fact]
+    public async Task ParseAsync_reads_one_activitys_history_once_for_every_entry_naming_it()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddHistoryAsync(userId, work.Id, new(9, 30), new(17, 0),
+            DaysAgo(1), DaysAgo(2), DaysAgo(3), DaysAgo(4));
+
+        // A pasted week: same activity, no clock times. Every day gets the same habitual hours.
+        _ctx.Llm.Content = Entries(
+            Entry(title: "Work", activity: "Work", date: "2026-08-18"),
+            Entry(title: "Work", activity: "Work", date: "2026-08-19"),
+            Entry(title: "Work", activity: "Work", date: "2026-08-20"));
+
+        var result = await _ctx.CaptureService.ParseAsync(userId, "work mon to wed");
+
+        Assert.Equal(3, result.Value!.Drafts.Count);
+        Assert.All(result.Value.Drafts, d =>
+        {
+            Assert.Equal(work.Id, d.ActivityId);
+            Assert.False(d.IsAllDay);
+            Assert.Equal(new TimeSpan(9, 30, 0), d.StartAt!.Value.TimeOfDay);
+        });
+        Assert.Equal(
+            [new DateTime(2026, 8, 18), new DateTime(2026, 8, 19), new DateTime(2026, 8, 20)],
+            result.Value.Drafts.Select(d => d.StartAt!.Value.Date));
+    }
+
+    [Fact]
+    public async Task ParseAsync_titles_an_untitled_entry_from_the_activity_it_matched()
+    {
+        var userId = await CreateUserAsync();
+        await AddActivityAsync(userId, "Work");
+        _ctx.Llm.Content = Entries(
+            Entry(title: "", activity: "Work", date: "2026-08-18", startTime: "09:00"),
+            Entry(title: "Gym", date: "2026-08-18", startTime: "18:00"));
+
+        var result = await _ctx.CaptureService.ParseAsync(userId, "work then gym tomorrow");
+
+        // With several entries the note describes all of them, so it is a poor title for any one.
+        Assert.Equal("Work", result.Value!.Drafts[0].Title);
+    }
+
+    [Fact]
+    public async Task ParseAsync_caps_how_many_entries_one_note_can_produce()
+    {
+        var userId = await CreateUserAsync();
+        _ctx.Llm.Content = Entries(Enumerable.Range(0, 50)
+            .Select(_ => Entry(date: "2026-08-18", startTime: "07:00"))
+            .ToArray());
+
+        var result = await _ctx.CaptureService.ParseAsync(userId, "gym");
+
+        // A model that has started repeating itself must not turn one note into fifty rows to review.
+        Assert.Equal(30, result.Value!.Drafts.Count);
+    }
+
+    [Fact]
+    public async Task ParseAsync_reports_an_empty_entry_list_rather_than_an_empty_answer()
+    {
+        var userId = await CreateUserAsync();
+        _ctx.Llm.Content = Entries();
+
+        var result = await _ctx.CaptureService.ParseAsync(userId, "hmm");
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(ErrorType.Unavailable, result.Error!.Type);
     }
 
     // ── status ─────────────────────────────────────────────────────────────

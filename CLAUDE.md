@@ -179,17 +179,22 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   inference - so every call passes a JSON schema *and* a tight `maxOutputTokens`. An unconstrained
   reply is minutes, not seconds. `think: false` is sent only when the user asks for it: a model with
   no thinking mode rejects the field outright.
-- `Services/CaptureService.cs` — natural-language capture. Returns a `CaptureDraftDto` and **writes
-  nothing**: the client opens the draft in `EventModal` and the user creates it through the normal
-  endpoints. The model is given no timezone and no arithmetic - it returns a plain local date and
-  clock time and this class builds the instants, since date maths is what it is worst at.
+- `Services/CaptureService.cs` — natural-language capture. Returns a `CaptureResultDto` (a **list** of
+  `CaptureDraftDto` plus the call's diagnostics) and **writes nothing**: the client creates what the
+  user ticks, through the normal endpoints. A note is not one entry - "work and both commutes", or a
+  pasted rota - so the schema's top level is an `entries` array and a single-thing note is a list of
+  one; nothing downstream has a one-draft path. `MaxEntries` caps it and `MaxOutputTokens` must clear
+  a full one, since a budget hit mid-array is truncated JSON, i.e. the whole note lost. The model is
+  given no timezone and no arithmetic - it returns a plain local date and clock time and this class
+  builds the instants, since date maths is what it is worst at.
   Activity names match **exactly** (ignoring case/space) and nothing looser; a substring match would
   point an occurrence at the wrong activity and corrupt its cadence, habitual start and every
   suggestion drawn from it.
   A note that names a day but no time is filled in from the matched activity's habitual hours via
   `RecommendationService.ComputeStats` — **called, not reimplemented**, so a captured note and a
   suggested slot cannot quote different figures for the same routine. It beats the model's `allDay`
-  flag; date-only is the fallback when there is no habit to read. See `spec.md` → Assistant.
+  flag; date-only is the fallback when there is no habit to read. Habits are cached per activity
+  across the entries, so a pasted week of one shift costs one lookup. See `spec.md` → Assistant.
 - `Services/ExportService.cs` + `Services/ExportMarkdown.cs` — the export loads the whole account and
   renders it as **one Markdown document**, not JSON. It has no DTOs and no import path, so the writer
   is free to drop ids, name everything, and turn stored numbers into the sentences the UI uses. Any
@@ -307,14 +312,20 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   every gesture that becomes something else (drag, swipe, pinch, >15px move) disarms it; `pointercancel`
   deliberately does **not**. The mouse path stays on mouseup and is kept out of the click handler by
   `lastPointerTypeRef.current !== 'touch'`, since a touch arrives there again as a compatibility event.
-- `components/capture/CaptureModal.tsx` — natural-language capture: a note in, a `CaptureDraft` back,
-  then handed to `EventModal` via its `draft` prop (read once by the initial state, so a fresh parse
-  needs a fresh `key`). Nothing is saved here. The whole component assumes the answer is slow: the
-  wait gets a running seconds counter rather than a spinner, and the call's cost goes in the modal
-  **footer** (and is itself the raw-reply toggle), not in the body between the draft and the buttons.
-  The editor is passed this modal's own `open`, not a literal - it calls back the same `onClose`, so
-  hardcoding it left an editor nothing could dismiss. Its trigger on `PlanPreviewPage` is hidden unless
-  `settings.llmEnabled`.
+- `components/capture/CaptureModal.tsx` — natural-language capture: a note in, a `CaptureResult`
+  (many drafts) back, each a tickable row. **Add** creates the ticked ones itself via
+  `createFromDraft` (`occurrencesApi.create`/`createEvent` + a subtask pass), so the editor is the
+  exception path, not a tollgate; a row's pencil opens it in `EventModal` via the `draft` prop (read
+  once by the initial state, hence the per-index `key`). Drafts are tracked by **index** - they are
+  not rows anywhere - in three sets: `selected`, `created` (written, so a half-failed run never
+  creates twice) and the one open in the editor. The dialog closes itself when every draft is created
+  or unticked, which is also how the editor path finishes: `EventModal.onSaved` is what ticks a draft
+  off, since `onClose` alone cannot tell a create from a cancel. The whole component assumes the
+  answer is slow: the wait gets a running seconds counter rather than a spinner, and the call's cost
+  goes in the modal **footer** (and is itself the raw-reply toggle), not in the body between the
+  drafts and the buttons. The editor is passed this modal's own `open`, not a literal - it calls back
+  the same `onClose`, so hardcoding it left an editor nothing could dismiss. Its trigger on
+  `PlanPreviewPage` is hidden unless `settings.llmEnabled`.
 - `components/settings/SettingSection.tsx` — `SettingSection`/`SettingRow`/`SectionFooter`, the layout
   primitives `SettingsPage` is built from. Settings now holds preferences only.
 - `pages/SettingsPage.tsx` — one `form` object and one save mutation behind several sections; the

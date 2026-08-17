@@ -377,7 +377,16 @@ public sealed record CaptureDraftDto(
     DateTimeOffset? EndAt,
     bool IsAllDay,
     int? DurationMinutes,
-    List<string> Subtasks,
+    List<string> Subtasks);
+
+/// <summary>
+/// One capture call's whole answer. A note about one thing yields one draft; a pasted rota or a
+/// "work and both commutes" note yields several, which is why the drafts arrive as a list rather
+/// than a single form. The cost belongs here rather than on each draft: there was one call,
+/// whatever it produced.
+/// </summary>
+public sealed record CaptureResultDto(
+    List<CaptureDraftDto> Drafts,
     CaptureDiagnosticsDto Diagnostics);
 
 /// <summary>
