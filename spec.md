@@ -878,7 +878,20 @@ Rules applied to the reply, none of which trust it:
   substring match would attach "run" to "Run errands", and an occurrence pointed at the wrong
   activity corrupts that activity's whole history - its cadence, its habitual start time, every
   suggestion drawn from it. No match opens the draft as a new event instead. The prompt carries the
-  burden: it tells the model to copy a listed title character for character.
+  burden: it tells the model to copy a listed title character for character, to match on meaning
+  rather than spelling (the note is often not in the language the titles are written in), and to pick
+  **the most specific** activity an entry supports: where "Work" and "Work from home" both exist, a
+  qualifier on the line - a place, a variant, a note in brackets, in any language - is what decides
+  between them, and the plainer title is the fallback for a line that carries none. That choice is
+  per entry, since consecutive days of one rota routinely name different activities.
+- **A draft the calendar already has is flagged, not dropped.** Same activity, same day as an
+  existing occurrence that was not skipped, and the draft comes back pointing at it. A rota is
+  usually pasted once part of the week is already logged, and re-adding a day corrupts the history
+  the engine reads; but two sessions of one activity in a day are legitimate, so the row is offered
+  unticked rather than removed. The check is deliberately blind to clock times - a shift re-listed an
+  hour out is the same shift - and ignores skipped occurrences, since re-planning one is the point.
+  It is the app's check, not the model's: the calendar is a fact the app holds, and asking a model to
+  cross-reference it would cost prefill for a worse answer.
 - **Event-kind activities are not offered.** Their activity row backs one occurrence and is not a
   reusable thing to log again.
 - **A note with no day floats.** Guessing today is a confident wrong answer, and "sometime" is a
@@ -905,8 +918,10 @@ shift costs one lookup, not one per day.
 ### Accepting drafts
 
 Each draft is a row in the capture dialog, ticked by default, with the count and an "untick anything
-you do not want" line above when there is more than one. **Add** creates the ticked ones in order and
-closes the dialog. The editor is still one click away per row, for the drafts that need a correction
+you do not want" line above when there is more than one. A draft the calendar already has starts
+**unticked** and says "Already on your calendar" under its time, and the line above counts them;
+a single such draft gets a tick box of its own, which it would otherwise not have. **Add** creates
+the ticked ones in order and closes the dialog. The editor is still one click away per row, for the drafts that need a correction
 first - it is there for the exceptions, not as a tollgate every draft has to pass.
 
 A row that has been created is marked **Added** and cannot be ticked again, including when a run

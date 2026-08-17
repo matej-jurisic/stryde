@@ -189,7 +189,14 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   builds the instants, since date maths is what it is worst at.
   Activity names match **exactly** (ignoring case/space) and nothing looser; a substring match would
   point an occurrence at the wrong activity and corrupt its cadence, habitual start and every
-  suggestion drawn from it.
+  suggestion drawn from it. Which of several similar activities is meant is therefore the prompt's
+  job, not the matcher's: it asks for meaning over spelling (the note is often in another language)
+  and for the **most specific** title an entry supports, per entry.
+  `FlagDuplicatesAsync` sets `ExistingOccurrenceId` on a draft whose activity is already on the
+  calendar that day (any status but `skipped`), so the client can offer it unticked - the pasted-rota
+  case, where half the week is logged already. Same activity + same day is the whole rule: times are
+  ignored on purpose, and the check lives here rather than in the prompt because the calendar is the
+  app's own fact.
   A note that names a day but no time is filled in from the matched activity's habitual hours via
   `RecommendationService.ComputeStats` — **called, not reimplemented**, so a captured note and a
   suggested slot cannot quote different figures for the same routine. It beats the model's `allDay`
@@ -317,7 +324,8 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   `createFromDraft` (`occurrencesApi.create`/`createEvent` + a subtask pass), so the editor is the
   exception path, not a tollgate; a row's pencil opens it in `EventModal` via the `draft` prop (read
   once by the initial state, hence the per-index `key`). Drafts are tracked by **index** - they are
-  not rows anywhere - in three sets: `selected`, `created` (written, so a half-failed run never
+  not rows anywhere - in three sets: `selected` (everything except drafts carrying
+  `existingOccurrenceId`, which start unticked and say "Already on your calendar"), `created` (written, so a half-failed run never
   creates twice) and the one open in the editor. The dialog closes itself when every draft is created
   or unticked, which is also how the editor path finishes: `EventModal.onSaved` is what ticks a draft
   off, since `onClose` alone cannot tell a create from a cancel. The whole component assumes the

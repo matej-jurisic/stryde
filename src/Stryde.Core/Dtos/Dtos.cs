@@ -377,7 +377,13 @@ public sealed record CaptureDraftDto(
     DateTimeOffset? EndAt,
     bool IsAllDay,
     int? DurationMinutes,
-    List<string> Subtasks);
+    List<string> Subtasks,
+    /// <summary>
+    /// The occurrence already on the calendar that this draft would duplicate: same activity, same
+    /// day. Set means "you have this already" - the row is offered unticked rather than dropped,
+    /// since two sessions of one activity in a day are legitimate.
+    /// </summary>
+    Guid? ExistingOccurrenceId = null);
 
 /// <summary>
 /// One capture call's whole answer. A note about one thing yields one draft; a pasted rota or a

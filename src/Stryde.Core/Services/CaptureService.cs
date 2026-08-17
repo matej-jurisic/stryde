@@ -98,6 +98,13 @@ public class CaptureService(
     - title: what the user is doing, in their own words, capitalised. Never put a date or a time in it.
     - activity: if the entry clearly refers to one of the listed activities, copy that title EXACTLY,
       character for character. Otherwise null. Never invent a title here and never edit one.
+      Match on meaning, not spelling: the note may be written in a different language than the
+      activity titles, or abbreviate them.
+      Choose per entry, and choose the most specific activity the entry supports. When two listed
+      titles describe the same thing at different levels of detail, a qualifier in the entry - a
+      place, a variant, a note in brackets - decides between them, even when it sits after the time
+      or in another language. Only fall back to the plainer title when the entry carries no such
+      qualifier. Two lines of the same list often name different activities.
     - date: YYYY-MM-DD. Resolve "tomorrow", "friday", "next week" against the current date given
       below. Null when the note names no day at all.
     - startTime: HH:mm, 24 hour. Null when the note gives no clock time. Words like "morning" or
@@ -210,9 +217,61 @@ public class CaptureService(
         }
 
         return Result<CaptureResultDto>.Success(new CaptureResultDto(
-            drafts,
+            await FlagDuplicatesAsync(userId, drafts, ctx, ct),
             new CaptureDiagnosticsDto(
                 raw.Model, raw.TotalMs, raw.LoadMs, raw.PromptTokens, raw.OutputTokens, raw.Content)));
+    }
+
+    /// <summary>
+    /// Points a draft at the occurrence it would duplicate, when the same activity is already on the
+    /// calendar that day.
+    /// <para>
+    /// A pasted rota covers days that are half logged already - the week's schedule arrives on
+    /// Wednesday - and re-adding what is there corrupts the very history the engine reads. The check
+    /// is the app's, not the model's: the calendar is a fact the app holds, and asking a model to
+    /// cross-reference it would cost prefill for a worse answer. Same activity, same day is the whole
+    /// rule; it is deliberately blind to clock times, because a shift moved by an hour is the same
+    /// shift re-listed, not a second one.
+    /// </para>
+    /// <para>
+    /// Flagged, never dropped: a draft the user does want is one tick away, and two sessions of the
+    /// same activity in a day are legitimate. Skipped occurrences do not count - a skipped thing did
+    /// not happen, so re-planning it is exactly what the user is doing.
+    /// </para>
+    /// </summary>
+    private async Task<List<CaptureDraftDto>> FlagDuplicatesAsync(
+        Guid userId, List<CaptureDraftDto> drafts, DayContext ctx, CancellationToken ct)
+    {
+        var activityIds = drafts
+            .Where(d => d.ActivityId is not null && d.StartAt is not null)
+            .Select(d => d.ActivityId!.Value)
+            .Distinct()
+            .ToList();
+
+        if (activityIds.Count == 0) return drafts;
+
+        // Whole history per activity: the day window cannot be pushed into SQL (SQLite has no
+        // instant-correct DateTimeOffset comparison), and one user's rows for a handful of activities
+        // are few enough that bucketing them here is cheaper than the query gymnastics.
+        var existing = await db.Occurrences
+            .AsNoTracking()
+            .Where(o => o.UserId == userId
+                && activityIds.Contains(o.ActivityId)
+                && o.Status != EventStatus.skipped
+                && o.StartAt != null)
+            .Select(o => new { o.Id, o.ActivityId, o.StartAt })
+            .ToListAsync(ct);
+
+        var byDay = new Dictionary<(Guid Activity, DateOnly Day), Guid>();
+        foreach (var o in existing)
+            byDay.TryAdd((o.ActivityId, DayMath.DayOf(o.StartAt!.Value, ctx)), o.Id);
+
+        return drafts
+            .Select(d => d.ActivityId is { } id && d.StartAt is { } start
+                && byDay.TryGetValue((id, DayMath.DayOf(start, ctx)), out var existingId)
+                    ? d with { ExistingOccurrenceId = existingId }
+                    : d)
+            .ToList();
     }
 
     /// <summary>

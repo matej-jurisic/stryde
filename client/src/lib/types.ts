@@ -280,6 +280,12 @@ export interface CaptureDraft {
   isAllDay: boolean
   durationMinutes: number | null
   subtasks: string[]
+  /**
+   * The occurrence already on the calendar that this draft would duplicate: same activity, same day.
+   * Set means the row starts unticked - a pasted week usually covers days that are logged already,
+   * and re-adding one corrupts the activity's history.
+   */
+  existingOccurrenceId: string | null
 }
 
 /**

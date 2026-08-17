@@ -548,6 +548,103 @@ public class CaptureServiceTests : IDisposable
         Assert.Equal(ErrorType.Unavailable, result.Error!.Type);
     }
 
+    // ── what the calendar already has ──────────────────────────────────────
+
+    /// <summary>One occurrence of <paramref name="activityId"/>, 08:00 on the given day.</summary>
+    private async Task<Occurrence> AddOccurrenceAsync(
+        Guid userId, Guid activityId, DateOnly day, EventStatus status = EventStatus.pending)
+    {
+        var occurrence = new Occurrence
+        {
+            UserId = userId,
+            ActivityId = activityId,
+            Status = status,
+            StartAt = new DateTimeOffset(day.ToDateTime(new TimeOnly(8, 0)), TimeSpan.Zero),
+            EndAt = new DateTimeOffset(day.ToDateTime(new TimeOnly(16, 0)), TimeSpan.Zero),
+        };
+        _ctx.Db.Occurrences.Add(occurrence);
+        await _ctx.Db.SaveChangesAsync();
+        return occurrence;
+    }
+
+    [Fact]
+    public async Task ParseAsync_flags_a_draft_the_calendar_already_has()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        var already = await AddOccurrenceAsync(userId, work.Id, new DateOnly(2026, 8, 18));
+
+        // A different clock time on purpose: a shift re-listed an hour out is the same shift, not a
+        // second one.
+        _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18", startTime: "09:30");
+        var result = await ParseOneAsync(userId, "work tomorrow 9:30-17:00");
+
+        Assert.Equal(already.Id, result.Value!.ExistingOccurrenceId);
+    }
+
+    [Fact]
+    public async Task ParseAsync_flags_only_the_days_the_calendar_already_has()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        var already = await AddOccurrenceAsync(userId, work.Id, new DateOnly(2026, 8, 19));
+
+        // The pasted-rota case: a week's schedule that arrives once part of it is logged.
+        _ctx.Llm.Content = Entries(
+            Entry(title: "Work", activity: "Work", date: "2026-08-18", startTime: "08:00"),
+            Entry(title: "Work", activity: "Work", date: "2026-08-19", startTime: "09:30"),
+            Entry(title: "Work", activity: "Work", date: "2026-08-20", startTime: "09:30"));
+
+        var result = await _ctx.CaptureService.ParseAsync(userId, "work mon to wed");
+
+        Assert.Equal(
+            [null, already.Id, null],
+            result.Value!.Drafts.Select(d => d.ExistingOccurrenceId));
+    }
+
+    [Fact]
+    public async Task ParseAsync_does_not_flag_a_different_activity_on_the_same_day()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddActivityAsync(userId, "Work from home");
+        await AddOccurrenceAsync(userId, work.Id, new DateOnly(2026, 8, 18));
+
+        _ctx.Llm.Content = Reply(
+            title: "Work from home", activity: "Work from home", date: "2026-08-18", startTime: "08:00");
+        var result = await ParseOneAsync(userId, "work from home tomorrow 8-16");
+
+        Assert.Null(result.Value!.ExistingOccurrenceId);
+    }
+
+    [Fact]
+    public async Task ParseAsync_does_not_flag_against_a_skipped_occurrence()
+    {
+        var userId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddOccurrenceAsync(userId, work.Id, new DateOnly(2026, 8, 18), EventStatus.skipped);
+
+        _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18", startTime: "09:30");
+        var result = await ParseOneAsync(userId, "work tomorrow");
+
+        // A skipped thing did not happen, so re-planning it is the point, not a duplicate.
+        Assert.Null(result.Value!.ExistingOccurrenceId);
+    }
+
+    [Fact]
+    public async Task ParseAsync_does_not_flag_another_users_occurrence()
+    {
+        var userId = await CreateUserAsync();
+        var otherId = await CreateUserAsync();
+        var work = await AddActivityAsync(userId, "Work");
+        await AddOccurrenceAsync(otherId, work.Id, new DateOnly(2026, 8, 18));
+
+        _ctx.Llm.Content = Reply(title: "Work", activity: "Work", date: "2026-08-18", startTime: "09:30");
+        var result = await ParseOneAsync(userId, "work tomorrow");
+
+        Assert.Null(result.Value!.ExistingOccurrenceId);
+    }
+
     // ── status ─────────────────────────────────────────────────────────────
 
     [Fact]

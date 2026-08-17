@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, Pencil, Sparkles } from 'lucide-react'
+import { CalendarCheck, Check, Pencil, Sparkles } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { EventModal } from '@/components/events/EventModal'
@@ -80,7 +80,9 @@ export function CaptureModal({ open, onClose }: { open: boolean; onClose: () => 
     mutationFn: llmApi.capture,
     onSuccess: (r) => {
       setResult(r)
-      setSelected(new Set(r.drafts.map((_, i) => i)))
+      // Everything is ticked except what is already on the calendar. A pasted rota usually covers
+      // days that are logged already, so those start off and are re-ticked deliberately.
+      setSelected(new Set(r.drafts.flatMap((d, i) => (d.existingOccurrenceId ? [] : [i]))))
       setCreated(new Set())
     },
   })
@@ -156,6 +158,7 @@ export function CaptureModal({ open, onClose }: { open: boolean; onClose: () => 
   }
 
   const pending = drafts.filter((_, i) => selected.has(i) && !created.has(i)).length
+  const duplicates = drafts.filter((d) => d.existingOccurrenceId).length
   const busy = createMutation.isPending
 
   const error =
@@ -232,6 +235,8 @@ export function CaptureModal({ open, onClose }: { open: boolean; onClose: () => 
             {drafts.length > 1 && (
               <p className="text-xs text-muted-foreground">
                 {drafts.length} entries. Untick anything you do not want.
+                {duplicates > 0 &&
+                  ` ${duplicates} ${duplicates > 1 ? 'are' : 'is'} on your calendar already, left unticked.`}
               </p>
             )}
 
@@ -248,7 +253,7 @@ export function CaptureModal({ open, onClose }: { open: boolean; onClose: () => 
                   <div className="flex items-start gap-2">
                     {/* A single draft has nothing to choose between, so it carries the assistant's
                         mark instead of a checkbox. */}
-                    {drafts.length > 1 ? (
+                    {drafts.length > 1 || draft.existingOccurrenceId ? (
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -266,6 +271,13 @@ export function CaptureModal({ open, onClose }: { open: boolean; onClose: () => 
                         {draft.activityTitle ?? draft.title}
                       </p>
                       <p className="mt-0.5 text-xs text-muted-foreground">{formatWhen(draft)}</p>
+                      {/* Unticked already, so this only has to say why. */}
+                      {draft.existingOccurrenceId && (
+                        <p className="mt-1 flex items-center gap-1 text-xs font-medium text-foreground">
+                          <CalendarCheck className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                          Already on your calendar
+                        </p>
+                      )}
                     </div>
 
                     {isCreated ? (
