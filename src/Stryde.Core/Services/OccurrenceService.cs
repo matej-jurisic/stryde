@@ -191,6 +191,31 @@ public class OccurrenceService(StrydeDbContext db, UserSettingsService settings)
         return Result.Success();
     }
 
+    /// <summary>
+    /// Wipes the user's whole calendar history. Activities, types, states, goals and settings all
+    /// survive: only the occurrences and the backing activities of event-kind ones go, which is the
+    /// same pair <see cref="DeleteAsync"/> removes for a single row. Leaving an event's activity
+    /// behind would strand a row no screen can reach, since the activity list is activity-kind only.
+    /// </summary>
+    public async Task<Result<int>> DeleteAllAsync(Guid userId)
+    {
+        var occurrences = await db.Occurrences
+            .Include(o => o.Activity)
+            .Where(o => o.UserId == userId)
+            .ToListAsync();
+
+        var count = occurrences.Count;
+        if (count == 0) return Result<int>.Success(0);
+
+        db.Activities.RemoveRange(occurrences
+            .Where(o => o.Activity.Kind == ActivityKind.@event)
+            .Select(o => o.Activity));
+        db.Occurrences.RemoveRange(occurrences.Where(o => o.Activity.Kind != ActivityKind.@event));
+
+        await db.SaveChangesAsync();
+        return Result<int>.Success(count);
+    }
+
     public async Task<Result<OccurrenceDto>> CreateEventAsync(Guid userId, CreateEventRequest req)
     {
         var err = Validators.ValidateTitle(req.Title, "Title")

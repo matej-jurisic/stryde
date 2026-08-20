@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Download, LogOut, Monitor, Moon, Sun } from 'lucide-react'
+import { Download, LogOut, Monitor, Moon, Sun, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { SettingSection, SettingRow, SectionFooter, inputCls } from '@/components/settings/SettingSection'
-import { settingsApi, authApi, exportApi, llmApi, ApiError } from '@/lib/api'
-import { toastError } from '@/store/toasts'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { settingsApi, authApi, exportApi, llmApi, occurrencesApi, ApiError } from '@/lib/api'
+import { toastError, toastSuccess } from '@/store/toasts'
 import { useAuthStore } from '@/store/auth'
 import { getThemePref, setThemePref, type ThemePref } from '@/lib/theme'
 import { isNative, getServerUrl, setServerUrl } from '@/lib/server-config'
@@ -152,6 +153,26 @@ export function SettingsPage() {
       setExporting(false)
     }
   }
+
+  const [confirmWipe, setConfirmWipe] = useState(false)
+
+  // Every list keyed off occurrences goes stale at once, and insights and goals are computed from
+  // them, so this invalidates the same set an occurrence write does plus those two.
+  const wipeHistory = useMutation({
+    mutationFn: () => occurrencesApi.deleteAll(),
+    onSuccess: ({ deleted }) => {
+      qc.invalidateQueries({ queryKey: ['events'] })
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+      qc.invalidateQueries({ queryKey: ['insights'] })
+      qc.invalidateQueries({ queryKey: ['goals'] })
+      setConfirmWipe(false)
+      toastSuccess(deleted === 0 ? 'There was nothing to delete.' : `Deleted ${deleted} ${deleted === 1 ? 'entry' : 'entries'}.`)
+    },
+    onError: (err) => {
+      setConfirmWipe(false)
+      toastError(err)
+    },
+  })
 
   function selectTheme(pref: ThemePref) {
     setTheme(pref)
@@ -377,6 +398,12 @@ export function SettingsPage() {
                     Export
                   </Button>
                 </SettingRow>
+                <SettingRow label="Delete history" hint="Remove every entry from the calendar, past and future. Activities, types, states, categories and goals are kept, so you can start logging again from a clean slate. This cannot be undone.">
+                  <Button variant="destructive" size="sm" onClick={() => setConfirmWipe(true)}>
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" strokeWidth={2} />
+                    Delete
+                  </Button>
+                </SettingRow>
               </SettingSection>
 
               <SettingSection label="Account">
@@ -392,6 +419,16 @@ export function SettingsPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmWipe}
+        onClose={() => setConfirmWipe(false)}
+        onConfirm={() => wipeHistory.mutate()}
+        title="Delete history"
+        message="This deletes every occurrence on your calendar, done and pending alike. Activities, types, states, categories and goals stay. There is no undo, so export your data first if you want a copy."
+        confirmLabel="Delete everything"
+        loading={wipeHistory.isPending}
+      />
     </div>
   )
 }

@@ -4,6 +4,7 @@ using Stryde.Api.Auth;
 using Stryde.Api.Endpoints;
 using Stryde.Core;
 using Stryde.Core.Auth;
+using Stryde.Core.Development;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -43,6 +44,10 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
+// The dev data seeder is registered only here, so nothing outside a Development host can resolve it.
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddScoped<DevDataSeeder>();
+
 var corsOrigins = (builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [])
     .Where(o => !string.IsNullOrWhiteSpace(o)).ToArray();
 if (corsOrigins.Length > 0)
@@ -81,6 +86,8 @@ app.MapActivityTypeEndpoints();
 app.MapInsightsEndpoints();
 app.MapExportEndpoints();
 app.MapLlmEndpoints();
+if (app.Environment.IsDevelopment())
+    app.MapDevEndpoints();
 
 app.MapFallbackToFile("index.html");
 

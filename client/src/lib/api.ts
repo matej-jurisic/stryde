@@ -169,6 +169,9 @@ export const occurrencesApi = {
   update: (id: string, body: { activityId?: string; title?: string | null; startAt?: string | null; endAt?: string | null; isAllDay?: boolean; isPlanned?: boolean; durationMinutes?: number | null; subtasks?: SubtaskInput[] }) =>
     request<Occurrence>(`/api/occurrences/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
+  /** Wipes the whole calendar. Activities, types, states and goals survive. */
+  deleteAll: () => request<{ deleted: number }>('/api/occurrences', { method: 'DELETE' }),
+
   delete: (id: string) => request<void>(`/api/occurrences/${id}`, { method: 'DELETE' }),
 
   setStatus: (id: string, status: import('./types').EventStatus) =>

@@ -51,6 +51,15 @@ public static class OccurrenceEndpoints
             return result.IsSuccess ? Results.Ok(result.Value) : result.Error!.ToProblem();
         });
 
+        // Deliberately on the collection, not a /history route: it removes exactly what GET "/" lists.
+        group.MapDelete("/", async (ClaimsPrincipal principal, OccurrenceService svc) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+            var result = await svc.DeleteAllAsync(userId.Value);
+            return result.IsSuccess ? Results.Ok(new { deleted = result.Value }) : result.Error!.ToProblem();
+        });
+
         group.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal principal, OccurrenceService svc) =>
         {
             var userId = principal.GetUserId();

@@ -46,6 +46,11 @@ cd client && npm run build                  # tsc -b + production build
 
 # EF migration:
 dotnet ef migrations add <Name> --project src/Stryde.Core --startup-project src/Stryde.Api --output-dir Migrations
+# Dev data, into the account that already exists (reset=true replaces what is there).
+# PowerShell: `curl` is an alias for Invoke-WebRequest and has no -X, so use one of these:
+Invoke-RestMethod -Method Post -Uri "http://localhost:5200/api/dev/seed?reset=true"
+curl.exe -X POST "http://localhost:5200/api/dev/seed?reset=true"
+
 
 # Docker:
 cp .env.example .env && docker compose up --build   # http://localhost:8080
@@ -220,6 +225,15 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   is free to drop ids, name everything, and turn stored numbers into the sentences the UI uses. Any
   new user-facing field belongs in `ExportMarkdown` too, phrased for someone who has never seen the
   app. See `spec.md` → Settings → Data export.
+- `Development/DevDataSeeder.cs` — fills an account that **already exists** with a few months of
+  plausible use: categories, types, states, goals, activities and the occurrence history everything
+  derived is read off. Writes entities directly rather than through the services (they police one
+  human edit; this makes thousands), so the invariants they own are kept by hand and guarded by
+  `DevDataSeederTests`. Ahead of now it places **only fixtures** - commutes, standup, the office
+  block - because a full calendar has nothing left to recommend into, and the jitter on each routine
+  is small enough that `ComputeStats` still finds a habitual start. Fixed RNG seed, so a reseed
+  reproduces the dataset you were looking at. `reset` clears everything except the user, their
+  settings row and their refresh tokens.
 - ⚠️ **A child with a pre-set `Guid Id` added to a *tracked* parent's nav collection is treated as an
   existing row** (change detection sees a non-default key) and issues an UPDATE matching nothing. Use
   `db.Set<T>().Add(...)` explicitly — see `StateService.CreateValueAsync` and
@@ -240,6 +254,10 @@ cp .env.example .env && docker compose up --build   # http://localhost:8080
   `SettingsEndpoints.cs` (`/api/settings`), `ActivityTypeEndpoints.cs` (`/api/activity-types`),
   `StateEndpoints.cs` (`/api/states` + `/api/states/snapshot?at=` + `/api/states/{stateId}/values`),
   `LlmEndpoints.cs` (`/api/llm/status` + `/api/llm/capture`).
+  `DevEndpoints.cs` (`POST /api/dev/seed?username=&reset=&weeksBack=&weeksAhead=`) - **Development
+  environment only**, mapped and DI-registered from `Program.cs` behind `IsDevelopment()`, so it does
+  not exist in a published app; anonymous, and with no `username` it fills the single user a dev
+  database has.
 - `Endpoints/ApiResults.cs` — `Error.ToProblem()` + `principal.GetUserId()` (reads `sub` claim).
 
 **Frontend (`client/src`)**

@@ -34,3 +34,8 @@ export const useToastStore = create<ToastState>((set) => ({
 export function toastError(err: unknown, fallback = 'Something went wrong.') {
   useToastStore.getState().push(err instanceof ApiError ? err.message : fallback, 'error')
 }
+
+/** Confirm something irreversible actually happened; the tone the store already carries. */
+export function toastSuccess(message: string) {
+  useToastStore.getState().push(message, 'success')
+}
